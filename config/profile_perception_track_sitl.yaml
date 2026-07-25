@@ -1,0 +1,14 @@
+# MAVROS perception-constrained chase/reacquisition profile.
+# Start target_launch.launch in relative-estimate mode so /target/odom freshness
+# represents actual camera detections rather than ground truth:
+#   roslaunch comando_planner target_launch.launch \
+#     target_source:=relative_estimate sim_relative_estimate:=true
+# Then load this file with scripts/apply_profile.sh.
+ocp_type: perception_track
+mode: mpc
+n_replay: 4
+
+# Tracking is continuous; reaching one predicted node must not latch the generic
+# landing/hover terminal-freeze state.
+enable_terminal_freeze: false
+land_action: none
