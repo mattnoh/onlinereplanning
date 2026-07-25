@@ -210,6 +210,9 @@ struct SolverResult {
     Eigen::VectorXd next_state;
     std::vector<Eigen::VectorXd> state_trajectory;
     std::vector<Eigen::VectorXd> control_trajectory;
+    // DDP feedback gains, one per stage. Exposed with the solver result for
+    // OCP-level policy evaluation and replay implementations that opt in.
+    std::vector<Eigen::MatrixXd> feedback_gains;
     double solve_time_ms = 0.0;
     double constraint_error = 0.0;
     int solve_iters = 0;

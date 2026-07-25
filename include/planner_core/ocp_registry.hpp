@@ -11,6 +11,7 @@
 #include "ocp/ocp_landing.hpp"
 #include "ocp/ocp_stateswitch.hpp"
 #include "ocp/ocp_stc_landing.hpp"
+#include "ocp/ocp_perception_track.hpp"
 #include "ocp/ocp_stc_landing_noaug.hpp"
 #include "ocp/ocp_stc_landing_noaug_legacy.hpp"
 #include "ocp/ocp_tracking_circle_target.hpp"
@@ -36,6 +37,7 @@ inline const std::map<std::string, OCPDescriptor>& getTable() {
         {"state_switch",                   StateswitchOCP::descriptor()},
         {"stc_landing",                    StcLandingOCP::descriptor()},
         {"rh_stc",                         StcLandingOCP::descriptor()},
+        {"perception_track",               PerceptionTrackOCP::descriptor()},
         {"stc_landing_noaug",              StcLandingNoAugOCP::descriptor()},
         {"rh_stc_noaug",                   StcLandingNoAugOCP::descriptor()},
         {"stc_landing_noaug_legacy",       StcLandingNoAugLegacyOCP::descriptor()},

@@ -59,6 +59,10 @@ public:
         nh_.param<std::string>("body_relative_input_angular_unit", body_relative_angular_unit_, "deg_s");
         nh_.param<std::string>("target_source",           target_source_,           "ground_truth");
         nh_.param<bool>       ("sim_relative_estimate",   sim_relative_estimate_,   false);
+        nh_.param<bool>       ("sim_visibility_gate",     sim_visibility_gate_,     true);
+        nh_.param<double>     ("sim_camera_hfov_deg",     sim_camera_hfov_deg_,     30.0);
+        nh_.param<double>     ("sim_camera_vfov_deg",     sim_camera_vfov_deg_,     22.0);
+        nh_.param<double>     ("sim_camera_max_range",    sim_camera_max_range_,    12.0);
         nh_.param<double>     ("pad_z",                   pad_z_,                   0.0);
         nh_.param<std::string>("relative_estimate_topic", relative_estimate_topic_, "/drone/relative_target_estimate");
         nh_.param<bool>       ("publish_ground_truth_debug", publish_gt_debug_,     true);
@@ -136,6 +140,12 @@ public:
                  "  rel_topic=%s  twist_frame=%s",
             target_source_.c_str(), sim_relative_estimate_ ? "true" : "false", pad_z_,
             relative_estimate_topic_.c_str(), drone_odom_twist_frame_.c_str());
+        if (sim_relative_estimate_) {
+            ROS_INFO("[TargetPublisher] simulated camera gate=%s  half-FOV=(%.1f, %.1f) deg"
+                     "  max_range=%.2f m",
+                     sim_visibility_gate_ ? "on" : "off",
+                     sim_camera_hfov_deg_, sim_camera_vfov_deg_, sim_camera_max_range_);
+        }
 
         timer_ = nh_.createTimer(ros::Duration(1.0 / publish_hz_),
                                  &TargetPublisherNode::timerCallback, this);
@@ -200,19 +210,23 @@ private:
                 const Eigen::Vector3d p_rel_b = R.transpose() * (p - p_d);
                 const Eigen::Vector3d v_rel_b = R.transpose() * (v - v_d);
 
-                nav_msgs::Odometry est;
-                est.header.stamp    = stamp;
-                est.header.frame_id = "drone_body";
-                est.child_frame_id  = "target_in_drone_body";
-                est.pose.pose.position.x = p_rel_b.x();
-                est.pose.pose.position.y = p_rel_b.y();
-                est.pose.pose.position.z = p_rel_b.z();
-                est.pose.pose.orientation.w = 1.0;
-                est.pose.covariance[21] = -1.0;   // orientation unmeasured
-                est.twist.twist.linear.x = v_rel_b.x();
-                est.twist.twist.linear.y = v_rel_b.y();
-                est.twist.twist.linear.z = v_rel_b.z();
-                rel_estimate_pub_.publish(est);
+                const bool detected = !sim_visibility_gate_ || cameraDetects(p_rel_b);
+                reportDetectionTransition(detected, p_rel_b.norm());
+                if (detected) {
+                    nav_msgs::Odometry est;
+                    est.header.stamp    = stamp;
+                    est.header.frame_id = "drone_body";
+                    est.child_frame_id  = "target_in_drone_body";
+                    est.pose.pose.position.x = p_rel_b.x();
+                    est.pose.pose.position.y = p_rel_b.y();
+                    est.pose.pose.position.z = p_rel_b.z();
+                    est.pose.pose.orientation.w = 1.0;
+                    est.pose.covariance[21] = -1.0;   // orientation unmeasured
+                    est.twist.twist.linear.x = v_rel_b.x();
+                    est.twist.twist.linear.y = v_rel_b.y();
+                    est.twist.twist.linear.z = v_rel_b.z();
+                    rel_estimate_pub_.publish(est);
+                }
             }
         }
 
@@ -374,6 +388,30 @@ private:
         return q.toRotationMatrix();
     }
 
+    /// Fixed body-forward camera model used by the MAVROS perception OCP.
+    /// A missing detection is represented by publishing nothing: the downstream
+    /// target tracker's existing timestamp gate then exposes the observation age
+    /// without adding a planner-core-specific message contract.
+    bool cameraDetects(const Eigen::Vector3d& p_rel_b) const {
+        const double range = p_rel_b.norm();
+        if (!std::isfinite(range) || range > sim_camera_max_range_ || p_rel_b.x() <= 1e-6)
+            return false;
+        const double lateral =
+            p_rel_b.y()/std::tan(sim_camera_hfov_deg_*DEG2RAD);
+        const double vertical =
+            p_rel_b.z()/std::tan(sim_camera_vfov_deg_*DEG2RAD);
+        return p_rel_b.x() - std::sqrt(lateral*lateral + vertical*vertical) > 0.0;
+    }
+
+    void reportDetectionTransition(bool detected, double range) {
+        if (!detection_state_initialized_ || detected != last_detection_state_) {
+            ROS_INFO("[TargetPublisher] simulated target %s (range %.2f m)",
+                     detected ? "ACQUIRED" : "LOST", range);
+            detection_state_initialized_ = true;
+            last_detection_state_ = detected;
+        }
+    }
+
     /// MAVROS /mavros/local_position/odom has child_frame_id=base_link, so its
     /// twist is body-frame per the Odometry spec. Both stages use this helper,
     /// so the round trip is exact regardless of the setting.
@@ -401,6 +439,12 @@ private:
     std::string target_source_ = "ground_truth";
     bool        synthesize_from_estimate_ = false;
     bool        sim_relative_estimate_ = false;
+    bool        sim_visibility_gate_ = true;
+    double      sim_camera_hfov_deg_ = 30.0;
+    double      sim_camera_vfov_deg_ = 22.0;
+    double      sim_camera_max_range_ = 12.0;
+    bool        detection_state_initialized_ = false;
+    bool        last_detection_state_ = false;
     double      pad_z_ = 0.0;
     std::string relative_estimate_topic_;
     bool        publish_gt_debug_ = true;

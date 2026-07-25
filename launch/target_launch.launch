@@ -9,9 +9,13 @@
   <arg name="body_relative_input_angular_unit"    default="rad_s"/>
   <arg name="debug_body_relative_trace"           default="false"/>
 
-  <!-- Simulated relative sensing (defaults preserve legacy behavior) -->
+  <!-- Simulated relative sensing; ground-truth defaults preserve legacy behavior -->
   <arg name="target_source"                       default="ground_truth"/>
   <arg name="sim_relative_estimate"               default="false"/>
+  <arg name="sim_visibility_gate"                 default="true"/>
+  <arg name="sim_camera_hfov_deg"                 default="30.0"/>
+  <arg name="sim_camera_vfov_deg"                 default="22.0"/>
+  <arg name="sim_camera_max_range"                default="12.0"/>
   <arg name="pad_z"                               default="0.0"/>
   <arg name="relative_estimate_topic"             default="/drone/relative_target_estimate"/>
   <arg name="publish_ground_truth_debug"          default="true"/>
@@ -29,6 +33,10 @@
     <param name="debug_body_relative_trace"         value="$(arg debug_body_relative_trace)"/>
     <param name="target_source"                     value="$(arg target_source)"/>
     <param name="sim_relative_estimate"             type="bool"   value="$(arg sim_relative_estimate)"/>
+    <param name="sim_visibility_gate"               type="bool"   value="$(arg sim_visibility_gate)"/>
+    <param name="sim_camera_hfov_deg"               type="double" value="$(arg sim_camera_hfov_deg)"/>
+    <param name="sim_camera_vfov_deg"               type="double" value="$(arg sim_camera_vfov_deg)"/>
+    <param name="sim_camera_max_range"              type="double" value="$(arg sim_camera_max_range)"/>
     <param name="pad_z"                             type="double" value="$(arg pad_z)"/>
     <param name="relative_estimate_topic"           value="$(arg relative_estimate_topic)"/>
     <param name="publish_ground_truth_debug"        type="bool"   value="$(arg publish_ground_truth_debug)"/>
