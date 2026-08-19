@@ -1,5 +1,31 @@
 <launch>
   <arg name="target_trajectory"                   default="circle"/>
+  <!-- motion shape (previously hard-coded in the model headers) -->
+  <arg name="target_center_x"                     default="0.0"/>
+  <arg name="target_center_y"                     default="0.0"/>
+  <arg name="target_center_z"                     default="0.2"/>
+  <arg name="target_radius"                       default="1.0"/>
+  <arg name="target_omega"                        default="0.4"/>
+  <arg name="target_amp_x"                        default="1.0"/>
+  <arg name="target_amp_y"                        default="1.0"/>
+  <arg name="target_speed"                        default="0.4"/>
+  <arg name="target_heading"                      default="0.0"/>
+  <arg name="target_v_max"                        default="0.5"/>
+  <arg name="target_span"                         default="2.0"/>
+  <arg name="target_cruise_s"                     default="3.0"/>
+  <arg name="target_ramp_s"                       default="1.0"/>
+  <arg name="target_dwell_s"                      default="2.0"/>
+  <arg name="target_accel_mag"                    default="0.15"/>
+  <arg name="target_accel_hold"                   default="2.0"/>
+  <arg name="target_accel_sigma"                  default="0.20"/>
+  <arg name="target_random_hold"                  default="2.0"/>
+  <arg name="target_motion_seed"                  default="1"/>
+  <!-- target-state estimate uncertainty (0 = noise-free) -->
+  <arg name="target_noise_sigma_pos"              default="0.0"/>
+  <arg name="target_noise_sigma_vel"              default="0.0"/>
+  <arg name="target_noise_sigma_acc"              default="0.0"/>
+  <arg name="target_noise_bias_frac"              default="0.5"/>
+  <arg name="target_noise_seed"                   default="1"/>
   <arg name="planning_frame"                      default="world"/>
   <arg name="target_yaw_rate"                     default="0.3"/>
   <arg name="publish_hz"                          default="100.0"/>
@@ -23,6 +49,30 @@
 
   <node pkg="comando_planner" type="target_publisher" name="target_publisher" output="screen">
     <param name="target_trajectory"                 value="$(arg target_trajectory)"/>
+    <param name="target_center_x"                    type="double" value="$(arg target_center_x)"/>
+    <param name="target_center_y"                    type="double" value="$(arg target_center_y)"/>
+    <param name="target_center_z"                    type="double" value="$(arg target_center_z)"/>
+    <param name="target_radius"                      type="double" value="$(arg target_radius)"/>
+    <param name="target_omega"                       type="double" value="$(arg target_omega)"/>
+    <param name="target_amp_x"                       type="double" value="$(arg target_amp_x)"/>
+    <param name="target_amp_y"                       type="double" value="$(arg target_amp_y)"/>
+    <param name="target_speed"                       type="double" value="$(arg target_speed)"/>
+    <param name="target_heading"                     type="double" value="$(arg target_heading)"/>
+    <param name="target_span"                         type="double" value="$(arg target_span)"/>
+    <param name="target_v_max"                       type="double" value="$(arg target_v_max)"/>
+    <param name="target_cruise_s"                    type="double" value="$(arg target_cruise_s)"/>
+    <param name="target_ramp_s"                      type="double" value="$(arg target_ramp_s)"/>
+    <param name="target_dwell_s"                     type="double" value="$(arg target_dwell_s)"/>
+    <param name="target_accel_mag"                   type="double" value="$(arg target_accel_mag)"/>
+    <param name="target_accel_hold"                  type="double" value="$(arg target_accel_hold)"/>
+    <param name="target_accel_sigma"                 type="double" value="$(arg target_accel_sigma)"/>
+    <param name="target_random_hold"                 type="double" value="$(arg target_random_hold)"/>
+    <param name="target_noise_sigma_pos"             type="double" value="$(arg target_noise_sigma_pos)"/>
+    <param name="target_noise_sigma_vel"             type="double" value="$(arg target_noise_sigma_vel)"/>
+    <param name="target_noise_sigma_acc"             type="double" value="$(arg target_noise_sigma_acc)"/>
+    <param name="target_noise_bias_frac"             type="double" value="$(arg target_noise_bias_frac)"/>
+    <param name="target_motion_seed"                 type="int" value="$(arg target_motion_seed)"/>
+    <param name="target_noise_seed"                  type="int" value="$(arg target_noise_seed)"/>
     <param name="planning_frame"                    value="$(arg planning_frame)"/>
     <param name="target_yaw_rate"                   type="double" value="$(arg target_yaw_rate)"/>
     <param name="publish_hz"                        type="double" value="$(arg publish_hz)"/>

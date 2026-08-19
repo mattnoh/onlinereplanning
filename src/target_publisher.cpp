@@ -32,6 +32,11 @@
 
 #include "target/circular_target.hpp"
 #include "target/figure8_target.hpp"
+#include "target/straight_target.hpp"
+#include "target/stop_and_go_target.hpp"
+#include "target/segmented_accel_target.hpp"
+#include "target/target_model_config.hpp"
+#include <random>
 
 namespace {
 constexpr double DEG2RAD = M_PI / 180.0;
@@ -87,7 +92,97 @@ public:
         else
             drone_odom_mode_ = "world";
 
-        target_trajectory_ = (traj == "figure8") ? "figure8" : "circle";
+        target_trajectory_ = traj;
+
+        // Motion-shape params (none of these existed before; the models used
+        // their in-header defaults and could not be configured at runtime).
+        double c_x, c_y, c_z, radius, omega, amp_x, amp_y, speed, heading;
+        double sg_cruise, sg_ramp, sg_dwell, pa_accel, pa_hold, ra_sigma, ra_hold, vmax;
+        int    motion_seed;
+        nh_.param<double>("target_center_x", c_x, 0.0);
+        nh_.param<double>("target_center_y", c_y, 0.0);
+        nh_.param<double>("target_center_z", c_z, 0.2);
+        nh_.param<double>("target_radius",   radius, 1.0);
+        nh_.param<double>("target_omega",    omega, 0.4);
+        nh_.param<double>("target_amp_x",    amp_x, 1.0);
+        nh_.param<double>("target_amp_y",    amp_y, 1.0);
+        nh_.param<double>("target_speed",    speed, 0.4);
+        nh_.param<double>("target_heading",  heading, 0.0);
+        nh_.param<double>("target_v_max",    vmax, 0.5);
+        double span; nh_.param<double>("target_span", span, 2.0);
+        nh_.param<double>("target_cruise_s", sg_cruise, 3.0);
+        nh_.param<double>("target_ramp_s",   sg_ramp, 1.0);
+        nh_.param<double>("target_dwell_s",  sg_dwell, 2.0);
+        nh_.param<double>("target_accel_mag", pa_accel, 0.15);
+        nh_.param<double>("target_accel_hold", pa_hold, 2.0);
+        nh_.param<double>("target_accel_sigma", ra_sigma, 0.20);
+        nh_.param<double>("target_random_hold", ra_hold, 2.0);
+        nh_.param<int>   ("target_motion_seed", motion_seed, 1);
+        const Eigen::Vector3d ctr(c_x, c_y, c_z);
+
+        // One SyntheticTarget replaces the old if/else over eagerly-constructed
+        // members. An unknown key is now FATAL instead of silently degrading to
+        // a circle (the previous behaviour would have made a mis-typed campaign
+        // scenario look like a passing circle run).
+        if (traj == "circle") {
+            target_models::CircularTarget m;
+            m.center = ctr; m.R = radius; m.omega = omega;
+            motion_ = target_config::SyntheticTarget::from(m);
+        } else if (traj == "figure8") {
+            target_models::Figure8Target m;
+            m.center = ctr; m.amp_x = amp_x; m.amp_y = amp_y; m.omega = omega;
+            motion_ = target_config::SyntheticTarget::from(m);
+        } else if (traj == "straight") {
+            target_models::StraightTarget m;
+            m.center = ctr; m.speed = speed; m.heading = heading; m.span = span;
+            motion_ = target_config::SyntheticTarget::from(m);
+        } else if (traj == "stop_and_go") {
+            target_models::StopAndGoTarget m;
+            m.center = ctr; m.speed = speed; m.heading = heading;
+            m.t_cruise = sg_cruise; m.t_ramp = sg_ramp; m.t_dwell = sg_dwell; m.span = span;
+            motion_ = target_config::SyntheticTarget::from(m);
+        } else if (traj == "piecewise_accel") {
+            motion_ = target_config::SyntheticTarget::from(
+                target_models::makePiecewiseAccelTarget(ctr, pa_accel, pa_hold, vmax, speed));
+        } else if (traj == "random_accel") {
+            motion_ = target_config::SyntheticTarget::from(
+                target_models::makeRandomAccelTarget(ctr, ra_sigma, ra_hold, vmax, speed,
+                                                     static_cast<unsigned>(motion_seed)));
+        } else {
+            ROS_FATAL("[TargetPublisher] unknown target_trajectory '%s' (expected: circle, "
+                      "figure8, straight, stop_and_go, piecewise_accel, random_accel)",
+                      traj.c_str());
+            throw std::runtime_error("unknown target_trajectory: " + traj);
+        }
+
+        // Target-state estimate uncertainty. Per-run constant bias (drawn once)
+        // plus per-sample white noise, applied to what the PLANNER sees; the
+        // ground-truth debug topics stay clean so metrics score against truth.
+        int noise_seed;
+        nh_.param<double>("target_noise_sigma_pos", noise_sigma_pos_, 0.0);
+        nh_.param<double>("target_noise_sigma_vel", noise_sigma_vel_, 0.0);
+        nh_.param<double>("target_noise_sigma_acc", noise_sigma_acc_, 0.0);
+        nh_.param<double>("target_noise_bias_frac", noise_bias_frac_, 0.5);
+        nh_.param<int>   ("target_noise_seed",      noise_seed, 1);
+        noise_rng_.seed(static_cast<unsigned>(noise_seed));
+        {
+            std::normal_distribution<double> nb(0.0, 1.0);
+            auto drawBias = [&](double sig) {
+                return Eigen::Vector3d(nb(noise_rng_), nb(noise_rng_), 0.0)
+                       * (noise_bias_frac_ * sig);
+            };
+            noise_bias_pos_ = drawBias(noise_sigma_pos_);
+            noise_bias_vel_ = drawBias(noise_sigma_vel_);
+            noise_bias_acc_ = drawBias(noise_sigma_acc_);
+        }
+        noise_active_ = (noise_sigma_pos_ > 0.0 || noise_sigma_vel_ > 0.0 ||
+                         noise_sigma_acc_ > 0.0);
+        if (noise_active_) {
+            ROS_WARN("[TargetPublisher] target-estimate NOISE active: sigma p/v/a = "
+                     "%.3f/%.3f/%.3f, bias frac %.2f, seed %d",
+                     noise_sigma_pos_, noise_sigma_vel_, noise_sigma_acc_,
+                     noise_bias_frac_, noise_seed);
+        }
 
         t0_ = ros::Time::now().toSec();
 
@@ -156,16 +251,9 @@ private:
         const ros::Time stamp = ros::Time::now();
         const double t_rel = stamp.toSec() - t0_;
 
-        Eigen::Vector3d p, v, a;
-        if (target_trajectory_ == "figure8") {
-            p = figure8_model_.pos(t_rel);
-            v = figure8_model_.vel(t_rel);
-            a = figure8_model_.accel(t_rel);
-        } else {
-            p = circle_model_.pos(t_rel);
-            v = circle_model_.vel(t_rel);
-            a = circle_model_.accel(t_rel);
-        }
+        Eigen::Vector3d p = motion_.pos(t_rel);
+        Eigen::Vector3d v = motion_.vel(t_rel);
+        Eigen::Vector3d a = motion_.accel(t_rel);
         const double psi = target_yaw_rate_ * t_rel;
         const Eigen::Quaterniond q_tgt(std::cos(psi/2.0), 0.0, 0.0, std::sin(psi/2.0));
         last_target_quat_ = q_tgt;
@@ -173,7 +261,21 @@ private:
         // Ground truth: to /target/* normally, to /target/*_gt when the
         // synthesized estimate owns /target/*.
         if (!synthesize_from_estimate_) {
-            publishGroundTruth(stamp, p, v, a, q_tgt, odom_pub_, accel_pub_);
+            // The planner-facing topics carry the (optionally corrupted)
+            // ESTIMATE; /target/*_gt always carries truth so the campaign can
+            // score touchdown error against the real target, not the estimate.
+            if (noise_active_) {
+                publishGroundTruth(stamp,
+                                   corrupt(p, noise_bias_pos_, noise_sigma_pos_),
+                                   corrupt(v, noise_bias_vel_, noise_sigma_vel_),
+                                   corrupt(a, noise_bias_acc_, noise_sigma_acc_),
+                                   q_tgt, odom_pub_, accel_pub_);
+                if (publish_gt_debug_) {
+                    publishGroundTruth(stamp, p, v, a, q_tgt, gt_odom_pub_, gt_accel_pub_);
+                }
+            } else {
+                publishGroundTruth(stamp, p, v, a, q_tgt, odom_pub_, accel_pub_);
+            }
         } else if (publish_gt_debug_) {
             publishGroundTruth(stamp, p, v, a, q_tgt, gt_odom_pub_, gt_accel_pub_);
         }
@@ -452,8 +554,23 @@ private:
     double t0_ = 0.0;
     Eigen::Quaterniond last_target_quat_ = Eigen::Quaterniond::Identity();
 
-    target_models::CircularTarget circle_model_;
-    target_models::Figure8Target  figure8_model_;
+    target_config::SyntheticTarget motion_;
+
+    // Target-estimate uncertainty (see constructor).
+    mutable std::mt19937 noise_rng_;
+    double noise_sigma_pos_ = 0.0, noise_sigma_vel_ = 0.0, noise_sigma_acc_ = 0.0;
+    double noise_bias_frac_ = 0.5;
+    bool   noise_active_ = false;
+    Eigen::Vector3d noise_bias_pos_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d noise_bias_vel_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d noise_bias_acc_ = Eigen::Vector3d::Zero();
+
+    Eigen::Vector3d corrupt(const Eigen::Vector3d& x, const Eigen::Vector3d& bias,
+                            double sigma) const {
+        if (sigma <= 0.0) return x + bias;
+        std::normal_distribution<double> nd(0.0, sigma);
+        return x + bias + Eigen::Vector3d(nd(noise_rng_), nd(noise_rng_), 0.0);
+    }
 
     ros::Publisher  odom_pub_, accel_pub_;
     ros::Publisher  abs_rel_odom_pub_, body_rel_odom_pub_, target_frame_odom_pub_;
