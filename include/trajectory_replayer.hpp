@@ -30,6 +30,7 @@ public:
         state_dim_ = 13;
         last_solve_wall_time_ = std::chrono::steady_clock::time_point{};
         pending_state_trajectory_.clear();
+        pending_gains_.clear();
         pending_control_trajectory_.clear();
         pending_solve_num_ = -1;
         pending_has_variable_dt_ = false;
@@ -50,6 +51,13 @@ public:
         Eigen::VectorXd x_cmd;
         Eigen::VectorXd x_cmd_lookahead;
         Eigen::VectorXd u_cmd;
+        // DDP feedback: the gain at the bracketing node and the FULL planned
+        // reference state it is relative to. x_cmd is truncated to state_dim for
+        // the command path; x_ref_full keeps the augmented block (monitor states
+        // included) so a caller can form K (x_measured - x_ref) over ALL rows.
+        // Empty when the plan carried no gains.
+        Eigen::MatrixXd K;
+        Eigen::VectorXd x_ref_full;
     };
 
     struct HandoffDiagnostic {
@@ -81,7 +89,8 @@ public:
                     double /*ocp_dt*/,
                     int min_replay_before_swap,
                     bool is_variable_dt = false,
-                    int state_dim = 13) {
+                    int state_dim = 13,
+                    const std::vector<Eigen::MatrixXd>& feedback_gains = {}) {
         std::lock_guard<std::mutex> lk(mutex_);
         min_replay_before_swap_ = std::max(1, min_replay_before_swap);
 
@@ -98,6 +107,7 @@ public:
 
         // Keep only the freshest pending plan; swap-in decision happens in sample().
         pending_state_trajectory_ = state_trajectory;
+        pending_gains_ = feedback_gains;
         pending_control_trajectory_ = control_trajectory;
         pending_solve_num_ = solve_num;
         pending_solve_wall_time_ = plan_origin_time;
@@ -147,7 +157,7 @@ public:
         if (state_trajectory_.empty()) {
             return false;
         }
-        *out = makeSampleLocked(state_trajectory_, control_trajectory_, active_solve_num_,
+        *out = makeSampleLocked(state_trajectory_, control_trajectory_, gains_, active_solve_num_,
                                 has_variable_dt_, state_dim_, elapsed, ocp_dt);
         return out->has_plan;
     }
@@ -192,7 +202,7 @@ public:
         s.active_solve_num = active_solve_num_;
         s.elapsed = std::chrono::duration<double>(now - last_solve_wall_time_).count();
 
-        return makeSampleLocked(state_trajectory_, control_trajectory_, active_solve_num_,
+        return makeSampleLocked(state_trajectory_, control_trajectory_, gains_, active_solve_num_,
                                 has_variable_dt_, state_dim_, s.elapsed, ocp_dt);
     }
 
@@ -291,6 +301,7 @@ private:
 
     ReplaySample makeSampleLocked(const std::vector<Eigen::VectorXd>& states,
                                   const std::vector<Eigen::VectorXd>& controls,
+                                  const std::vector<Eigen::MatrixXd>& gains,
                                   int solve_num,
                                   bool variable_dt,
                                   int state_dim,
@@ -324,6 +335,17 @@ private:
         s.x_cmd = sampleStateFrom(states, variable_dt, state_dim, t_sample, ocp_dt);
         s.x_cmd_lookahead = sampleStateFrom(states, variable_dt, state_dim, t_lookahead, ocp_dt);
         s.u_cmd = sampleControlFrom(controls, states, variable_dt, state_dim, t_sample, ocp_dt);
+
+        // DDP feedback: gains are ZERO-ORDER HELD at the bracketing node. They
+        // are not interpolated -- a gain matrix is a linear map, and blending two
+        // of them has no meaning, whereas holding the one whose linearization
+        // point we are inside does.
+        if (!gains.empty()) {
+            const int kg = std::min(k_lo, static_cast<int>(gains.size()) - 1);
+            s.K = gains[kg];
+            const int ks = std::min(k_lo, static_cast<int>(states.size()) - 1);
+            s.x_ref_full = states[ks];   // FULL state, augmented block included
+        }
         return s;
     }
 
@@ -349,11 +371,12 @@ private:
 
         const double old_elapsed = std::chrono::duration<double>(now - last_solve_wall_time_).count();
         const double new_elapsed = std::chrono::duration<double>(now - pending_solve_wall_time_).count();
-        const auto old_sample = makeSampleLocked(state_trajectory_, control_trajectory_,
+        const auto old_sample = makeSampleLocked(state_trajectory_, control_trajectory_, gains_,
                                                  active_solve_num_, has_variable_dt_, state_dim_,
                                                  old_elapsed, ocp_dt);
         const auto new_sample = makeSampleLocked(pending_state_trajectory_,
-                                                 pending_control_trajectory_, pending_solve_num_,
+                                                 pending_control_trajectory_, pending_gains_,
+                                                 pending_solve_num_,
                                                  pending_has_variable_dt_, pending_state_dim_,
                                                  new_elapsed, ocp_dt);
 
@@ -377,12 +400,14 @@ private:
 
         state_trajectory_ = pending_state_trajectory_;
         control_trajectory_ = pending_control_trajectory_;
+        gains_ = pending_gains_;
         active_solve_num_ = pending_solve_num_;
         last_solve_wall_time_ = pending_solve_wall_time_;
         has_variable_dt_ = pending_has_variable_dt_;
         state_dim_ = pending_state_dim_;
 
         pending_state_trajectory_.clear();
+        pending_gains_.clear();
         pending_control_trajectory_.clear();
         pending_solve_num_ = -1;
         pending_has_variable_dt_ = false;
@@ -414,6 +439,7 @@ private:
     mutable std::mutex mutex_;
     std::vector<Eigen::VectorXd> state_trajectory_;
     std::vector<Eigen::VectorXd> control_trajectory_;
+    std::vector<Eigen::MatrixXd> gains_;
     int active_solve_num_ = -1;
     bool has_variable_dt_ = false;
     int state_dim_ = 13;  ///< Physical state dimension; DT slot lives at index state_dim_
@@ -421,6 +447,7 @@ private:
 
     std::vector<Eigen::VectorXd> pending_state_trajectory_;
     std::vector<Eigen::VectorXd> pending_control_trajectory_;
+    std::vector<Eigen::MatrixXd> pending_gains_;
     int pending_solve_num_ = -1;
     bool pending_has_variable_dt_ = false;
     int pending_state_dim_ = 13;

@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace PT = PerceptionTrackOCP;
 
@@ -158,7 +159,24 @@ SolveCheck solveCase(double yaw, double staleness) {
 
 int main() {
     unsetenv("PT_ENABLE_GIMBAL");
-    PT::setPillars({});
+    // Default (unchanged): no obstacles -- "lost" then means only "yawed away".
+    // PT_TEST_PILLARS=1 restores the pillar field so the lost case is lost by
+    // OCCLUSION, which is the actual mechanism of loss in the real scenario and
+    // the half this regression otherwise skips.
+    if (std::getenv("PT_TEST_PILLARS")) {
+        std::vector<PT::Pillar> P;
+        for (int i = 0; i < 6; ++i) {
+            const double px = 3.0 + 2.0*i, hw = 0.5;
+            const double py = 1.5*std::sin(0.40*((px - 1.0)/0.45));
+            PT::Pillar q;
+            q.lo = Eigen::Vector3d(px-hw, py-hw, 0.0);
+            q.hi = Eigen::Vector3d(px+hw, py+hw, 3.0);
+            P.push_back(q);
+        }
+        PT::setPillars(P);
+    } else {
+        PT::setPillars({});
+    }
 
     const auto& d = OCPRegistry::getDescriptor("perception_track");
     require(d.name == "perception_track", "perception_track must be registered");

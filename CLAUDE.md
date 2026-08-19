@@ -84,6 +84,48 @@ estimator swaps in with `sim_relative_estimate:=false`. Contract and math:
 
 Full PX4 SITL bring-up (PX4 + gz + mavros + planner): **`docs/MAVROS_SITL.md`**.
 
+### SITL process hygiene (agents: mandatory)
+
+**Tear the whole SITL stack down as soon as you report a result.** A finished
+run means the simulator is done, not parked — leaving `px4`, `gz sim`,
+`mavros` and `target_publisher` idling burns CPU, holds UDP 14540, and makes
+the next run start from a stale EKF/armed state instead of a clean spawn.
+
+The rule:
+
+- **Done + reported → kill it.** After you finish talking about a run's
+  results, shut everything down. Start the next run from a fresh stack.
+- **Tuning → keep it.** The *only* case for reusing a live stack is an
+  in-progress tuning sweep where you are still flying variations back to back
+  and have not yet reported a conclusion. The moment you report, kill it.
+- Never leave a stack running across a conversation turn boundary you have
+  ended with a summary.
+
+```bash
+# 1. Planner FIRST, and wait — this is what finalizes logs/flight_<date>.bag.
+pkill -INT -f "roslaunch comando_planner planner_launch"; sleep 6
+
+# 2. Everything else, by PID (see the pkill warning below).
+pgrep -af "bin/px4|gz sim|mavros_node|target_publisher|rosmaster|px4_sitl"
+kill -INT <pids>; sleep 4; kill -9 <pids>   # gz/px4 often need the -9
+
+# 3. Verify — this MUST print CLEAN before you consider the run closed.
+pgrep -af "bin/px4|gz sim|mavros_node|target_publisher|rosmaster|px4_sitl" \
+  | grep -vE "pgrep|snapshot" || echo "CLEAN"
+```
+
+Two traps, both hit in practice:
+
+- **Order matters.** SIGINT the planner launch first and give it several
+  seconds. Killing the simulator out from under a live recorder leaves a
+  `.bag.active` that `analyze_flight.py` cannot read.
+- **Do not `pkill -f px4` (or any broad pattern) from an agent shell.** The
+  agent's own `zsh -c ...` wrapper contains the command string, so the pattern
+  matches that shell and pkill kills the teardown mid-flight (observed: exit
+  144, half the stack still alive). Enumerate with `pgrep -af` and kill by
+  **PID**, or anchor the pattern to something the wrapper cannot contain
+  (`bin/px4`, not `px4`).
+
 ## Current Architecture
 
 | Area | Files | Notes |

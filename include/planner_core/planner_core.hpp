@@ -232,7 +232,8 @@ public:
                              config_.ocp_dt,
                              config_.n_replay,
                              desc_.variable_dt,
-                             desc_.state_dim);
+                             desc_.state_dim,
+                             result.feedback_gains);   // DDP gains reach the replayer
 
         last_accepted_solve_timestamp_ = plan_origin_time;
         primed_ = true;
@@ -447,6 +448,7 @@ private:
         result.success = r.success;
         result.next_state = r.next_state;
         result.state_trajectory = r.state_trajectory;
+        result.feedback_gains = r.feedback_gains;
         result.control_trajectory = r.control_trajectory;
         result.solve_time_ms = r.solve_time_ms;
         result.constraint_error = r.constraint_error;
