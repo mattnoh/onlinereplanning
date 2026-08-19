@@ -131,19 +131,32 @@ def wait_settle(timeout=90):
 
 
 def wait_landing(planner_log, timeout=300):
-    """Landed = the planner latched terminal freeze and the land action disarmed."""
+    """Landed = the FCU disarmed after having been armed.
+
+    Do NOT poll the planner log: roslaunch buffers redirected stdout, so
+    "landing complete" only appears in the file after the process exits. The
+    first campaign run landed successfully and was still recorded as a TIMEOUT
+    because of that. `land_action: force_disarm` cuts the motors at touchdown,
+    so the arm state is the real-time signal.
+    """
     t_end = time.time() + timeout
+    seen_armed = False
     while time.time() < t_end:
-        try:
-            txt = open(planner_log, errors="ignore").read()
-        except OSError:
-            txt = ""
-        if "landing complete" in txt:
+        r = sh(f"{SETUP} && timeout 5 rostopic echo -n1 /mavros/state 2>/dev/null "
+               "| grep -E '^armed:'", timeout=15)
+        txt = r.stdout.strip()
+        if "True" in txt:
+            seen_armed = True
+        elif "False" in txt and seen_armed:
             return "LANDED"
-        if "holdHoverAndPause" in txt or "trajectory stale 3x" in txt:
-            return "STALE_ABORT"
         time.sleep(3)
-    return "TIMEOUT"
+    # Fall back to the (now flushed) log before declaring a timeout.
+    try:
+        if "landing complete" in open(planner_log, errors="ignore").read():
+            return "LANDED"
+    except OSError:
+        pass
+    return "TIMEOUT" if seen_armed else "NEVER_ARMED"
 
 
 def run_cell(motion, level, trial, outdir, args):
@@ -264,7 +277,7 @@ def main():
     ap.add_argument("--levels", default=",".join(UNCERT))
     args = ap.parse_args()
 
-    out = args.out or os.path.join(
+    out = os.path.abspath(args.out) if args.out else os.path.join(
         PKG, "logs", "campaign_" + datetime.datetime.now().strftime("%Y%m%d_%H%M"))
     os.makedirs(out, exist_ok=True)
     motions = args.motions.split(",")
