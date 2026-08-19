@@ -42,6 +42,18 @@
   <arg name="target_predicted_accel_topic"      default="/target/predicted_accel"/>
 
   <!-- Terminal freeze -->
+  <!-- Seed each replan from the measured state: x0 = plan(t_act) +
+       clamp(alpha*(live-plan(now))), POSITION ONLY. alpha is the measured
+       error persistence at the activation lead (rho~0.70). The clamp scales
+       with relative altitude because the feasible budget tracks the glideslope
+       cone (0.40 m at rel z 1.6 down to 0.02 m at 0.06). seed_alpha_pos=0
+       reproduces the pre-existing predicted-handoff seed exactly. -->
+  <arg name="seed_alpha_pos"                    default="0.70"/>
+  <arg name="seed_alpha_vel"                    default="0.0"/>
+  <arg name="seed_clamp_pos_cap_m"              default="0.10"/>
+  <arg name="seed_clamp_pos_per_m"              default="0.10"/>
+  <arg name="seed_min_rel_z"                    default="0.60"/>
+
   <arg name="enable_terminal_freeze"            default="true"/>
   <arg name="terminal_freeze_enter_pos"         default="0.20"/>
   <arg name="terminal_freeze_enter_vel"         default="0.10"/>
@@ -106,6 +118,11 @@
     <param name="target_accel_topic"                value="$(arg target_accel_topic)"/>
     <param name="target_predicted_accel_topic"      value="$(arg target_predicted_accel_topic)"/>
 
+    <param name="seed_alpha_pos"                    type="double" value="$(arg seed_alpha_pos)"/>
+    <param name="seed_alpha_vel"                    type="double" value="$(arg seed_alpha_vel)"/>
+    <param name="seed_clamp_pos_cap_m"              type="double" value="$(arg seed_clamp_pos_cap_m)"/>
+    <param name="seed_clamp_pos_per_m"              type="double" value="$(arg seed_clamp_pos_per_m)"/>
+    <param name="seed_min_rel_z"                    type="double" value="$(arg seed_min_rel_z)"/>
     <param name="enable_terminal_freeze"            value="$(arg enable_terminal_freeze)"/>
     <param name="terminal_freeze_enter_pos"         type="double" value="$(arg terminal_freeze_enter_pos)"/>
     <param name="terminal_freeze_enter_vel"         type="double" value="$(arg terminal_freeze_enter_vel)"/>

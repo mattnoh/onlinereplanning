@@ -561,12 +561,17 @@ private:
         Eigen::VectorXd predicted_x0 = preparePredictedHandoffState(predicted.x_cmd,
                                                                     predicted_target,
                                                                     live_x0.size());
+        // tracking_x0 is the ACTIVE plan sampled at *now*, so live_x0 -
+        // tracking_x0 is the current tracking error. Without this sample there
+        // is no error to measure and none to carry into the seed.
         Eigen::VectorXd tracking_x0 = predicted_x0;
+        bool have_tracking_sample = false;
         TrajectoryReplayer::ReplaySample active_now;
         if (replayer_.sampleActiveAtElapsed(handoff.active_elapsed_now, config_.ocp_dt, &active_now) &&
             active_now.has_plan &&
             active_now.x_cmd.size() >= live_x0.size()) {
             tracking_x0 = preparePredictedHandoffState(active_now.x_cmd, target_snapshot, live_x0.size());
+            have_tracking_sample = true;
         } else {
             addDiagnostic(out, DiagnosticSeverity::Warn, "handoff_tracking_sample_missing",
                           "Active-plan sample unavailable for tracking-error check",
@@ -589,8 +594,68 @@ private:
                            {"activation_elapsed", handoff.activation_elapsed}});
             return live_x0;
         }
+        // Carry the persistent, FEASIBLE part of the tracking error onto the
+        // predicted seed so the plan responds to where the vehicle actually is.
+        // Position only, clamped — see PlannerCoreConfig::seed_alpha_pos for why
+        // attitude/rates are excluded and why the clamp scales with altitude.
+        if (have_tracking_sample) {
+            const Eigen::VectorXd seeded =
+                applyMeasuredSeed(predicted_x0, live_x0, tracking_x0);
+            if (!seeded.isApprox(predicted_x0)) {
+                x0_source = "measured_seed";
+                return seeded;
+            }
+        }
         x0_source = "predicted_handoff";
         return predicted_x0;
+    }
+
+    /// x0 = predicted + clamp(alpha * (live - tracking)) on the position (and
+    /// optionally velocity) block. Every other element of `predicted` — the
+    /// quaternion, the body rates, and any trailing cumulative-time slot — is
+    /// returned untouched, which is what keeps the seed feasible for the OCP's
+    /// hard constraints.
+    Eigen::VectorXd applyMeasuredSeed(const Eigen::VectorXd& predicted,
+                                      const Eigen::VectorXd& live,
+                                      const Eigen::VectorXd& tracking) const {
+        const int n = static_cast<int>(predicted.size());
+        if (live.size() != n || tracking.size() != n || n < 3) {
+            return predicted;
+        }
+        // Terminal approach: the feasible seed budget collapses with the
+        // glideslope cone and the tracking error is already small, so stop
+        // correcting and hand the terminal phase the plain predicted seed.
+        if (predicted(2) < config_.seed_min_rel_z) {
+            return predicted;
+        }
+        Eigen::VectorXd out = predicted;
+
+        if (config_.seed_alpha_pos > 0.0) {
+            // The feasible budget tracks the glideslope cone, which closes as
+            // the vehicle descends, so the clamp is proportional to the
+            // relative altitude with an absolute cap.
+            const double clamp = std::min(config_.seed_clamp_pos_cap_m,
+                                          config_.seed_clamp_pos_per_m *
+                                              std::max(0.0, predicted(2)));
+            Eigen::Vector3d c =
+                config_.seed_alpha_pos * (live.head(3) - tracking.head(3));
+            const double norm = c.norm();
+            if (norm > clamp && norm > 1e-12) {
+                c *= clamp / norm;
+            }
+            out.head(3) += c;
+        }
+
+        if (config_.seed_alpha_vel > 0.0 && n >= 6) {
+            Eigen::Vector3d c =
+                config_.seed_alpha_vel * (live.segment(3, 3) - tracking.segment(3, 3));
+            const double norm = c.norm();
+            if (norm > config_.seed_clamp_vel && norm > 1e-12) {
+                c *= config_.seed_clamp_vel / norm;
+            }
+            out.segment(3, 3) += c;
+        }
+        return out;
     }
 
     Eigen::VectorXd preparePredictedHandoffState(const Eigen::VectorXd& predicted_sample,

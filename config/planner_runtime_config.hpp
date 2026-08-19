@@ -51,6 +51,13 @@ inline PlannerRuntimeConfig loadPlannerRuntimeConfig(ros::NodeHandle& nh) {
     nh.param<std::string>("target_predicted_accel_topic", cfg.target_predicted_accel_topic, cfg.target_predicted_accel_topic);
     nh.param<bool>       ("debug_body_relative_trace",    cfg.debug_body_relative_trace,    cfg.debug_body_relative_trace);
 
+    nh.param<double>("seed_alpha_pos",              cfg.seed_alpha_pos,              cfg.seed_alpha_pos);
+    nh.param<double>("seed_alpha_vel",              cfg.seed_alpha_vel,              cfg.seed_alpha_vel);
+    nh.param<double>("seed_clamp_pos_cap_m",        cfg.seed_clamp_pos_cap_m,        cfg.seed_clamp_pos_cap_m);
+    nh.param<double>("seed_clamp_pos_per_m",        cfg.seed_clamp_pos_per_m,        cfg.seed_clamp_pos_per_m);
+    nh.param<double>("seed_clamp_vel",              cfg.seed_clamp_vel,              cfg.seed_clamp_vel);
+    nh.param<double>("seed_min_rel_z",              cfg.seed_min_rel_z,              cfg.seed_min_rel_z);
+
     nh.param<bool>  ("enable_terminal_freeze",      cfg.enable_terminal_freeze,      cfg.enable_terminal_freeze);
     nh.param<double>("terminal_freeze_enter_pos",   cfg.terminal_freeze_enter_pos,   cfg.terminal_freeze_enter_pos);
     nh.param<double>("terminal_freeze_enter_vel",   cfg.terminal_freeze_enter_vel,   cfg.terminal_freeze_enter_vel);

@@ -383,6 +383,40 @@ struct PlannerCoreConfig {
     std::string target_frame_odom_topic = "/drone/target_frame_odom";
     double solve_lead_guard_sec = 0.05;
     double initial_solve_lead_sec = 0.20;
+    // Seeding the replan from the MEASURED state.
+    //
+    //   x0 = plan(t_activation) + clamp(alpha * (live(now) - plan(now)))
+    //
+    // applied to the POSITION block only. alpha is the fraction of tracking
+    // error PX4 still leaves at the activation lead, measured from bag odom vs
+    // published PositionTarget (LS fit e(t+tau) = rho e(t) at tau ~0.48 s):
+    // rho_pos 0.642/0.774 in SITL and 0.698 on Crazyflie hardware.
+    //
+    // Attitude and body rates are NEVER seeded: the STC bounds on them are
+    // tighter than the vehicle's real behaviour (omega <= 0.019 rad/s vs
+    // 0.03-0.50 flown), so a measured attitude/rate seed is infeasible 37-60%
+    // of the time and diverges the IPM. Velocity is feasible but its error is
+    // not persistent on hardware (rho_vel = -0.10), so it defaults off too.
+    //
+    // The clamp MUST scale with altitude. tools_seed_probe sweeps the feasible
+    // seed perturbation along a descent: the budget tracks the glideslope cone
+    // and collapses from 0.40 m at rel z 1.6 to 0.02 m at rel z 0.06, so a
+    // constant clamp would have to be 0.02 m and correct nothing. The rule
+    // min(cap, per_m * rel_z) at (0.15, 0.12) passed 21/21 phases; the shipped
+    // (0.10, 0.10) is strictly smaller.
+    double seed_alpha_pos = 0.70;         // 0 = pre-existing predicted-handoff seed
+    double seed_alpha_vel = 0.0;
+    double seed_clamp_pos_cap_m = 0.10;   // absolute cap on the applied correction
+    double seed_clamp_pos_per_m = 0.10;   // and per metre of relative altitude
+    double seed_clamp_vel = 0.30;         // probe: 0.30 m/s feasible at every phase
+    // Below this relative altitude the seed correction is switched off entirely
+    // and the plain predicted seed is used. Flown at 0.10/0.10 with no cutoff,
+    // every solve from rel z ~0.45 to touchdown was rejected (constraint 2-9)
+    // for the last 1.15 s of descent. There is also nothing to gain there: by
+    // that point the measured tracking error has already fallen to 0.017-0.05 m,
+    // while the large errors this mechanism exists to correct (0.12-0.18 m)
+    // occur mid-descent.
+    double seed_min_rel_z = 0.60;
     double recovery_pos_err = 0.50;
     double recovery_vel_err = 2.00;
     double max_first_solve_age_sec = 1.00;

@@ -35,6 +35,14 @@ struct PlannerRuntimeConfig {
     std::string target_predicted_accel_topic = "/target/predicted_accel";
     bool debug_body_relative_trace = false;
 
+    // Measured-state seeding (see PlannerCoreConfig in planner_core/types.hpp).
+    double seed_alpha_pos = 0.70;
+    double seed_alpha_vel = 0.0;
+    double seed_clamp_pos_cap_m = 0.10;
+    double seed_clamp_pos_per_m = 0.10;
+    double seed_clamp_vel = 0.30;
+    double seed_min_rel_z = 0.60;
+
     bool enable_terminal_freeze = true;
     double terminal_freeze_enter_pos = 0.20;
     double terminal_freeze_enter_vel = 0.10;

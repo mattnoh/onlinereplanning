@@ -107,6 +107,10 @@ add_executable(test_stc_landing_noaug test/test_stc_landing_noaug.cpp ${SHARED_S
 target_include_directories(test_stc_landing_noaug PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
 target_link_libraries(test_stc_landing_noaug planner_core)
 
+add_executable(tools_seed_probe test/tools_seed_probe.cpp ${SHARED_SOURCES})
+target_include_directories(tools_seed_probe PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
+target_link_libraries(tools_seed_probe planner_core)
+
 # ── Install ───────────────────────────────────────────────────────────────────
 install(TARGETS
     comando_planner

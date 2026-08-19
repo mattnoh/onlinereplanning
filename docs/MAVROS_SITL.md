@@ -293,6 +293,55 @@ RViz fixed frame is `odom` — without the chain, whichever frame is
 disconnected renders nothing (the classic symptom: target visible, quad
 missing).
 
+### Seeding each replan from the measured state
+
+Each replan is seeded from the active plan sampled at the activation instant, plus
+the persistent and *feasible* part of the current tracking error:
+
+```text
+x0 = plan(t_activation) + clamp(seed_alpha_pos * (live(now) - plan(now)))
+```
+
+applied to the **position block only** (`x0_source: measured_seed` in
+`solver_events.csv`). Three rules, each measured rather than guessed:
+
+- **`seed_alpha_pos = 0.70`** is the fraction of position error PX4 still leaves at
+  the ~0.48 s activation lead (LS fit `e(t+tau) = rho e(t)` on bag odom vs published
+  `PositionTarget`): rho 0.642/0.774 in SITL, 0.698 on Crazyflie hardware.
+- **Attitude and body rates are never seeded.** Their STC bounds are tighter than
+  the vehicle's real behaviour (`omega <= 0.019` rad/s vs 0.03-0.50 flown), so a
+  measured attitude/rate seed is infeasible 37-60 % of the time and diverges the
+  IPM. A full-state measured seed was flown and gave 78-84 rejects with
+  `constraint_error` up to 3.4e8. Velocity is feasible but its error is not
+  persistent on hardware (rho_vel = -0.10), so `seed_alpha_vel` defaults to 0.
+- **The clamp scales with altitude** — `min(cap, per_m * rel_z)`. The feasible seed
+  budget tracks the glideslope cone and collapses from 0.40 m at rel z 1.6 to
+  0.02 m at rel z 0.06, so a constant clamp would have to be 0.02 m and correct
+  nothing. Below `seed_min_rel_z` (0.60 m) the correction is off entirely: flown
+  without that cutoff, every solve from rel z ~0.45 to touchdown was rejected
+  (constraint 2-9) for the last 1.15 s, and the tracking error there is already
+  0.017-0.05 m.
+
+**Screen any seeding change offline before flying it** — this takes seconds and
+catches what a SITL run costs minutes to discover:
+
+```bash
+rosrun comando_planner tools_seed_probe    # sweeps the feasible seed budget
+                                           # along a full descent
+```
+
+SITL A/B (identical config, only the seed differs):
+
+| | baseline (`seed_alpha_pos:=0.0`) | measured seed (0.70) |
+| --- | --- | --- |
+| accepted / rejected | 38 / 0 | 38 / 0 |
+| max `handoff_pos_err` | 0.376 m | **0.143 m** |
+| flown glideslope violation | 0.092 | 0.084 |
+| touchdown offset | 0.119 m | 0.160 m |
+
+Engagement is not synchronized to the circling target's phase, so small run-to-run
+differences (e.g. the touchdown column) are not interpretable; only large effects are.
+
 ### Where everything gets written
 
 - **Planner CSVs** (`all_solves.csv`, `solver_events.csv`): the node's

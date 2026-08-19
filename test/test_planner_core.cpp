@@ -212,6 +212,87 @@ int main() {
         }
 
         {
+            // Measured-state seeding. The seed carries the persistent, FEASIBLE
+            // part of the tracking error onto the predicted state: POSITION
+            // only, clamped by relative altitude. Attitude and body rates must
+            // never move — a measured attitude/rate seed is infeasible against
+            // the STC bounds and diverges the solver.
+            // The shared fixture plans at z = 0, where the altitude-scaled clamp
+            // is correctly zero. Give this plan a realistic altitude so the seed
+            // path is actually exercised.
+            const double kSeedZ = 1.5;
+            const auto solvedAtZ = [&](const Clock::time_point& finish) {
+                SolverResult r = solved(finish, 0.0);
+                for (auto& x : r.state_trajectory) x(2) = kSeedZ;
+                return r;
+            };
+
+            const auto seed_with = [&](double alpha, double cap, double per_m) {
+                planner_core::PlannerCore core;
+                auto cfg = hoverConfig();
+                cfg.recovery_pos_err = 1000.0;
+                cfg.recovery_vel_err = 1000.0;
+                cfg.seed_alpha_pos = alpha;
+                cfg.seed_clamp_pos_cap_m = cap;
+                cfg.seed_clamp_pos_per_m = per_m;
+                core.configure(cfg);
+                auto input = inputAt(t0);
+                core.acceptSolvedResult(input, input.current_state, solvedAtZ(t0));
+
+                auto early = inputAt(t0 + std::chrono::milliseconds(150));
+                planner_core::PlannerCoreStepResult early_out;
+                planner_core::PlannerCore::HandoffSchedule early_handoff;
+                core.prepareHandoffSchedule(early, early_out, early_handoff);
+
+                auto handoff = inputAt(t0 + std::chrono::milliseconds(180));
+                planner_core::PlannerCoreStepResult out;
+                planner_core::PlannerCore::HandoffSchedule schedule;
+                require(core.prepareHandoffSchedule(handoff, out, schedule),
+                        "measured-seed fixture: solve should start in lead window");
+                double hp = 0.0, hv = 0.0;
+                Eigen::VectorXd x = core.selectInitialState(
+                    handoff.current_state, handoff.target_snapshot, schedule,
+                    &hp, &hv, out.x0_source, out);
+                return std::make_pair(x, out.x0_source);
+            };
+
+            // alpha = 0 must reproduce the pre-existing predicted seed exactly.
+            const auto off = seed_with(0.0, 0.10, 0.10);
+            require(off.second == "predicted_handoff",
+                    "seed_alpha_pos = 0 must fall through to the predicted seed");
+            require(std::abs(off.first(0) - 2.0) < 1e-12,
+                    "seed_alpha_pos = 0 perturbed the predicted seed");
+
+            // A generous clamp lets the full correction through; the fixture's
+            // live state is x = 0 while the plan is already past x = 1.8, so the
+            // correction is negative.
+            const auto on = seed_with(0.5, 10.0, 10.0);
+            require(on.second == "measured_seed",
+                    "nonzero seed_alpha_pos must be reported as measured_seed");
+            require(on.first(0) < off.first(0),
+                    "measured seed did not move toward the live state");
+
+            // Only the position block may move.
+            for (int i = 3; i < off.first.size(); ++i) {
+                require(std::abs(on.first(i) - off.first(i)) < 1e-12,
+                        "measured seed modified a non-position state element");
+            }
+
+            // The clamp must bound the applied correction.
+            const auto clamped = seed_with(0.5, 0.05, 10.0);
+            const double moved = (clamped.first.head(3) - off.first.head(3)).norm();
+            require(moved <= 0.05 + 1e-9,
+                    "measured seed exceeded seed_clamp_pos_cap_m");
+            require(moved > 0.0, "clamped measured seed applied no correction");
+
+            // The clamp also scales with relative altitude: per_m = 0 forbids
+            // any correction regardless of the cap.
+            const auto by_alt = seed_with(0.5, 10.0, 0.0);
+            require(by_alt.second == "predicted_handoff",
+                    "zero per-metre clamp must leave the predicted seed untouched");
+        }
+
+        {
             // Regression: when solve latency is longer than one replay step,
             // the next origin must remain in the future instead of advancing
             // by an already-expired n_replay interval on every solve.

@@ -68,6 +68,12 @@ public:
         target_predicted_accel_topic_    = runtime_cfg.target_predicted_accel_topic;
         debug_body_relative_trace_       = runtime_cfg.debug_body_relative_trace;
         body_relative_odom_topic_        = runtime_cfg.body_relative_odom_topic;
+        seed_alpha_pos_                  = runtime_cfg.seed_alpha_pos;
+        seed_alpha_vel_                  = runtime_cfg.seed_alpha_vel;
+        seed_clamp_pos_cap_m_            = runtime_cfg.seed_clamp_pos_cap_m;
+        seed_clamp_pos_per_m_            = runtime_cfg.seed_clamp_pos_per_m;
+        seed_clamp_vel_                  = runtime_cfg.seed_clamp_vel;
+        seed_min_rel_z_                  = runtime_cfg.seed_min_rel_z;
         enable_terminal_freeze_          = runtime_cfg.enable_terminal_freeze;
         terminal_freeze_enter_pos_       = runtime_cfg.terminal_freeze_enter_pos;
         terminal_freeze_enter_vel_       = runtime_cfg.terminal_freeze_enter_vel;
@@ -433,6 +439,12 @@ private:
         core_cfg.n_replay                = n_replay_;
         core_cfg.max_constraint_error    = max_constraint_error_;
         core_cfg.skip_trajectory_validation = skip_trajectory_validation_;
+        core_cfg.seed_alpha_pos          = seed_alpha_pos_;
+        core_cfg.seed_alpha_vel          = seed_alpha_vel_;
+        core_cfg.seed_clamp_pos_cap_m    = seed_clamp_pos_cap_m_;
+        core_cfg.seed_clamp_pos_per_m    = seed_clamp_pos_per_m_;
+        core_cfg.seed_clamp_vel          = seed_clamp_vel_;
+        core_cfg.seed_min_rel_z          = seed_min_rel_z_;
         core_cfg.enable_terminal_freeze  = enable_terminal_freeze_;
         core_cfg.terminal_freeze_enter_pos = terminal_freeze_enter_pos_;
         core_cfg.terminal_freeze_enter_vel = terminal_freeze_enter_vel_;
@@ -931,6 +943,13 @@ private:
     std::string target_accel_topic_        = "/target/accel";
     std::string target_predicted_accel_topic_ = "/target/predicted_accel";
     bool debug_body_relative_trace_ = false;
+
+    double seed_alpha_pos_            = 0.70;
+    double seed_alpha_vel_            = 0.0;
+    double seed_clamp_pos_cap_m_      = 0.10;
+    double seed_clamp_pos_per_m_      = 0.10;
+    double seed_clamp_vel_            = 0.30;
+    double seed_min_rel_z_            = 0.60;
 
     bool enable_terminal_freeze_      = true;
     double terminal_freeze_enter_pos_ = 0.20;
