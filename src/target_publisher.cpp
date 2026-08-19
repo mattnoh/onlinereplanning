@@ -167,13 +167,28 @@ public:
         noise_rng_.seed(static_cast<unsigned>(noise_seed));
         {
             std::normal_distribution<double> nb(0.0, 1.0);
-            auto drawBias = [&](double sig) {
+            // NOTE the explicit return type. With `auto`, this lambda deduces
+            // an Eigen EXPRESSION TEMPLATE that holds a reference to the
+            // temporary Vector3d, which dies at the end of the return
+            // statement -- the stored bias then reads freed memory. That
+            // produced a constant ~5e254 bias on x (y happened to survive) and
+            // blew every solve up to constraint=nan / max_rel_p=inf.
+            auto drawBias = [&](double sig) -> Eigen::Vector3d {
                 return Eigen::Vector3d(nb(noise_rng_), nb(noise_rng_), 0.0)
                        * (noise_bias_frac_ * sig);
             };
             noise_bias_pos_ = drawBias(noise_sigma_pos_);
             noise_bias_vel_ = drawBias(noise_sigma_vel_);
             noise_bias_acc_ = drawBias(noise_sigma_acc_);
+        }
+        if (!noise_bias_pos_.allFinite() || !noise_bias_vel_.allFinite() ||
+            !noise_bias_acc_.allFinite()) {
+            ROS_FATAL("[TargetPublisher] non-finite noise bias computed "
+                      "(p=[%g %g] v=[%g %g] a=[%g %g])",
+                      noise_bias_pos_.x(), noise_bias_pos_.y(),
+                      noise_bias_vel_.x(), noise_bias_vel_.y(),
+                      noise_bias_acc_.x(), noise_bias_acc_.y());
+            throw std::runtime_error("non-finite target noise bias");
         }
         noise_active_ = (noise_sigma_pos_ > 0.0 || noise_sigma_vel_ > 0.0 ||
                          noise_sigma_acc_ > 0.0);
