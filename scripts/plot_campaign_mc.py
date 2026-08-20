@@ -214,29 +214,38 @@ def figure(rows, groups, labels, colors, title, subtitle, outfile, difficulty=No
 
 def main():
     camp = sys.argv[1]
+    which = sys.argv[2] if len(sys.argv) > 2 else "auto"
     rows = list(csv.DictReader(open(os.path.join(camp, "samples.csv"))))
-    diff = {r["motion"]: {k: float(v) for k, v in r.items() if k != "motion"}
-            for r in csv.DictReader(open(os.path.join(camp, "scenario_difficulty.csv")))}
+    dfile = os.path.join(camp, "scenario_difficulty.csv")
+    diff = ({r["motion"]: {k: float(v) for k, v in r.items() if k != "motion"}
+             for r in csv.DictReader(open(dfile))} if os.path.exists(dfile) else None)
 
-    # ---- MC1: motion generalization, at the no-added-uncertainty condition ----
-    m1 = [dict(r, _g=r["motion"]) for r in rows if r["uncertainty"] == "zero"]
-    n1 = len(m1)
-    figure(m1, MOTIONS, [MOTION_LABELS[m] for m in MOTIONS],
-           [MOTION_COLORS[m] for m in MOTIONS],
-           "MC1 — Target-motion generalization",
-           f"PX4 SITL closed-loop receding-horizon landing · {n1} runs, "
-           "no added target-state uncertainty",
-           os.path.join(camp, "mc1_motion_generalization.png"),
-           difficulty=diff)
+    levels_present = sorted({r["uncertainty"] for r in rows})
+    motions_present = sorted({r["motion"] for r in rows})
+    if which == "auto":
+        which = "mc1" if len(levels_present) == 1 else "mc2"
 
-    # ---- MC2: uncertainty analysis, pooled over motions ----
-    m2 = [dict(r, _g=r["uncertainty"]) for r in rows]
-    figure(m2, LEVELS, [LEVEL_LABELS[l] for l in LEVELS],
-           [LEVEL_COLORS[l] for l in LEVELS],
-           "MC2 — Target-state and acceleration-prediction uncertainty",
-           f"PX4 SITL closed-loop receding-horizon landing · {len(m2)} runs, "
-           "6 target motions pooled · model mismatch vs constant-accel prediction",
-           os.path.join(camp, "mc2_uncertainty.png"))
+    if which == "mc1":
+        groups = [m for m in MOTIONS if m in motions_present]
+        m1 = [dict(r, _g=r["motion"]) for r in rows]
+        figure(m1, groups, [MOTION_LABELS[m] for m in groups],
+               [MOTION_COLORS[m] for m in groups],
+               "MC1 — Target-motion generalization",
+               f"PX4 SITL closed-loop receding-horizon landing · {len(m1)} runs "
+               f"({len(m1)//max(1,len(groups))} per motion) · no added target-state uncertainty",
+               os.path.join(camp, "mc1_motion_generalization.png"),
+               difficulty=diff)
+    else:
+        groups = [l for l in LEVELS if l in levels_present]
+        m2 = [dict(r, _g=r["uncertainty"]) for r in rows]
+        base = ", ".join(MOTION_LABELS.get(m, m) for m in motions_present)
+        figure(m2, groups, [LEVEL_LABELS[l] for l in groups],
+               [LEVEL_COLORS[l] for l in groups],
+               "MC2 — Target-state and acceleration-prediction uncertainty",
+               f"PX4 SITL closed-loop receding-horizon landing · {len(m2)} runs "
+               f"({len(m2)//max(1,len(groups))} per level) · {base} target · "
+               "model mismatch vs constant-acceleration prediction",
+               os.path.join(camp, "mc2_uncertainty.png"))
 
 
 if __name__ == "__main__":
