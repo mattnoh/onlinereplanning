@@ -26,6 +26,7 @@ import signal
 import subprocess
 import sys
 import time
+import zlib
 
 PKG = "/home/lab/mavros_ws/src/CoManDO_planner"
 PX4 = "/home/lab/projects/px4/PX4-Autopilot"
@@ -62,8 +63,14 @@ PLANNER_ENV = {
 
 
 def seed_for(motion, level, trial):
-    """Deterministic per-cell seed so any trial is exactly reproducible."""
-    return (abs(hash(motion)) % 1000) * 10000 + list(UNCERT).index(level) * 100 + trial + 1
+    """Deterministic per-cell seed so any trial is exactly reproducible.
+
+    Uses crc32, NOT hash(): Python randomises str hashing per process
+    (PYTHONHASHSEED), so hash('circle') returned 878/36/53 on three
+    consecutive runs and the seeds were never actually reproducible.
+    """
+    return (zlib.crc32(motion.encode()) % 1000) * 10000 \
+        + list(UNCERT).index(level) * 100 + trial + 1
 
 
 def sh(cmd, timeout=None, check=False):
