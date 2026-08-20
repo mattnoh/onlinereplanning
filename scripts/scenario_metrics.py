@@ -116,6 +116,19 @@ def flight_stats(cell):
     rows = rows[:cut]
     if not rows:
         return out
+    # Restrict to the DESCENT. moving_executed.csv covers the whole flight, and
+    # during takeoff the drone sits on the ground far from the target -- rz is
+    # then below alt_trig, so an alt_trig-only filter counts takeoff as landing
+    # and reports metre-scale glideslope "violations". Start after the last time
+    # the drone was at staging altitude.
+    last_high = None
+    for i, r in enumerate(rows):
+        if f(r, "rz") > 1.3:
+            last_high = i
+    if last_high is not None:
+        rows = rows[last_high:]
+    if not rows:
+        return out
     pp = lambda v: v if v > 0 else 0.0
     gs = sp = ti = om = 0.0
     for r in rows:
