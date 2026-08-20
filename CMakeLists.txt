@@ -115,6 +115,10 @@ add_executable(tools_motion_screen test/tools_motion_screen.cpp ${SHARED_SOURCES
 target_include_directories(tools_motion_screen PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
 target_link_libraries(tools_motion_screen planner_core)
 
+add_executable(tools_motion_difficulty test/tools_motion_difficulty.cpp ${SHARED_SOURCES})
+target_include_directories(tools_motion_difficulty PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
+target_link_libraries(tools_motion_difficulty planner_core)
+
 # ── Install ───────────────────────────────────────────────────────────────────
 install(TARGETS
     comando_planner
