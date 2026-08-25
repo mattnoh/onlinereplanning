@@ -24,6 +24,9 @@ struct StopAndGoTarget {
     double t_ramp = 1.0;        // s to decelerate (and to accelerate)
     double t_dwell = 2.0;       // s stopped
     double span = 2.0;          // m shuttle half-span (see StraightTarget::span)
+    // Per-trial phase into the cruise/ramp/dwell cycle -- see
+    // StraightTarget::t_offset for why this exists.
+    double t_offset = 0.0;      // s, added to t
 
     void fold(double d, double& x, double& sign) const {
         if (span <= 0.0) { x = d; sign = 1.0; return; }
@@ -42,6 +45,7 @@ struct StopAndGoTarget {
 
     // Scalar (arc-length, speed, tangential accel) at time t.
     void profile(double t, double& d, double& v, double& a) const {
+        t += t_offset;
         const double T = period();
         const double n = std::floor(t / T);
         double u = t - n * T;                 // time within this period

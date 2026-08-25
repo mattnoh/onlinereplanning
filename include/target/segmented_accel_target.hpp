@@ -122,11 +122,17 @@ struct SegmentedAccelTarget {
 
 // Acceleration cycles deterministically through a fixed pattern of directions.
 // Reproducible without a seed; the jumps are regular rather than stochastic.
+// `dir_rot` rotates the whole direction cycle and the initial velocity, and
+// `k0` phases into it. Both default to the original fixed pattern. Without
+// them the piecewise target is a pure function of t and every trial of a
+// campaign cell flies the IDENTICAL path -- see StraightTarget::t_offset.
 inline SegmentedAccelTarget makePiecewiseAccelTarget(const Eigen::Vector3d& center,
                                                      double accel_mag,
                                                      double hold,
                                                      double v_max,
-                                                     double speed0) {
+                                                     double speed0,
+                                                     double dir_rot = 0.0,
+                                                     int k0 = 0) {
     SegmentedAccelTarget t;
     t.center = center;
     t.hold = hold;
@@ -134,9 +140,13 @@ inline SegmentedAccelTarget makePiecewiseAccelTarget(const Eigen::Vector3d& cent
     static const double kDirs[8][2] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1},
                                        {0.7071, 0.7071}, {-0.7071, 0.7071},
                                        {-0.7071, -0.7071}, {0.7071, -0.7071}};
-    t.build(Eigen::Vector3d(speed0, 0.0, 0.0), [&](int k) {
-        const auto& d = kDirs[k % 8];
-        return Eigen::Vector3d(accel_mag * d[0], accel_mag * d[1], 0.0);
+    const double cr = std::cos(dir_rot), sr = std::sin(dir_rot);
+    t.build(Eigen::Vector3d(speed0 * cr, speed0 * sr, 0.0), [&](int k) {
+        const auto& d = kDirs[((k + k0) % 8 + 8) % 8];
+        // Rotate the unit direction, then scale -- a rotation preserves the
+        // magnitude, so |a| is still exactly accel_mag.
+        return Eigen::Vector3d(accel_mag * (cr * d[0] - sr * d[1]),
+                               accel_mag * (sr * d[0] + cr * d[1]), 0.0);
     });
     return t;
 }
@@ -148,14 +158,18 @@ inline SegmentedAccelTarget makeRandomAccelTarget(const Eigen::Vector3d& center,
                                                   double hold,
                                                   double v_max,
                                                   double speed0,
-                                                  unsigned seed) {
+                                                  unsigned seed,
+                                                  double dir_rot = 0.0) {
     SegmentedAccelTarget t;
     t.center = center;
     t.hold = hold;
     t.v_max = v_max;
     std::mt19937 rng(seed);
     std::normal_distribution<double> nd(0.0, sigma);
-    t.build(Eigen::Vector3d(speed0, 0.0, 0.0), [&](int) {
+    // The accelerations are already seeded; dir_rot only varies the initial
+    // heading so this motion is randomised the same way as the others.
+    t.build(Eigen::Vector3d(speed0 * std::cos(dir_rot),
+                            speed0 * std::sin(dir_rot), 0.0), [&](int) {
         return Eigen::Vector3d(nd(rng), nd(rng), 0.0);
     });
     return t;

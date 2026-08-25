@@ -51,6 +51,20 @@ MOTION_COLORS = {"straight": "#2ca02c", "figure8": "#ff7f0e", "circle": "#1f77b4
 
 FLOOR = 1e-4          # log-axis floor so an exactly-satisfied constraint is visible
 
+# Two nested success criteria, because the bare one is uninformative on its own.
+#
+#   landed        the FCU disarmed after having been armed -- a LIVENESS test.
+#                 It says the STC block activated, the horizon kept replanning
+#                 and the vehicle reached the ground without the run timing
+#                 out. It says nothing about WHERE it landed, which is why it
+#                 reads 100% everywhere.
+#   precision     landed AND touchdown lateral error <= PRECISION_M.
+#
+# PRECISION_M is cap_radius / 3 (the pad radius is 0.45 m in every run's
+# constraints.csv), so it is a fixed fraction of the actual landing target
+# rather than a threshold picked to make the bars look interesting.
+PRECISION_M = 0.15
+
 
 def wilson(successes, total, z=1.96):
     if total == 0:
@@ -110,30 +124,52 @@ def num(rows, key, floor=None):
 
 
 def figure(rows, groups, labels, colors, title, subtitle, outfile, difficulty=None):
-    fig, axes = plt.subplots(2, 3, figsize=(10.4 + 1.3 * len(groups), 9.0),
-                             constrained_layout=True)
+    # tight_layout(rect=...) rather than constrained_layout: this matplotlib
+    # (3.5) has no Figure.set_layout_engine, and mixing subplots_adjust into a
+    # constrained_layout figure disables it -- which let panel (a)'s two-line
+    # caption run into the row below.
+    fig, axes = plt.subplots(2, 3, figsize=(10.4 + 1.3 * len(groups), 9.4))
     (ax_rate, ax_err, ax_viol), (ax_cdf, ax_time, ax_last) = axes
     G = [[r for r in rows if r["_g"] == g] for g in groups]
     n_per = [len(g) for g in G]
 
-    # (a) landing success rate, Wilson interval
+    # (a) landing success. Outlined bar = liveness (landed at all); filled bar
+    # = precision landing. Showing only the first gives six identical 100%
+    # bars; showing only the second hides that every run did in fact complete.
     xs = np.arange(1, len(groups) + 1)
-    rates = [sum(int(r["landed"]) for r in g) / len(g) if g else 0 for g in G]
-    ci = [wilson(sum(int(r["landed"]) for r in g), len(g)) for g in G]
-    ax_rate.bar(xs, rates, width=0.55, color=colors, alpha=0.88,
+    def _lat(r):
+        try:
+            return float(r["td_lateral"])
+        except (ValueError, KeyError):
+            return float("inf")
+    live = [sum(int(r["landed"]) for r in g) for g in G]
+    prec = [sum(1 for r in g if int(r["landed"]) and _lat(r) <= PRECISION_M)
+            for g in G]
+    rates = [k / len(g) if g else 0 for k, g in zip(live, G)]
+    prates = [k / len(g) if g else 0 for k, g in zip(prec, G)]
+    ci = [wilson(k, len(g)) for k, g in zip(prec, G)]
+    ax_rate.bar(xs, rates, width=0.55, facecolor="none", edgecolor=colors,
+                linewidth=1.4, linestyle=(0, (3, 2)))
+    ax_rate.bar(xs, prates, width=0.55, color=colors, alpha=0.88,
                 edgecolor=colors, linewidth=0.9)
-    ax_rate.errorbar(xs, rates,
-                     yerr=[[max(0.0, r - lo) for r, (lo, _) in zip(rates, ci)],
-                           [max(0.0, hi - r) for r, (_, hi) in zip(rates, ci)]],
+    ax_rate.errorbar(xs, prates,
+                     yerr=[[max(0.0, r - lo) for r, (lo, _) in zip(prates, ci)],
+                           [max(0.0, hi - r) for r, (_, hi) in zip(prates, ci)]],
                      fmt="none", ecolor="0.25", elinewidth=0.85, capsize=4)
     ax_rate.set_ylim(0, 1.12)
-    ax_rate.set_ylabel("landing success rate")
-    ax_rate.set_xlabel(f"(a) Landing success  (n={n_per[0]} per group, 95% Wilson)",
+    ax_rate.set_ylabel("success rate")
+    ax_rate.set_xlabel(f"(a) Landing success  (dashed: landed, n={n_per[0]}/group;"
+                       f"\n      filled: lateral err $\\leq$ {PRECISION_M:g} m, 95% Wilson)",
                        labelpad=8)
     style(ax_rate)
 
     # (b) terminal / touchdown accuracy
     boxes(ax_err, [num(g, "td_lateral") or [0] for g in G], colors)
+    ax_err.axhline(PRECISION_M, color="0.35", lw=1.0, ls=(0, (4, 3)), zorder=1)
+    ax_err.annotate(f"precision criterion {PRECISION_M:g} m", (0.02, PRECISION_M),
+                    xycoords=("axes fraction", "data"), xytext=(0, 4),
+                    textcoords="offset points", ha="left", va="bottom",
+                    fontsize=9, color="0.35")
     ax_err.set_ylabel("touchdown lateral error [m]")
     ax_err.set_xlabel("(b) Terminal accuracy", labelpad=8)
     style(ax_err)
@@ -197,16 +233,23 @@ def figure(rows, groups, labels, colors, title, subtitle, outfile, difficulty=No
         ax_last.set_xlabel("(f) Replanning cost", labelpad=8)
         style(ax_last)
 
+    # Title block FIRST, legend below it. The legend used to be anchored above
+    # the title, and with six groups its row ran straight through the title
+    # text. Stacking them in reading order removes the collision by
+    # construction rather than by tuning two y offsets against each other.
+    fig.text(0.5, 0.988, title, ha="center", va="top", fontsize=16,
+             fontweight="bold")
+    fig.text(0.5, 0.962, subtitle, ha="center", va="top", fontsize=11.5,
+             color="0.30")
     handles = [Patch(facecolor=c, edgecolor=c, alpha=0.88, label=l)
                for c, l in zip(colors, labels)]
     fig.legend(handles=handles, loc="upper center", ncol=min(len(handles), 6),
-               frameon=False, fontsize=10.5, bbox_to_anchor=(0.5, 0.997))
-    fig.text(0.5, 0.955, title, ha="center", fontsize=13, fontweight="bold")
-    fig.text(0.5, 0.930, subtitle, ha="center", fontsize=10.5, color="0.30")
-    try:
-        fig.get_layout_engine().set(rect=(0, 0, 1, 0.915))
-    except AttributeError:
-        fig.subplots_adjust(top=0.87)
+               frameon=False, fontsize=14, handlelength=1.6, handleheight=1.1,
+               columnspacing=1.8, bbox_to_anchor=(0.5, 0.945))
+    # Reserve the top strip for the title block + legend. set_layout_engine
+    # keeps constrained_layout ON; subplots_adjust would silently disable it
+    # and let panel (a)'s two-line caption run into the row below.
+    fig.tight_layout(rect=(0, 0, 1, 0.885), h_pad=2.4, w_pad=2.0)
     fig.savefig(outfile, dpi=200)
     plt.close(fig)
     print("wrote", outfile)

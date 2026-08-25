@@ -120,34 +120,68 @@ public:
         nh_.param<int>   ("target_motion_seed", motion_seed, 1);
         const Eigen::Vector3d ctr(c_x, c_y, c_z);
 
+        // Per-trial shape randomisation. WITHOUT this, target_motion_seed
+        // reached only the random_accel branch, so the other five motions flew
+        // a byte-identical target path in every trial of a campaign cell and
+        // the only trial-to-trial variation was SITL bring-up jitter shifting
+        // where the target happened to be at engagement. Straight and
+        // stop_and_go were the worst case: heading and speed profile were
+        // literally constant across all 20 trials.
+        //
+        // Drawn from one generator in a fixed order so a (motion, level, trial)
+        // triple stays exactly reproducible. `shape_random` defaults ON; set it
+        // false to reproduce a pre-fix run.
+        bool shape_random; nh_.param<bool>("target_shape_random", shape_random, true);
+        std::mt19937 shape_rng(static_cast<unsigned>(motion_seed));
+        std::uniform_real_distribution<double> u2pi(0.0, 2.0 * M_PI);
+        std::uniform_int_distribution<int>     u8(0, 7);
+        const double rnd_phase   = shape_random ? u2pi(shape_rng) : 0.0;
+        const double rnd_heading = shape_random ? u2pi(shape_rng) : heading;
+        const int    rnd_k0      = shape_random ? u8(shape_rng)   : 0;
+        // Phase offset in SECONDS, spanning a full shuttle cycle (4*span at
+        // `speed`) so the drone can engage anywhere along the stroke.
+        const double shuttle_T   = (speed > 1e-9 && span > 0.0)
+                                       ? 4.0 * span / speed : 0.0;
+        std::uniform_real_distribution<double> ushuttle(0.0, std::max(shuttle_T, 1e-9));
+        const double rnd_t_off   = shape_random ? ushuttle(shape_rng) : 0.0;
+        ROS_INFO("[TargetPublisher] shape_random=%d seed=%d -> phase=%.3f rad, "
+                 "heading=%.3f rad, k0=%d, t_offset=%.2f s",
+                 static_cast<int>(shape_random), motion_seed, rnd_phase,
+                 rnd_heading, rnd_k0, rnd_t_off);
+
         // One SyntheticTarget replaces the old if/else over eagerly-constructed
         // members. An unknown key is now FATAL instead of silently degrading to
         // a circle (the previous behaviour would have made a mis-typed campaign
         // scenario look like a passing circle run).
         if (traj == "circle") {
             target_models::CircularTarget m;
-            m.center = ctr; m.R = radius; m.omega = omega;
+            m.center = ctr; m.R = radius; m.omega = omega; m.phi0 = rnd_phase;
             motion_ = target_config::SyntheticTarget::from(m);
         } else if (traj == "figure8") {
             target_models::Figure8Target m;
             m.center = ctr; m.amp_x = amp_x; m.amp_y = amp_y; m.omega = omega;
+            m.phi0 = rnd_phase;
             motion_ = target_config::SyntheticTarget::from(m);
         } else if (traj == "straight") {
             target_models::StraightTarget m;
-            m.center = ctr; m.speed = speed; m.heading = heading; m.span = span;
+            m.center = ctr; m.speed = speed; m.heading = rnd_heading; m.span = span;
+            m.t_offset = rnd_t_off;
             motion_ = target_config::SyntheticTarget::from(m);
         } else if (traj == "stop_and_go") {
             target_models::StopAndGoTarget m;
-            m.center = ctr; m.speed = speed; m.heading = heading;
+            m.center = ctr; m.speed = speed; m.heading = rnd_heading;
             m.t_cruise = sg_cruise; m.t_ramp = sg_ramp; m.t_dwell = sg_dwell; m.span = span;
+            m.t_offset = rnd_t_off;
             motion_ = target_config::SyntheticTarget::from(m);
         } else if (traj == "piecewise_accel") {
             motion_ = target_config::SyntheticTarget::from(
-                target_models::makePiecewiseAccelTarget(ctr, pa_accel, pa_hold, vmax, speed));
+                target_models::makePiecewiseAccelTarget(ctr, pa_accel, pa_hold, vmax, speed,
+                                                       rnd_heading, rnd_k0));
         } else if (traj == "random_accel") {
             motion_ = target_config::SyntheticTarget::from(
                 target_models::makeRandomAccelTarget(ctr, ra_sigma, ra_hold, vmax, speed,
-                                                     static_cast<unsigned>(motion_seed)));
+                                                     static_cast<unsigned>(motion_seed),
+                                                     rnd_heading));
         } else {
             ROS_FATAL("[TargetPublisher] unknown target_trajectory '%s' (expected: circle, "
                       "figure8, straight, stop_and_go, piecewise_accel, random_accel)",

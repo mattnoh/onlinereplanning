@@ -109,6 +109,12 @@ def load_animation_data(result_dir: Path, csv_name: str, kind: str) -> dict:
         "bounds": bounds,
         "t": t,
         "rxyz": rxyz,
+        # World-frame series, needed by the world-frame animation. The
+        # target-relative animation puts the target at the origin by
+        # construction, so the pad never moves and every motion shape looks
+        # identical; these two let the pad be drawn where it actually is.
+        "world_xyz": data["world_xyz"],
+        "target_xyz": data["target_xyz"],
         "rvxyz": rvxyz,
         "quat": quat,
         "speed": speed,
@@ -284,6 +290,99 @@ def draw_partial_3d(ax, data: dict, k: int):
     return lc
 
 
+def draw_partial_3d_world(ax, data: dict, k: int):
+    """World-frame counterpart of draw_partial_3d, with a MOVING target.
+
+    Axis limits are computed once over the whole run (drone path + target
+    path) rather than per frame, so the pad visibly travels across a fixed
+    scene instead of the scene sliding to keep it centred."""
+    b = data["bounds"]
+    wxyz = data["world_xyz"]
+    txyz = data["target_xyz"]
+    quat = data["quat"]
+    speed = data["speed"]
+    kk = slice(0, k + 1)
+
+    paper.anim.style_3d(ax, "")
+    ax.tick_params(labelsize=12)
+    center = 0.5 * (np.nanmin(txyz[:, :2], axis=0) + np.nanmax(txyz[:, :2], axis=0))
+    lo, hi = paper.set_3d_limits(ax, wxyz, txyz[-1], extra=txyz, center=center)
+    extent = float(np.max(hi - lo))
+
+    # Full target path shown from frame one: the point of the world view is
+    # that the motion SHAPE is legible immediately, not revealed only at the
+    # end. Lifted clear of z=0 so the pad glyph does not sit on top of it.
+    z_trail = txyz[:, 2] + 0.035
+    ax.plot(txyz[:, 0], txyz[:, 1], z_trail, color=paper.anim.TARGET, lw=1.6,
+            ls=(0, (4, 3)), alpha=0.55, zorder=1, label="Target path (full)")
+    ax.plot(txyz[kk, 0], txyz[kk, 1], z_trail[kk], color=paper.anim.TARGET,
+            lw=3.2, alpha=1.0, zorder=6, solid_capstyle="round",
+            label="Target path (travelled)")
+    # Wall projection of the target path, matching the drone's, so the shape
+    # is readable even when the 3-D view foreshortens it.
+    ax.plot(txyz[:, 0], np.full(len(txyz), hi[1]), z_trail,
+            color=paper.anim.TARGET, lw=0.9, alpha=0.35, zorder=0)
+
+    pts = wxyz[kk].reshape(-1, 1, 3)
+    if len(pts) > 1:
+        segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
+        lc = Line3DCollection(
+            segs,
+            cmap=plt.cm.rainbow,
+            norm=mcolors.Normalize(0.0, max(float(np.nanmax(speed)), 1e-6)),
+            array=speed[:k],
+            lw=2.8,
+            zorder=5,
+        )
+        ax.add_collection3d(lc)
+    else:
+        lc = None
+
+    n = k + 1
+    ax.plot(wxyz[kk, 0], np.full(n, hi[1]), wxyz[kk, 2],
+            color=paper.C_PROJ, lw=0.9, alpha=0.55, zorder=0,
+            label="Trajectory Projections")
+    ax.plot(np.full(n, lo[0]), wxyz[kk, 1], wxyz[kk, 2],
+            color=paper.C_PROJ, lw=0.9, alpha=0.55, zorder=0)
+
+    draw_projection_trigger(ax, lo, hi, wxyz, data["stage_idx"], paper.C_TRIG_STAGE, 0.0)
+    draw_projection_trigger(ax, lo, hi, wxyz, data["los_idx"], paper.C_TRIG_THR, 1.4)
+    draw_projection_trigger(ax, lo, hi, wxyz, data["land_idx"], paper.C_TRIG_ALT, 2.8)
+
+    # Cone and pad ride the CURRENT target pose, not the final one.
+    tgt = txyz[k]
+    tan_a = float(b.get("gs_post_tan", np.tan(np.radians(float(b["gs_post_deg"])))))
+    cone_h = min(max(float(b["alt_trig"]) + b["gs_apex_offset"], 0.85), 1.15)
+    old_h, old_cone = paper.anim.CONE_H, paper.anim.CONE
+    try:
+        paper.anim.GS_APEX_OFFSET = float(b["gs_apex_offset"])
+        paper.anim.GS_TAN = tan_a
+        paper.anim.CONE_H = cone_h
+        paper.anim.CONE = paper.C_CONE
+        paper.anim.draw_constraint(ax, "gs", tgt, alpha=0.42)
+    finally:
+        paper.anim.CONE_H = old_h
+        paper.anim.CONE = old_cone
+
+    paper.anim.draw_target_pad(ax, tgt, yaw=0.0, alpha=0.58)
+    pos = wxyz[k].copy()
+    if k == len(wxyz) - 1:
+        pos[2] = max(float(pos[2]), 0.04)
+    paper.anim.draw_drone(ax, pos, quat[k], scale=0.30, alpha=0.65)
+
+    ax.scatter([tgt[0]], [tgt[1]], [tgt[2]], s=30, c=paper.anim.TARGET,
+               depthshade=False, zorder=6, label="Landing point")
+    ax.set_xlabel("$x$ [m]", fontsize=13, labelpad=7)
+    ax.set_ylabel("$y$ [m]", fontsize=13, labelpad=7)
+    ax.set_zlabel("$z$ [m]", fontsize=13, labelpad=12)
+    try:
+        ax.set_box_aspect((1, 1, 0.85))
+    except Exception:
+        pass
+    ax.view_init(elev=13, azim=-58)
+    return lc
+
+
 def y_limits(series: np.ndarray, *bounds: float | None, floor_zero: bool = True) -> tuple[float, float]:
     vals = [np.asarray(series, dtype=float)]
     vals.extend(np.array([b], dtype=float) for b in bounds if b is not None)
@@ -381,10 +480,11 @@ def draw_state_panels(fig, data: dict, k: int):
                handlelength=1.6, borderpad=0.35)
 
 
-def render_frame(data: dict, k: int, frame_path: Path, dpi: int):
+def render_frame(data: dict, k: int, frame_path: Path, dpi: int, frame: str = "relative"):
+    """Legacy stacked layout: one small 3-D panel over six state panels."""
     fig = plt.figure(figsize=(9.0, 8.6), facecolor="white")
     ax3d = fig.add_axes([0.04, 0.47, 0.70, 0.43], projection="3d", computed_zorder=False)
-    lc = draw_partial_3d(ax3d, data, k)
+    lc = (draw_partial_3d_world if frame == "world" else draw_partial_3d)(ax3d, data, k)
     cax = fig.add_axes([0.82, 0.54, 0.025, 0.30])
     if lc is None:
         lc = mpl.cm.ScalarMappable(
@@ -407,8 +507,82 @@ def render_frame(data: dict, k: int, frame_path: Path, dpi: int):
     plt.close(fig)
 
 
+# Geometry copied from plot_stc_paper.main()'s TWIN_3D branch so an animation
+# frame is compositionally identical to the published static figure: two large
+# 3-D panels side by side, colourbar at the right, legend in a single row in a
+# reserved band ABOVE the axes. The old layout put a nine-entry legend INSIDE
+# the 3-D axes, where it covered most of the scene, and gave the 3-D view only
+# 43% of the canvas height because six state panels sat underneath it.
+TWIN_W, TWIN_H = 18.0, 7.0
+TWIN_BOX_L = (0.128, 0.060, 0.320, 0.820)
+TWIN_BOX_R = (0.488, 0.060, 0.320, 0.820)
+TWIN_CBAR  = (0.863, 0.190, 0.010, 0.500)
+TWIN_LEG_Y = 0.880 + 0.115
+
+
+def render_frame_twin(data: dict, k: int, frame_path: Path, dpi: int):
+    """Paper-style animation frame: world panel (moving target) + relative panel."""
+    fig = plt.figure(figsize=(TWIN_W, TWIN_H), facecolor="white")
+    axL = fig.add_axes(list(TWIN_BOX_L), projection="3d", computed_zorder=False)
+    axR = fig.add_axes(list(TWIN_BOX_R), projection="3d", computed_zorder=False)
+    lcL = draw_partial_3d_world(axL, data, k)
+    lcR = draw_partial_3d(axR, data, k)
+
+    # Panel labels go UNDER the panels, not as ax.set_title: the two-row
+    # legend occupies the band above the axes and drew straight over them.
+    for box, title in ((TWIN_BOX_L, "World frame"),
+                       (TWIN_BOX_R, "Target-relative frame")):
+        fig.text(box[0] + box[2] / 2.0, 0.012, title, fontsize=17,
+                 ha="center", va="bottom", color="0.25")
+    for ax in (axL, axR):
+        ax.tick_params(labelsize=13)
+        ax.xaxis.label.set_size(16)
+        ax.yaxis.label.set_size(16)
+        ax.zaxis.label.set_size(16)
+
+    lc = lcL if lcL is not None else lcR
+    if lc is None:
+        lc = mpl.cm.ScalarMappable(
+            cmap=plt.cm.rainbow,
+            norm=mcolors.Normalize(0.0, max(float(np.nanmax(data["speed"])), 1e-6)))
+        lc.set_array([])
+    cax = fig.add_axes(list(TWIN_CBAR))
+    cbar = fig.colorbar(lc, cax=cax)
+    cbar.set_label("Speed, $\\|v\\|_2$ [m s$^{-1}$]", fontsize=16, labelpad=8)
+    cbar.ax.tick_params(labelsize=13)
+
+    # Legend assembled from BOTH panels, de-duplicated, one row, above the axes.
+    pairs, seen = [], set()
+    for ax in (axL, axR):
+        for h, l in zip(*ax.get_legend_handles_labels()):
+            if l and l not in seen:
+                seen.add(l)
+                pairs.append((h, l))
+    # The cone / trigger entries are proxy artists, not real plotted handles,
+    # so they never show up in get_legend_handles_labels() and have to be
+    # appended explicitly.
+    for h in static_3d_legend_handles():
+        l = h.get_label()
+        if l and l not in seen:
+            seen.add(l)
+            pairs.append((h, l))
+    if pairs:
+        fig.legend([h for h, _ in pairs], [l for _, l in pairs],
+                   loc="upper left", bbox_to_anchor=(TWIN_BOX_L[0], TWIN_LEG_Y),
+                   # Nine entries in one row overflowed the canvas; wrap to two.
+                   ncol=(len(pairs) + 1) // 2, fontsize=14, frameon=True, framealpha=0.92,
+                   edgecolor="0.7", handlelength=1.7, columnspacing=0.9,
+                   borderpad=0.5)
+
+    fig.text(0.863, 0.735, f"t = {data['t'][k]:5.2f} s", fontsize=17,
+             ha="left", va="bottom", color="0.25", family="monospace")
+    fig.savefig(frame_path, dpi=dpi, facecolor="white")
+    plt.close(fig)
+
+
 def make_gif(data: dict, out_path: Path, step: int, dpi: int,
-             duration_ms: int, hold_frames: int, keep_frames: bool):
+             duration_ms: int, hold_frames: int, keep_frames: bool,
+             frame: str = "relative"):
     frame_dir = out_path.with_suffix("").with_name(out_path.stem + "_frames")
     frame_dir.mkdir(parents=True, exist_ok=True)
     for old in frame_dir.glob("frame_*.png"):
@@ -419,7 +593,10 @@ def make_gif(data: dict, out_path: Path, step: int, dpi: int,
     for frame_no, k in enumerate(indices):
         print(f"animation frame {frame_no + 1}/{len(indices)} source_index={k}")
         frame_path = frame_dir / f"frame_{frame_no:03d}.png"
-        render_frame(data, k, frame_path, dpi)
+        if frame == "twin":
+            render_frame_twin(data, k, frame_path, dpi)
+        else:
+            render_frame(data, k, frame_path, dpi, frame=frame)
         frame_paths.append(frame_path)
 
     for extra in range(max(0, hold_frames)):
@@ -466,6 +643,13 @@ def main() -> None:
     parser.add_argument("--duration-ms", type=int, default=110)
     parser.add_argument("--hold-frames", type=int, default=10)
     parser.add_argument("--keep-frames", action="store_true")
+    parser.add_argument("--frame", default="relative",
+                        choices=("relative", "world", "twin"),
+                        help="relative: target pinned at the origin (default, "
+                             "legacy stacked layout). world: same layout but the "
+                             "target moves along its real path. twin: paper-style "
+                             "two-panel layout matching plot_stc_paper's static "
+                             "3-D figure, world + relative side by side.")
     args = parser.parse_args()
 
     result_dir = args.dir.resolve()
@@ -482,6 +666,7 @@ def main() -> None:
         duration_ms=args.duration_ms,
         hold_frames=args.hold_frames,
         keep_frames=args.keep_frames,
+        frame=args.frame,
     )
     print(f"dataset={data['kind']}  csv={data['csv_path']}")
 

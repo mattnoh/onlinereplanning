@@ -23,6 +23,10 @@ struct StraightTarget {
     // exactly zero everywhere except the measure-zero reversals, so this
     // remains the case where the constant-acceleration predictor is exact.
     double span = 2.0;                       // m, <=0 disables the fold
+    // Per-trial phase. The motion is otherwise a pure function of t, so
+    // without this every trial of a campaign cell flies the IDENTICAL target
+    // path and the Monte-Carlo samples only differ by bring-up jitter.
+    double t_offset = 0.0;                   // s, added to t
 
     // Fold unbounded arc-length d into a triangle wave on [-span, span].
     void fold(double d, double& x, double& sign) const {
@@ -36,11 +40,13 @@ struct StraightTarget {
     }
 
     Eigen::Vector3d pos(double t) const {
+        t += t_offset;
         double x, sg; fold(speed * t, x, sg);
         return center + Eigen::Vector3d(x * std::cos(heading), x * std::sin(heading), 0.0);
     }
 
     Eigen::Vector3d vel(double t) const {
+        t += t_offset;
         double x, sg; fold(speed * t, x, sg);
         return Eigen::Vector3d(sg * speed * std::cos(heading),
                                sg * speed * std::sin(heading), 0.0);

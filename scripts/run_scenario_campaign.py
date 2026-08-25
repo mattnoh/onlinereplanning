@@ -20,6 +20,7 @@ import argparse
 import csv
 import datetime
 import json
+import math
 import os
 import shutil
 import signal
@@ -60,6 +61,58 @@ PLANNER_ENV = {
     "SZMUK_RH_N": "40", "SZMUK_MAX_ITER": "120",
     "SZMUK_THH": "0.16", "SZMUK_W_LAND_GS": "20000",
 }
+
+
+# Staging geometry. STAGE_R matches the |(1.4, 1.4)| engagement range the
+# campaign has always used; STAGE_ALPHA is the bearing of the drone from the
+# target, measured from the target's velocity direction, and is chosen from
+# tools_motion_seed_screen's `alpha` sweep.
+STAGE_R = 1.9799
+STAGE_ALPHA = float(os.environ.get("CAMPAIGN_STAGE_ALPHA", "0.0"))
+BEARING_TOL = float(os.environ.get("CAMPAIGN_BEARING_TOL", "0.35"))   # rad
+BEARING_WAIT_S = float(os.environ.get("CAMPAIGN_BEARING_WAIT", "25")) # s
+
+
+def read_target():
+    """(x, y, vx, vy) of /target/odom, or zeros if it cannot be read."""
+    out = sh(f"{SETUP} && timeout 6 rostopic echo -n1 /target/odom 2>/dev/null | "
+             "python3 -c \"import sys,re;t=sys.stdin.read();"
+             "p=re.search(r'position:.*?x: ([-0-9.e]+).*?y: ([-0-9.e]+)',t,re.S);"
+             "v=re.search(r'twist:.*?linear:.*?x: ([-0-9.e]+).*?y: ([-0-9.e]+)',t,re.S);"
+             "print(p.group(1) if p else 0, p.group(2) if p else 0,"
+             " v.group(1) if v else 0, v.group(2) if v else 0)\"", timeout=20)
+    try:
+        vals = [float(v) for v in out.stdout.split()]
+        return vals if len(vals) == 4 else [0.0, 0.0, 0.0, 0.0]
+    except Exception:
+        return [0.0, 0.0, 0.0, 0.0]
+
+
+def read_drone_xy():
+    out = sh(f"{SETUP} && timeout 6 rostopic echo -n1 /mavros/local_position/pose "
+             "2>/dev/null | python3 -c \"import sys,re;t=sys.stdin.read();"
+             "m=re.search(r'position:.*?x: ([-0-9.e]+).*?y: ([-0-9.e]+)',t,re.S);"
+             "print(m.group(1),m.group(2)) if m else print(0,0)\"", timeout=20)
+    try:
+        return [float(v) for v in out.stdout.split()][:2]
+    except Exception:
+        return [0.0, 0.0]
+
+
+def wrap_pi(a):
+    return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def bearing_now():
+    """Achieved staging bearing: angle from the target's heading to the
+    target->drone direction. This is the quantity the feasibility screen is
+    parameterised on, and it drifts during the settle wait because the target
+    keeps moving while the drone parks."""
+    tx, ty, tvx, tvy = read_target()
+    dx, dy = read_drone_xy()
+    if math.hypot(tvx, tvy) < 1e-6:
+        return None
+    return wrap_pi(math.atan2(dy - ty, dx - tx) - math.atan2(tvy, tvx))
 
 
 def seed_for(motion, level, trial):
@@ -110,6 +163,42 @@ def teardown(procs=None):
     time.sleep(2)
     r = sh(f"pgrep -af '{pat}' | grep -vE 'pgrep|bash -lc'")
     return "CLEAN" if not r.stdout.strip() else "DIRTY:" + r.stdout.strip()[:150]
+
+
+def wait_for(desc, probe, timeout, poll=2.0):
+    """Poll `probe` (a zero-arg predicate) until true. Replaces a fixed sleep.
+
+    The old fixed sleeps (45 + 22 + 10 + 25 = 102 s) dominated the ~170 s per
+    run. They are kept as the TIMEOUT here, so the worst case is unchanged and
+    the typical case is much faster. Returns the seconds waited.
+    """
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            if probe():
+                return time.time() - t0
+        except Exception:
+            pass
+        time.sleep(poll)
+    print(f"  [warn] {desc} not ready after {timeout:.0f}s; continuing", flush=True)
+    return time.time() - t0
+
+
+def topic_alive(topic):
+    r = sh(f"{SETUP} && timeout 4 rostopic echo -n1 {topic} >/dev/null 2>&1 "
+           "&& echo YES", timeout=12)
+    return "YES" in r.stdout
+
+
+def fcu_connected():
+    r = sh(f"{SETUP} && timeout 4 rostopic echo -n1 /mavros/state 2>/dev/null "
+           "| grep -m1 '^connected:'", timeout=12)
+    return "True" in r.stdout
+
+
+def node_alive(name):
+    r = sh(f"{SETUP} && timeout 5 rosnode list 2>/dev/null | grep -c {name}", timeout=14)
+    return r.stdout.strip() not in ("", "0")
 
 
 def wait_settle(timeout=90):
@@ -181,13 +270,19 @@ def run_cell(motion, level, trial, outdir, args):
 
     teardown()
     procs = []
+    # Bound before the try: a NO_SETTLE run or an exception skips the gate
+    # entirely, and meta below reads both unconditionally.
+    beta, beta_wait = None, 0.0
     try:
         procs.append(spawn(f"cd {PX4} && HEADLESS=1 make px4_sitl gz_x500 "
                            "2>&1 | grep --line-buffered -vE '^pxh>|\\[2K'", logs["px4"]))
-        time.sleep(45)
+        # PX4 is up once it is accepting the offboard UDP link; mavros
+        # connecting is the real gate, so just wait for the log banner.
+        wait_for("px4", lambda: "Ready for takeoff" in open(logs["px4"]).read()
+                 or "INFO  [commander]" in open(logs["px4"]).read(), 60)
         procs.append(spawn(f"{SETUP} && roslaunch mavros px4.launch "
                            'fcu_url:="udp://:14540@127.0.0.1:14557"', logs["mavros"]))
-        time.sleep(22)
+        wait_for("mavros<->fcu", fcu_connected, 45)
 
         tparams = dict(MOTIONS[motion]); tparams.update(UNCERT[level])
         tparams["target_motion_seed"] = seed
@@ -198,28 +293,37 @@ def run_cell(motion, level, trial, outdir, args):
             f"target_trajectory:={motion} "
             "drone_odom_topic:=/mavros/local_position/odom "
             f"drone_pose_topic:=/mavros/local_position/pose {targs}", logs["target"]))
-        time.sleep(10)
+        wait_for("/target/odom", lambda: topic_alive("/target/odom"), 25)
 
         env = " ".join(f"{k}={v}" for k, v in PLANNER_ENV.items())
         procs.append(spawn(
             f"{SETUP} && export {env} && roslaunch comando_planner planner_launch.launch "
             "platform:=mavros drone_name:=px4_drone terminal_freeze_enter_vel:=0.30 "
             f"stc_z_stage:=1.55 stc_los_alt_trig:=1.2 log_dir:={cell}", logs["planner"]))
-        time.sleep(25)
+        wait_for("planner", lambda: node_alive("comando_planner"), 45)
 
-        # Stage next to wherever the target actually is, instead of a fixed
-        # world point. With a fixed (2,2) hover the engagement range varied by
-        # motion (up to 4.8 m for the shuttle vs ~2.5 m for the circle), which
-        # both confounds the comparison and can leave the drone unable to close.
-        tp = sh(f"{SETUP} && timeout 6 rostopic echo -n1 /target/odom 2>/dev/null | "
-                "python3 -c \"import sys,re;t=sys.stdin.read();"
-                "m=re.search(r'position:.*?x: ([-0-9.e]+).*?y: ([-0-9.e]+)',t,re.S);"
-                "print(m.group(1),m.group(2)) if m else print(0,0)\"", timeout=20)
-        try:
-            tx, ty = [float(v) for v in tp.stdout.split()]
-        except Exception:
-            tx, ty = 0.0, 0.0
-        hx, hy = tx + 1.4, ty + 1.4      # settled lateral offset, as the docs require
+        # Stage at a fixed bearing FROM THE TARGET'S OWN HEADING, not at a
+        # fixed world offset. The old `target + (1.4, 1.4)` meant that once
+        # target_motion_seed randomised the heading, the approach bearing
+        # became an uncontrolled variable -- and tools_motion_seed_screen
+        # showed ~25-30% of bearings are outright infeasible (the cold solve
+        # is rejected and the vehicle never leaves the staging hover).
+        # Engagement geometry is not what MC1 is asking about, so it is held
+        # fixed and only the motion varies.
+        # A stop-and-go target may be in its DWELL right now, with |v| = 0 and
+        # therefore no heading to stage relative to. Wait for it to be moving
+        # rather than defaulting to an arbitrary world bearing -- that default
+        # was worth 5/20 failures on stop_and_go in the offline screen.
+        tx = ty = tvx = tvy = 0.0
+        t_psi = time.time()
+        while time.time() - t_psi < 30.0:
+            tx, ty, tvx, tvy = read_target()
+            if math.hypot(tvx, tvy) > 0.05:
+                break
+            time.sleep(1.0)
+        psi = math.atan2(tvy, tvx) if math.hypot(tvx, tvy) > 1e-6 else 0.0
+        hx = tx + STAGE_R * math.cos(psi + STAGE_ALPHA)
+        hy = ty + STAGE_R * math.sin(psi + STAGE_ALPHA)
         # Set the hover profile directly rather than via apply_profile.sh:
         # the script loads the yaml (which pins hover_target to a fixed 2,2) and
         # bumps command_seq, so overriding afterwards needs a second trigger --
@@ -238,6 +342,17 @@ def run_cell(motion, level, trial, outdir, args):
         if not settled:
             result = "NO_SETTLE"
         else:
+            # The target keeps moving during the ~25 s settle, so the bearing
+            # we staged at is not the bearing at activation. Wait (briefly)
+            # for it to come back into the screened band rather than firing
+            # blind; record what we actually got either way.
+            t_gate = time.time()
+            while time.time() - t_gate < BEARING_WAIT_S:
+                beta = bearing_now()
+                if beta is None or abs(wrap_pi(beta - STAGE_ALPHA)) <= BEARING_TOL:
+                    break
+                time.sleep(1.0)
+            beta_wait = time.time() - t_gate
             sh(f"{SETUP} && rosrun comando_planner apply_profile.sh /comando_planner "
                f"$(rospack find comando_planner)/config/profile_stc_landing_noaug_sitl.yaml",
                timeout=60)
@@ -268,6 +383,15 @@ def run_cell(motion, level, trial, outdir, args):
     meta = dict(motion=motion, uncertainty=level, trial=trial, seed=seed,
                 stage_xy=[round(hx,3), round(hy,3)] if "hx" in dir() else None,
                 result=result, settle_z=z, settle_vz=vz, teardown=clean,
+                # Geometry actually achieved at activation. stage_alpha is what
+                # we aimed for; stage_beta is what the target's motion left us
+                # with after the settle wait. Divergence between them is the
+                # thing to check first if a cell fails.
+                stage_alpha=round(STAGE_ALPHA, 4),
+                stage_beta=(round(beta, 4) if beta is not None else ""),
+                stage_beta_err=(round(abs(wrap_pi(beta - STAGE_ALPHA)), 4)
+                                if beta is not None else ""),
+                stage_beta_wait_s=round(beta_wait, 1),
                 wall_s=round(time.time() - t0, 1),
                 sigma=UNCERT[level], motion_params=MOTIONS[motion])
     json.dump(meta, open(os.path.join(cell, "cell.json"), "w"), indent=2)
