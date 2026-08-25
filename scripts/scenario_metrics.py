@@ -83,11 +83,21 @@ def ensure_executed_csv(cell):
     if not bags:
         return
     logs = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
+    # ABSOLUTE paths: the command cd's into logs/ first, so a relative cell path
+    # (which is what you get from `scenario_metrics.py logs/<campaign>`)
+    # resolved to logs/logs/<campaign>/... and the conversion silently did
+    # nothing -- leaving every touchdown and STC-violation column blank.
+    acell = os.path.abspath(cell)
     cmd = ("source /opt/ros/noetic/setup.bash && "
            "source /home/lab/mavros_ws/devel/setup.bash && "
            f"cd {os.path.abspath(logs)} && timeout 900 python3 bag_to_stc_csv.py "
-           f"{os.path.join(cell, bags[0])} --out {cell}")
-    subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True)
+           f"{os.path.join(acell, bags[0])} --out {acell}")
+    r = subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True)
+    if not os.path.exists(ex):
+        # Do not swallow it: a failed conversion is indistinguishable from a
+        # crashed run once the columns are blank.
+        print(f"  [warn] bag->csv failed for {os.path.basename(cell)}: "
+              f"{(r.stderr or r.stdout).strip().splitlines()[-1:] or ['no output']}")
 
 
 def flight_stats(cell):
@@ -165,7 +175,16 @@ def main():
         m = json.load(open(meta_f))
         r = dict(motion=m["motion"], uncertainty=m["uncertainty"], trial=m["trial"],
                  seed=m["seed"], result=m["result"], wall_s=m["wall_s"],
-                 landed=1 if m["result"] == "LANDED" else 0)
+                 landed=1 if m["result"] == "LANDED" else 0,
+                 # Engagement geometry actually achieved. The offline screen is
+                 # parameterised on this bearing, so if a cell fails it is the
+                 # first thing to check -- a large stage_beta_err means the run
+                 # flew a geometry the screen never validated, which is a
+                 # harness problem, not a planner result.
+                 stage_alpha=m.get("stage_alpha", ""),
+                 stage_beta=m.get("stage_beta", ""),
+                 stage_beta_err=m.get("stage_beta_err", ""),
+                 stage_beta_wait_s=m.get("stage_beta_wait_s", ""))
         ensure_executed_csv(cell)
         r.update(solver_stats(cell))
         r.update(flight_stats(cell))
@@ -180,7 +199,7 @@ def main():
         w.writeheader()
         w.writerows(rows)
 
-    num = ["td_lateral", "max_stc_viol", "viol_glideslope", "track_err_med",
+    num = ["stage_beta_err", "td_lateral", "max_stc_viol", "viol_glideslope", "track_err_med",
            "track_err_max", "solve_ms_med", "solve_ms_p90", "deadline_miss_rate",
            "n_accept", "n_reject"]
     summ = []
