@@ -105,7 +105,8 @@ def flight_stats(cell):
     constraints.csv and gated on the logged CTCS activation flags."""
     ex = os.path.join(cell, "moving_executed.csv")
     cn = os.path.join(cell, "constraints.csv")
-    out = dict(td_lateral="", td_z="", viol_glideslope="", viol_speed="",
+    out = dict(beta_at_activation="", beta_abs="",
+               td_lateral="", td_z="", viol_glideslope="", viol_speed="",
                viol_tilt="", viol_omega="", max_stc_viol="")
     if not (os.path.exists(ex) and os.path.exists(cn)):
         return out
@@ -152,6 +153,19 @@ def flight_stats(cell):
         sp = max(sp, pp(v - C["v_land_stc_max"]))
         ti = max(ti, pp(tilt - C["tilt_land_stc_deg"]))
         om = max(om, pp(omn - C["omega_land_stc_max"]))
+    # Achieved staging bearing AT ACTIVATION, computed here rather than in the
+    # runner. The runner can only sample it before the trigger (stale by the
+    # trigger latency) or after (by which point the drone is already descending
+    # and the target->drone bearing has moved for reasons that have nothing to
+    # do with the target). From the bag it is exact: take the first sample of
+    # the descent window, where rx/ry are already target-relative.
+    r0 = rows[0]
+    tvx, tvy = f(r0, "tvx"), f(r0, "tvy")
+    if math.hypot(tvx, tvy) > 1e-6:
+        b = math.atan2(f(r0, "ry"), f(r0, "rx")) - math.atan2(tvy, tvx)
+        b = (b + math.pi) % (2 * math.pi) - math.pi
+        out["beta_at_activation"] = round(b, 4)
+        out["beta_abs"] = round(abs(b), 4)
     td = rows[-1]
     out.update(td_lateral=round(math.hypot(f(td, "rx"), f(td, "ry")), 4),
                td_z=round(f(td, "rz"), 4),
@@ -199,7 +213,7 @@ def main():
         w.writeheader()
         w.writerows(rows)
 
-    num = ["stage_beta_err", "td_lateral", "max_stc_viol", "viol_glideslope", "track_err_med",
+    num = ["beta_abs", "stage_beta_err", "td_lateral", "max_stc_viol", "viol_glideslope", "track_err_med",
            "track_err_max", "solve_ms_med", "solve_ms_p90", "deadline_miss_rate",
            "n_accept", "n_reject"]
     summ = []

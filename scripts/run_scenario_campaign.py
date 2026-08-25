@@ -70,7 +70,10 @@ PLANNER_ENV = {
 STAGE_R = 1.9799
 STAGE_ALPHA = float(os.environ.get("CAMPAIGN_STAGE_ALPHA", "0.0"))
 BEARING_TOL = float(os.environ.get("CAMPAIGN_BEARING_TOL", "0.35"))   # rad
-BEARING_WAIT_S = float(os.environ.get("CAMPAIGN_BEARING_WAIT", "25")) # s
+BEARING_WAIT_S = float(os.environ.get("CAMPAIGN_BEARING_WAIT", "30")) # s
+# Seconds between await_bearing returning and the landing OCP actually
+# activating (apply_profile.sh round trip + the planner's 10 Hz param poll).
+TRIGGER_LEAD = float(os.environ.get("CAMPAIGN_TRIGGER_LEAD", "2.5"))  # s
 
 
 def read_target():
@@ -103,16 +106,56 @@ def wrap_pi(a):
     return (a + math.pi) % (2.0 * math.pi) - math.pi
 
 
-def bearing_now():
-    """Achieved staging bearing: angle from the target's heading to the
-    target->drone direction. This is the quantity the feasibility screen is
-    parameterised on, and it drifts during the settle wait because the target
-    keeps moving while the drone parks."""
-    tx, ty, tvx, tvy = read_target()
-    dx, dy = read_drone_xy()
-    if math.hypot(tvx, tvy) < 1e-6:
-        return None
-    return wrap_pi(math.atan2(dy - ty, dx - tx) - math.atan2(tvy, tvx))
+def bearing_probe():
+    """(beta, rate) in rad and rad/s, or (None, None). One rospy process reads
+    both topics in ~0.2 s; the old two-rostopic-echo poll took 3-4 s."""
+    r = sh(f"{SETUP} && timeout 20 python3 {PKG}/scripts/_bearing_probe.py", timeout=30)
+    try:
+        b, d = r.stdout.strip().split()[:2]
+        b, d = float(b), float(d)
+        if math.isnan(b):
+            return None, None
+        return b, (None if math.isnan(d) else d)
+    except Exception:
+        return None, None
+
+
+def await_bearing(alpha, tol, budget):
+    """Time the landing trigger so the staging bearing is `alpha` AT ACTIVATION.
+
+    Two latencies defeated the earlier attempts and both are compensated here:
+
+      * the probe itself takes ~1.2 s (it samples twice to get the rate), so a
+        verify-after-sleep loop measured beta AFTER it had already drifted past
+        the window -- at omega=0.55 rad/s, 1.2 s is 0.66 rad, nearly twice the
+        +-0.35 rad tolerance. The loop could never converge and burned its
+        budget overshooting. There is now exactly ONE probe and no verify
+        before the trigger.
+      * apply_profile.sh takes ~TRIGGER_LEAD seconds to actually activate the
+        landing OCP, during which the target keeps moving. We therefore aim at
+        the bearing the target will have THEN, not now.
+
+    Returns (predicted beta at activation, seconds waited).
+    """
+    t0 = time.time()
+    beta, rate = bearing_probe()
+    if beta is None:
+        return None, time.time() - t0
+    if rate is None or abs(rate) < 1e-3:
+        return beta, time.time() - t0        # not rotating; waiting cannot help
+    # Where beta will be when the trigger lands if we fire right now.
+    beta_at_trig = wrap_pi(beta + rate * TRIGGER_LEAD)
+    err = wrap_pi(alpha - beta_at_trig)
+    if abs(err) <= tol:
+        return beta_at_trig, time.time() - t0
+    dt = err / rate
+    period = 2.0 * math.pi / abs(rate)
+    while dt < 0.0:
+        dt += period
+    if dt > budget - (time.time() - t0):
+        return beta_at_trig, time.time() - t0
+    time.sleep(dt)
+    return alpha, time.time() - t0
 
 
 def seed_for(motion, level, trial):
@@ -199,6 +242,25 @@ def fcu_connected():
 def node_alive(name):
     r = sh(f"{SETUP} && timeout 5 rosnode list 2>/dev/null | grep -c {name}", timeout=14)
     return r.stdout.strip() not in ("", "0")
+
+
+def fcu_armed_offboard():
+    """Planner readiness is ARMED + OFFBOARD, not merely 'the node exists'.
+
+    rosnode list shows comando_planner within a second or two of roslaunch,
+    but the planner then runs a 2 s setpoint warmup and retries OFFBOARD+ARM
+    against /mavros/state. Gating on node existence fired the hover profile
+    DURING that sequence: the planner logged "New command while disarmed ???
+    re-engaging OFFBOARD+ARM", accepted command_seq=1 at the instant of
+    arming, and flew the open-loop hover from the ground, settling at
+    z = 1.59 instead of inside the 1.70-1.90 gate -> NO_SETTLE on run 1.
+    """
+    # No -m1: it stops at the FIRST match, so only one of the two lines would
+    # ever be seen and the mode check would silently never run.
+    r = sh(f"{SETUP} && timeout 4 rostopic echo -n1 /mavros/state 2>/dev/null "
+           "| grep -E '^armed:|^mode:'", timeout=12)
+    out = r.stdout
+    return ("armed: True" in out) and ("OFFBOARD" in out)
 
 
 def wait_settle(timeout=90):
@@ -300,7 +362,11 @@ def run_cell(motion, level, trial, outdir, args):
             f"{SETUP} && export {env} && roslaunch comando_planner planner_launch.launch "
             "platform:=mavros drone_name:=px4_drone terminal_freeze_enter_vel:=0.30 "
             f"stc_z_stage:=1.55 stc_los_alt_trig:=1.2 log_dir:={cell}", logs["planner"]))
-        wait_for("planner", lambda: node_alive("comando_planner"), 45)
+        wait_for("planner node", lambda: node_alive("comando_planner"), 45)
+        # ...then wait for it to actually be flying-ready, and give the
+        # position hold a moment to stabilise before overriding the target.
+        wait_for("armed+offboard", fcu_armed_offboard, 60)
+        time.sleep(6)
 
         # Stage at a fixed bearing FROM THE TARGET'S OWN HEADING, not at a
         # fixed world offset. The old `target + (1.4, 1.4)` meant that once
@@ -346,13 +412,8 @@ def run_cell(motion, level, trial, outdir, args):
             # we staged at is not the bearing at activation. Wait (briefly)
             # for it to come back into the screened band rather than firing
             # blind; record what we actually got either way.
-            t_gate = time.time()
-            while time.time() - t_gate < BEARING_WAIT_S:
-                beta = bearing_now()
-                if beta is None or abs(wrap_pi(beta - STAGE_ALPHA)) <= BEARING_TOL:
-                    break
-                time.sleep(1.0)
-            beta_wait = time.time() - t_gate
+            beta, beta_wait = await_bearing(STAGE_ALPHA, BEARING_TOL,
+                                            BEARING_WAIT_S)
             sh(f"{SETUP} && rosrun comando_planner apply_profile.sh /comando_planner "
                f"$(rospack find comando_planner)/config/profile_stc_landing_noaug_sitl.yaml",
                timeout=60)
