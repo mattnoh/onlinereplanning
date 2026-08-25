@@ -25,6 +25,7 @@
 #include "target/stop_and_go_target.hpp"
 #include "target/segmented_accel_target.hpp"
 #include "target/target_model_config.hpp"
+#include "target/campaign_shape.hpp"
 
 #include <Eigen/Dense>
 #include <algorithm>
@@ -69,56 +70,9 @@ int seed_for(const std::string& motion, int level_idx, int trial) {
     return static_cast<int>(crc32_of(motion) % 1000) * 10000 + level_idx * 100 + trial + 1;
 }
 
-struct Draw { double phase, heading, t_off; int k0; };
-
-/// Mirrors the draw order in target_publisher.cpp. Order matters.
-Draw drawShape(unsigned seed, double speed, double span) {
-    std::mt19937 g(seed);
-    std::uniform_real_distribution<double> u2pi(0.0, 2.0 * M_PI);
-    std::uniform_int_distribution<int> u8(0, 7);
-    Draw d;
-    d.phase = u2pi(g);
-    d.heading = u2pi(g);
-    d.k0 = u8(g);
-    const double T = (speed > 1e-9 && span > 0.0) ? 4.0 * span / speed : 0.0;
-    std::uniform_real_distribution<double> us(0.0, std::max(T, 1e-9));
-    d.t_off = us(g);
-    return d;
-}
-
-target_config::SyntheticTarget buildTarget(const std::string& motion, const Draw& d,
-                                           unsigned seed) {
-    const Eigen::Vector3d ctr(0.0, 0.0, 0.2);
-    if (motion == "circle") {
-        target_models::CircularTarget m;
-        m.center = ctr; m.R = 1.0; m.omega = 0.4; m.phi0 = d.phase;
-        return target_config::SyntheticTarget::from(m);
-    }
-    if (motion == "figure8") {
-        target_models::Figure8Target m;
-        m.center = ctr; m.omega = 0.3; m.phi0 = d.phase;
-        return target_config::SyntheticTarget::from(m);
-    }
-    if (motion == "straight") {
-        target_models::StraightTarget m;
-        m.center = ctr; m.speed = 0.4; m.span = 2.0;
-        m.heading = d.heading; m.t_offset = d.t_off;
-        return target_config::SyntheticTarget::from(m);
-    }
-    if (motion == "stop_and_go") {
-        target_models::StopAndGoTarget m;
-        m.center = ctr; m.speed = 0.4; m.span = 2.0;
-        m.heading = d.heading; m.t_offset = d.t_off;
-        return target_config::SyntheticTarget::from(m);
-    }
-    if (motion == "piecewise_accel") {
-        return target_config::SyntheticTarget::from(
-            target_models::makePiecewiseAccelTarget(ctr, 0.15, 2.0, 0.5, 0.4,
-                                                    d.heading, d.k0));
-    }
-    return target_config::SyntheticTarget::from(
-        target_models::makeRandomAccelTarget(ctr, 0.20, 2.0, 0.5, 0.4, seed, d.heading));
-}
+using target_campaign::Shape;
+using target_campaign::drawShape;
+using target_campaign::buildTarget;
 
 TargetSnapshot snapshotOf(const target_config::SyntheticTarget& m, double t) {
     TargetSnapshot s;
@@ -276,7 +230,7 @@ int main(int argc, char** argv) {
                 int ok = 0;
                 for (int tr = 0; tr < trials; ++tr) {
                     const unsigned sd = static_cast<unsigned>(seed_for(mo, 0, tr));
-                    const auto tg = buildTarget(mo, drawShape(sd, 0.4, 2.0), sd);
+                    const auto tg = buildTarget(mo, drawShape(sd), sd);
                     if (runDescent(tg, d0, g0).landed) ++ok;
                 }
                 tot += ok;
@@ -290,35 +244,62 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (argc > 1 && std::string(argv[1]) == "sweep") {
-        const std::string mo = argv[2];
-        const std::string what = argv[3];
+    // Parameter sweep: map feasibility over ONE physical shape parameter,
+    // holding the rest at their nominal. This is what picks the sampling
+    // ranges above -- run it per (motion, param) before choosing a range.
+    //   tools_motion_seed_screen psweep <motion> <param> <lo> <hi> <n> [alpha]
+    if (argc > 1 && std::string(argv[1]) == "psweep") {
+        const std::string mo = argv[2], what = argv[3];
         const double lo = std::atof(argv[4]), hi = std::atof(argv[5]);
         const int n = std::atoi(argv[6]);
+        g_stage_alpha = (argc > 7) ? std::atof(argv[7]) : 0.0;
         const OCPDescriptor& d0 = OCPRegistry::getDescriptor("stc_landing_noaug");
         const planner_core::PlannerCoreConfig g0;
-        std::cout << "\nsweep " << mo << " " << what << " in [" << lo << ", " << hi
-                  << "], " << n << " points\n\n"
-                  << std::right << std::setw(9) << what << std::setw(10) << "|tv0|"
-                  << std::setw(12) << "worst con" << std::setw(9) << "final z"
-                  << std::setw(10) << "final rxy" << "  verdict\n"
-                  << std::string(62, '-') << "\n";
+        std::fprintf(stderr, "\npsweep %s %s in [%g, %g], %d points, alpha=%.2f\n\n",
+                     mo.c_str(), what.c_str(), lo, hi, n, g_stage_alpha);
+        std::fprintf(stderr, "%10s%10s%10s%12s%9s%10s  %s\n",
+                     what.c_str(), "|v0|", "|a0|", "worst con", "final z",
+                     "final rxy", "verdict");
+        for (int i = 0; i < 72; ++i) std::fputc('-', stderr);
+        std::fputc('\n', stderr);
         for (int i = 0; i < n; ++i) {
             const double v = lo + (hi - lo) * i / std::max(1, n - 1);
-            Draw d{}; d.phase = 0.0; d.heading = 0.0; d.k0 = 0; d.t_off = 0.0;
-            if (what == "toff") d.t_off = v; else d.heading = v;
-            const auto tg = buildTarget(mo, d, 42u);
+            Shape d;                       // nominal everything else
+            if      (what == "radius") d.R = v;
+            else if (what == "omega")  { d.omega = v; d.omega_f8 = v; }
+            else if (what == "amp")    { d.amp_x = v; d.amp_y = v; }
+            else if (what == "speed")  { d.speed = v; d.speed_sag = v; }
+            else if (what == "span")   d.span = v;
+            else if (what == "cruise") d.cruise = v;
+            else if (what == "ramp")   d.ramp = v;
+            else if (what == "dwell")  d.dwell = v;
+            else if (what == "accel")  d.accel_mag = v;
+            else if (what == "hold")   d.hold = v;
+            else if (what == "sigma")  d.sigma = v;
+            else { std::fprintf(stderr, "unknown param %s\n", what.c_str()); return 2; }
+            const auto tg = buildTarget(mo, d, 4242u);
             const Result r = runDescent(tg, d0, g0);
-            std::cout << std::right << std::fixed << std::setprecision(2) << std::setw(9) << v
-                      << std::setw(10) << std::setprecision(3) << tg.vel(0.0).head(2).norm()
-                      << std::setw(12) << std::scientific << std::setprecision(2) << r.worst
-                      << std::setw(9) << std::fixed << std::setprecision(3) << r.z
-                      << std::setw(10) << r.rxy << "  "
-                      << (!r.cold_ok ? "COLD-FAIL" : (r.landed ? "ok" : "NO-LAND")) << "\n";
+            std::fprintf(stderr, "%10.3f%10.3f%10.3f%12.2e%9.3f%10.3f  %s\n",
+                         v, tg.vel(0.0).head(2).norm(), tg.accel(0.0).head(2).norm(),
+                         r.worst, r.z, r.rxy,
+                         !r.cold_ok ? "COLD-FAIL" : (r.landed ? "ok" : "NO-LAND"));
+            std::fflush(stderr);
         }
         return 0;
     }
 
+    // Optional 6th arg: comma-separated motion filter, so the screen can be
+    // fanned out one process per motion instead of run serially.
+    std::vector<std::string> motions = kMotions;
+    if (argc > 5 && std::string(argv[5]) != "all") {
+        motions.clear();
+        std::string f(argv[5]), tok;
+        size_t pos = 0;
+        while ((pos = f.find(',')) != std::string::npos) {
+            motions.push_back(f.substr(0, pos)); f.erase(0, pos + 1);
+        }
+        if (!f.empty()) motions.push_back(f);
+    }
     const int trials = (argc > 1) ? std::atoi(argv[1]) : 20;
     const int level_idx = (argc > 2) ? std::atoi(argv[2]) : 0;   // 0 = "zero"
     const bool verbose  = (argc > 3) && std::atoi(argv[3]) != 0;
@@ -343,14 +324,14 @@ int main(int argc, char** argv) {
               << std::string(100, '-') << "\n";
 
     int total = 0, total_ok = 0;
-    for (const auto& mo : kMotions) {
+    for (const auto& mo : motions) {
         int ok = 0, cold_fail = 0;
         double worst = 0.0, rxy_max = 0.0;
         std::vector<double> meds;
         std::vector<int> bad;
         for (int tr = 0; tr < trials; ++tr) {
             const unsigned seed = static_cast<unsigned>(seed_for(mo, level_idx, tr));
-            const Draw d = drawShape(seed, 0.4, 2.0);
+            const Shape d = drawShape(seed);
             const auto target = buildTarget(mo, d, seed);
             const Result r = runDescent(target, desc, gate);
             if (verbose) {
