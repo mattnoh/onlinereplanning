@@ -75,3 +75,5 @@ Crazyflie direct MPC validation and both directory cutovers remain pending.
 ### Crazyflie MPC first attempt — failed
 
 The calibrated circle flight (`crazyflie_mpc/circle`) accepted policies 0–3, then its measured state diverged and subsequent policies were rejected. The retained policy reached its 2 s expiry and the wrapper switched to hold. Final height was zero after the vehicle fell; this is a failed flight, not a landing. Rate-loop calibration and the physical-model mismatch must be resolved before any Crazyflie MPC acceptance or directory cutover. Disabling rate integral gains worsened the standalone rate step; a reduced-bandwidth calibration is under investigation. All failed attempts remain recorded.
+
+The lower-bandwidth rate-gain experiment failed: applying 0.1× roll/pitch gains before takeoff prevented staging; applying them after normal staging destabilized the neutral body-rate command and the vehicle fell before the requested step. These are calibration failures, and the settings are not adopted. The runner now records exceptions as harness failures and records requested rate tuning in each completed calibration cell.

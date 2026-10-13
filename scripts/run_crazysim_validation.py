@@ -1,5 +1,5 @@
 import argparse,os,pathlib,subprocess,signal,time,json,csv,math
-p=argparse.ArgumentParser();p.add_argument('--planner',default='/home/lab/projects/cf/online/ros_ws/install/comando_planner/lib/comando_planner/comando_planner');p.add_argument('--target',default='/home/lab/projects/cf/online/ros_ws/install/comando_planner/lib/comando_planner/target_publisher');p.add_argument('--motion',default='circle');p.add_argument('--out',required=True);p.add_argument('--direct',action='store_true');p.add_argument('--calibrate',action='store_true');p.add_argument('--rate',type=float,default=0);p.add_argument('--thrust',type=float,default=9.81);p.add_argument('--axis',choices=['roll','pitch','yaw'],default='yaw');p.add_argument('--calibrated',action='store_true');p.add_argument('--rate-ki',type=float,default=None);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--planner',default='/home/lab/projects/cf/online/ros_ws/install/comando_planner/lib/comando_planner/comando_planner');p.add_argument('--target',default='/home/lab/projects/cf/online/ros_ws/install/comando_planner/lib/comando_planner/target_publisher');p.add_argument('--motion',default='circle');p.add_argument('--out',required=True);p.add_argument('--direct',action='store_true');p.add_argument('--calibrate',action='store_true');p.add_argument('--rate',type=float,default=0);p.add_argument('--thrust',type=float,default=9.81);p.add_argument('--axis',choices=['roll','pitch','yaw'],default='yaw');p.add_argument('--calibrated',action='store_true');p.add_argument('--rate-ki',type=float,default=None);p.add_argument('--rate-scale',type=float,default=None);a=p.parse_args()
 out=pathlib.Path(a.out);out.mkdir(parents=True,exist_ok=True);procs=[]
 setup='export ROS_DOMAIN_ID=77; source /opt/ros/humble/setup.bash; source /home/lab/projects/cf/online/ros_ws/install/setup.bash; '
 fw='/home/lab/projects/cf/online/CrazySim/crazyflie-firmware'
@@ -42,6 +42,21 @@ try:
  spawn('ros2 launch crazyflie launch.py backend:=cflib gui:=False mocap:=False','server')
  spawn('python3 '+str(out/'record.py'),'recorder')
  ready('pose',lambda:pose_z() is not None,60)
+ if not a.calibrate:
+  mode='gazebo_figure8' if a.motion=='figure8' else 'gazebo_circle'
+  args=''
+  if a.motion=='straight':
+   with (out/'target.csv').open('w') as f:
+    w=csv.writer(f);w.writerow(['t','x','y','z','vx','vy','vz','ax','ay','az']);w.writerows([[i*.01,.4*i*.01,0,.2,.4,0,0,0,0,0] for i in range(20001)])
+   mode='trace_replay';args=f' -p trace_csv_path:={out}/target.csv'
+  target_command=f'{a.target} --ros-args -p target_mode:={mode} -p planning_frame:=world'+args
+  if a.motion!='straight':spawn(target_command,'target')
+  env='SZMUK_Z_STAGE=1.3 SZMUK_LOS_ALT_TRIG=1.2 MPC_RATE_LIMIT=.35 MPC_MAX_ITER=120 MPC_MAX_POLICY_AGE=2.0 MPC_HOVER_THRUST=.5460495715192737 MPC_RATE_TAU=.08' if a.direct else 'SZMUK_Z_STAGE=1.4 SZMUK_LOS_ALT_TRIG=1.2 SZMUK_RH_N=40 SZMUK_THH=.16'
+  spawn(f'{env} {a.planner} --ros-args -p drone_name:=cf_1 -p platform:=crazyflie -p log_dir:={out} -p enable_logging:=true','planner')
+  ready('planner',lambda:'comando_planner' in run('ros2 node list').stdout)
+ for service,type_,body,wait in [('/cf_1/arm','Arm','{arm: true}',1),('/cf_1/takeoff','Takeoff','{group_mask: 0, height: 1.0, duration: {sec: 3, nanosec: 0}}',5),('/cf_1/go_to','GoTo','{group_mask: 0, relative: false, goal: {x: 2.0, y: 2.0, z: 1.8}, yaw: 0.0, duration: {sec: 6, nanosec: 0}}',9)]:
+  res=run(f"ros2 service call {service} crazyflie_interfaces/srv/{type_} '{body}'",30);print(service,res.stdout[-400:],res.stderr[-200:],flush=True);time.sleep(wait)
+ ready('staging',lambda:pose_z() is not None and abs(pose_z()-1.8)<.15,15)
  if a.direct or a.calibrated:
   calibration_params="""import rclpy
 from rclpy.node import Node
@@ -59,25 +74,16 @@ if RATE_KI is not None:
   request=SetParameters.Request();p=Parameter();p.name='all.params.pid_rate.'+axis+'_ki';p.value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE,double_value=RATE_KI);request.parameters=[p]
   f=c.call_async(request);rclpy.spin_until_future_complete(n,f,timeout_sec=10);result=f.result();print(result,flush=True)
   if result is None or not all(r.successful for r in result.results):raise RuntimeError('rate tuning rejected')
+if RATE_SCALE is not None:
+ for axis in ['roll','pitch']:
+  for gain,default in [('kp',250.0),('ki',500.0),('kd',2.5)]:
+   request=SetParameters.Request();p=Parameter();p.name='all.params.pid_rate.'+axis+'_'+gain;p.value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE,double_value=default*RATE_SCALE);request.parameters=[p]
+   f=c.call_async(request);rclpy.spin_until_future_complete(n,f,timeout_sec=10);result=f.result();print(result,flush=True)
+   if result is None or not all(r.successful for r in result.results):raise RuntimeError('rate scaling rejected')
 """
-  calibration_params=calibration_params.replace('RATE_KI',repr(a.rate_ki))
+  calibration_params=calibration_params.replace('RATE_KI',repr(a.rate_ki)).replace('RATE_SCALE',repr(a.rate_scale))
   (out/'calibration_params.py').write_text(calibration_params);res=run('python3 '+str(out/'calibration_params.py'));print(res.stdout,res.stderr,flush=True)
   if res.returncode:raise RuntimeError('backend calibration parameter failed')
- if not a.calibrate:
-  mode='gazebo_figure8' if a.motion=='figure8' else 'gazebo_circle'
-  args=''
-  if a.motion=='straight':
-   with (out/'target.csv').open('w') as f:
-    w=csv.writer(f);w.writerow(['t','x','y','z','vx','vy','vz','ax','ay','az']);w.writerows([[i*.01,.4*i*.01,0,.2,.4,0,0,0,0,0] for i in range(20001)])
-   mode='trace_replay';args=f' -p trace_csv_path:={out}/target.csv'
-  target_command=f'{a.target} --ros-args -p target_mode:={mode} -p planning_frame:=world'+args
-  if a.motion!='straight':spawn(target_command,'target')
-  env='SZMUK_Z_STAGE=1.3 SZMUK_LOS_ALT_TRIG=1.2 MPC_RATE_LIMIT=.35 MPC_MAX_ITER=120 MPC_MAX_POLICY_AGE=2.0 MPC_HOVER_THRUST=.5460495715192737 MPC_RATE_TAU=.08' if a.direct else 'SZMUK_Z_STAGE=1.4 SZMUK_LOS_ALT_TRIG=1.2 SZMUK_RH_N=40 SZMUK_THH=.16'
-  spawn(f'{env} {a.planner} --ros-args -p drone_name:=cf_1 -p platform:=crazyflie -p log_dir:={out} -p enable_logging:=true','planner')
-  ready('planner',lambda:'comando_planner' in run('ros2 node list').stdout)
- for service,type_,body,wait in [('/cf_1/arm','Arm','{arm: true}',1),('/cf_1/takeoff','Takeoff','{group_mask: 0, height: 1.0, duration: {sec: 3, nanosec: 0}}',5),('/cf_1/go_to','GoTo','{group_mask: 0, relative: false, goal: {x: 2.0, y: 2.0, z: 1.8}, yaw: 0.0, duration: {sec: 6, nanosec: 0}}',9)]:
-  res=run(f"ros2 service call {service} crazyflie_interfaces/srv/{type_} '{body}'",30);print(service,res.stdout[-400:],res.stderr[-200:],flush=True);time.sleep(wait)
- ready('staging',lambda:pose_z() is not None and abs(pose_z()-1.8)<.15,15)
  if not a.calibrate and a.motion=='straight':spawn(target_command,'target');time.sleep(2)
  activation=time.time()
  if a.calibrate:
@@ -85,8 +91,8 @@ if RATE_KI is not None:
 from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped
 rclpy.init();n=Node('calibration');pub=n.create_publisher(TwistStamped,'/cf_1/cmd_bodyrate',10);start=time.monotonic()
-while time.monotonic()-start<2:
- m=TwistStamped();m.header.stamp=n.get_clock().now().to_msg();m.twist.linear.z={float(a.thrust)!r};m.twist.angular.{dict(roll='x',pitch='y',yaw='z')[a.axis]}={float(a.rate)!r};pub.publish(m);rclpy.spin_once(n,timeout_sec=0);time.sleep(.02)
+while time.monotonic()-start<3:
+ m=TwistStamped();m.header.stamp=n.get_clock().now().to_msg();m.twist.linear.z={float(a.thrust)!r};m.twist.angular.{dict(roll='x',pitch='y',yaw='z')[a.axis]}={float(a.rate)!r} if time.monotonic()-start>1 else 0.0;pub.publish(m);rclpy.spin_once(n,timeout_sec=0);time.sleep(.02)
 '''
   (out/'step.py').write_text(script);res=run('python3 '+str(out/'step.py'),10);print(res.stderr,flush=True)
   if res.returncode:raise RuntimeError('calibration publisher failed')
@@ -114,7 +120,10 @@ if result is None or not result.result.successful:raise RuntimeError('profile tr
   if res.returncode:raise RuntimeError('profile activation failed')
   time.sleep(25)
  print('FINAL Z',pose_z(),flush=True)
- (out/'cell.json').write_text(json.dumps(dict(motion=a.motion,direct=a.direct,activation=activation,final_z=pose_z(),calibrate=a.calibrate),indent=2))
+ (out/'cell.json').write_text(json.dumps(dict(motion=a.motion,direct=a.direct,activation=activation,final_z=pose_z(),calibrate=a.calibrate,rate_ki=a.rate_ki,rate_scale=a.rate_scale,axis=a.axis,thrust=a.thrust,rate=a.rate),indent=2))
+except Exception as error:
+ (out/'cell.json').write_text(json.dumps(dict(motion=a.motion,direct=a.direct,calibrate=a.calibrate,result='HARNESS_FAILED',error=str(error),rate_ki=a.rate_ki,rate_scale=a.rate_scale),indent=2))
+ raise
 finally:
  for pr in reversed(procs):
   try:os.killpg(pr.pid,signal.SIGINT)
