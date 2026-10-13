@@ -103,6 +103,8 @@ struct ConstraintsParameters {
 struct MpcParameters {
     static constexpr int horizon = 40;
     static constexpr double dt = 0.1;
+    static constexpr double command_dt = 0.01;
+    static constexpr double tracking_preview = 2*dt;
     double rate_tau = 0.08;
     double rate_limit = 1.0;
     double hover_thrust = 0.7282821834;

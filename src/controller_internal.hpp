@@ -1012,6 +1012,18 @@ private:
 }  // namespace planner_core
 
 namespace planner_core {
+struct TrackingOptimization {
+    Eigen::Vector4d control;
+    double predicted_residual=0, relaxation=0, elapsed_ms=0;
+    int iterations=0;
+};
+// Condensed nonlinear tracking problem. The only physical decisions are the
+// four plant-facing inputs; a reported phase-I relaxation handles states
+// outside the feasible set without confusing recovery with invariance.
+TrackingOptimization constrainedTracking(const OCPDescriptor::Model& model,
+    const Eigen::VectorXd& state, const Eigen::Vector4d& desired,
+    const Eigen::Vector4d& previous, double sample_period);
+
 class DirectMpcController {
     using Clock=std::chrono::steady_clock;
     struct Policy {
@@ -1041,24 +1053,25 @@ class DirectMpcController {
     Eigen::VectorXd relative(const Eigen::VectorXd& x,const TargetSnapshot& t) const {return prepareOcpState(desc_,x.head(13),t);}
 
     // Recompute the local quadratic DDP tracking backward pass at the
-    // actual 50 Hz command interval. The optimizer's 10 Hz IPM gains carry
-    // barrier curvature and previous-control memory; they are not a 50 Hz
+    // actual 100 Hz command interval. The optimizer's 10 Hz IPM gains carry
+    // barrier curvature and previous-control memory; they are not a 100 Hz
     // physical feedback controller.
     static std::vector<Eigen::MatrixXd> commandGains(const OcpSolver::Result& r,
                                                      OCPDescriptor::Model& dyn) {
-        const int count=dyn.horizon*5;
+        const int count=dyn.horizon*10;
+        constexpr double command_dt=comando_parameters::MpcParameters::command_dt;
         Eigen::MatrixXd q=Eigen::MatrixXd::Zero(dyn.nx,dyn.nx);
         q.diagonal().head(3)<<5,5,10;q.diagonal().segment(3,3)<<8,8,8;
         q.diagonal().segment(6,4).setConstant(50);q.diagonal().segment(10,3).setConstant(.5);
         Eigen::Matrix4d cost=Eigen::Matrix4d::Zero();cost.diagonal()<<.3,1.5,1.5,1.5;
         Eigen::MatrixXd p=10*q;std::vector<Eigen::MatrixXd> gains(count);
-        for(int j=count-1;j>=0;--j){const int i=j/5;const double t=(j%5)*.02;
+        for(int j=count-1;j>=0;--j){const int i=j/10;const double t=(j%10)*command_dt;
             auto x=dyn.flow(r.state_trajectory[i],r.control_trajectory[i],t,false).x;
-            auto linear=dyn.flow(x,r.control_trajectory[i],.02,true);
-            Eigen::MatrixXd s=.02*cost+linear.b.transpose()*p*linear.b;
+            auto linear=dyn.flow(x,r.control_trajectory[i],command_dt,true);
+            Eigen::MatrixXd s=command_dt*cost+linear.b.transpose()*p*linear.b;
             s.diagonal().array()+=1e-6;
             gains[j]=-s.ldlt().solve(linear.b.transpose()*p*linear.a);
-            p=.02*q+linear.a.transpose()*p*linear.a+linear.a.transpose()*p*linear.b*gains[j];
+            p=command_dt*q+linear.a.transpose()*p*linear.a+linear.a.transpose()*p*linear.b*gains[j];
             p=(.5*(p+p.transpose())).eval();
         }
         return gains;
@@ -1082,7 +1095,7 @@ class DirectMpcController {
                 Eigen::VectorXd predicted_control=applied, memory=feedback_memory;
                 int previous_node=prior_node;
                 for(double t=0;t<lead-1e-9;) {
-                    const double h=std::min(0.02,lead-t);
+                    const double h=std::min(comando_parameters::MpcParameters::command_dt,lead-t);
                     const double age=std::clamp(seconds(input.now,prior->origin)+t,0.0,dyn.horizon*dyn.dt-1e-6);
                     const int i=static_cast<int>(age/dyn.dt);
                     auto old_dyn=desc_.make_model(prior->acceleration);
@@ -1092,11 +1105,11 @@ class DirectMpcController {
                     x.tail(4)=memory;
                     Eigen::VectorXd error=x-reference;error(13)=0;
                     if(x.segment<4>(6).dot(reference.segment<4>(6))<0)error.segment<4>(6)=-x.segment<4>(6)-reference.segment<4>(6);
-                    Eigen::VectorXd correction=prior->command_gains[std::min(static_cast<int>(age/.02),dyn.horizon*5-1)]*error;
+                    Eigen::VectorXd correction=prior->command_gains[std::min(static_cast<int>(age/comando_parameters::MpcParameters::command_dt),dyn.horizon*10-1)]*error;
                     correction(0)=std::clamp(correction(0),-3.0,3.0);
                     for(int j=1;j<4;++j)correction(j)=std::clamp(correction(j),-0.35,0.35);
-                    auto u=dyn.bounded(prior->result.control_trajectory[i]+correction);
-                    for(int j=0;j<4;++j){const double limit=j==0?20:5;u(j)=std::clamp(u(j),predicted_control(j)-limit*h,predicted_control(j)+limit*h);}
+                    auto tracking=constrainedTracking(dyn,x,prior->result.control_trajectory[i]+correction,predicted_control,h);
+                    const auto& u=tracking.control;
                     x=dyn.flow(x,u,h,false).x;predicted_control=u;t+=h;
                 }
                 x.tail(4)=predicted_control;
@@ -1156,11 +1169,11 @@ class DirectMpcController {
 public:
     ~DirectMpcController(){stop();}
     void stop(){ {std::lock_guard<std::mutex> lock(mutex_);stop_=true;ready_.notify_all();} if(worker_.joinable())worker_.join(); }
-    void configure(const PlannerCoreConfig& c){stop();std::lock_guard<std::mutex> lock(mutex_);config_=c;desc_=OCPRegistry::getDescriptor(c.ocp_type);if(!desc_.make_model)throw std::runtime_error("OCP lacks MPC model");stop_=false;busy_=false;
+    void configure(const PlannerCoreConfig& c){stop();std::lock_guard<std::mutex> lock(mutex_);config_=c;desc_=OCPRegistry::getDescriptor(c.ocp_type);if(!desc_.make_model||!desc_.make_model(Eigen::Vector3d::Zero()).constraints)throw std::runtime_error("OCP lacks constrained MPC model");stop_=false;busy_=false;
         request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0.35;count_=0;last_u_=desc_.make_model(Eigen::Vector3d::Zero()).hover;feedback_memory_=last_u_;memory_policy_=-1;memory_node_=-1;
         worker_=std::thread([this]{run();});}
     void reset(){PlannerCoreConfig c; {std::lock_guard<std::mutex> lock(mutex_);c=config_;} configure(c);}
-    void openControlLog(const std::string& path){controls_.open(path,"time,policy,age,nom_thrust,nom_roll,nom_pitch,nom_yaw,fb_thrust,fb_roll,fb_pitch,fb_yaw,thrust,roll,pitch,yaw,saturation,jump,feedback_limited,slew_limited,pos_error,vel_error\n");}
+    void openControlLog(const std::string& path){controls_.open(path,"time,policy,age,nom_thrust,nom_roll,nom_pitch,nom_yaw,fb_thrust,fb_roll,fb_pitch,fb_yaw,thrust,roll,pitch,yaw,saturation,jump,feedback_limited,slew_limited,pos_error,vel_error,predicted_residual,tracking_relaxation,tracking_ms,constraint_limited\n");}
     PlannerCoreStepResult trySolve(const PlannerCoreInput& input){
         std::lock_guard<std::mutex> lock(mutex_);PlannerCoreStepResult out;
         if(completed_){out=std::move(*completed_);completed_.reset();}
@@ -1185,14 +1198,18 @@ public:
 
         Eigen::VectorXd reference=dyn.flow(r.state_trajectory[i],nominal,age-i*dyn.dt,false).x;
         reference.tail(4)=r.state_trajectory[i].tail(4);
+        if(last_apply_!=Clock::time_point{}&&now<=last_apply_) {
+            out.command.kind=CommandKind::BodyRate;out.command.control=last_u_;
+            out.command.state=reference.head(13);return out;
+        }
         // The previous-control state belongs to the 0.1 s optimization
-        // grid. Updating it every 0.02 s would apply its discrete DDP gain
-        // five times per node and amplify the physical feedback.
+        // grid. Updating it every 0.01 s would apply its discrete DDP gain
+        // ten times per node and amplify the physical feedback.
         if(memory_policy_!=policy_->number||memory_node_!=i){feedback_memory_=last_u_;memory_policy_=policy_->number;memory_node_=i;}
         Eigen::VectorXd live=reference;live.head(13)=relative(measured,target);live.tail(4)=feedback_memory_;
         if(live.segment<4>(6).dot(reference.segment<4>(6))<0)live.segment<4>(6)*=-1;
         Eigen::VectorXd delta=live-reference;delta(13)=0;
-        Eigen::VectorXd feedback=policy_->command_gains[std::min(static_cast<int>(age/.02),dyn.horizon*5-1)]*delta;
+        Eigen::VectorXd feedback=policy_->command_gains[std::min(static_cast<int>(age/comando_parameters::MpcParameters::command_dt),dyn.horizon*10-1)]*delta;
         // Bound the local-policy correction: DDP gains are only valid near
         // the nominal trajectory, particularly after rejected solves.
         if(!feedback.allFinite()){out.stale=true;return out;}
@@ -1201,16 +1218,22 @@ public:
         for(int j=1;j<4;++j)feedback(j)=std::clamp(feedback(j),-0.35,0.35);
         Eigen::VectorXd raw=nominal+feedback;
         if(!raw.allFinite()){out.stale=true;return out;}
-        Eigen::VectorXd u=dyn.bounded(raw);
-        const bool saturated=(u-raw).norm()>1e-9;
-        const Eigen::VectorXd before_slew=u;
-        const double h=last_apply_==Clock::time_point{}?0.02:std::clamp(seconds(now,last_apply_),0.0,0.05);
-        Eigen::Vector4d slew;slew<<20,5,5,5;
-        for(int j=0;j<4;++j)u(j)=std::clamp(u(j),last_u_(j)-slew(j)*h,last_u_(j)+slew(j)*h);
+        const Eigen::VectorXd bounded=dyn.bounded(raw);
+        const bool saturated=(bounded-raw).norm()>1e-9;
+        const double h=last_apply_==Clock::time_point{}?comando_parameters::MpcParameters::command_dt:
+            std::clamp(seconds(now,last_apply_),.001,.05);
+        auto physical_model=desc_.make_model(target.acceleration);
+        auto tracking=constrainedTracking(physical_model,live,raw,last_u_,h);
+        Eigen::VectorXd u=tracking.control;
+        Eigen::VectorXd slew_only=bounded;
+        for(int j=0;j<4;++j) {const double rate=j==0?20:5;
+            slew_only(j)=std::clamp(slew_only(j),last_u_(j)-rate*h,last_u_(j)+rate*h);}
+        const bool slew_limited=(slew_only-bounded).norm()>1e-9;
+        const bool constraint_limited=(u-slew_only).norm()>1e-9;
         const double jump=(u-last_u_).norm();last_u_=u;last_apply_=now;
         out.command.kind=CommandKind::BodyRate;out.command.control=u;out.command.state=reference.head(13);
         if(controls_){std::ostringstream trace;trace<<std::setprecision(17);trace<<std::chrono::duration<double>(now.time_since_epoch()).count()<<','<<policy_->number<<','<<age;
-            for(const auto& v:{nominal,feedback,u})for(int j=0;j<4;++j)trace<<','<<v(j);trace<<','<<saturated<<','<<jump<<','<<((feedback-unbounded_feedback).norm()>1e-9)<<','<<((u-before_slew).norm()>1e-9)<<','<<delta.head(3).norm()<<','<<delta.segment(3,3).norm()<<'\n';controls_.write(trace.str());}
+            for(const auto& v:{nominal,feedback,u})for(int j=0;j<4;++j)trace<<','<<v(j);trace<<','<<saturated<<','<<jump<<','<<((feedback-unbounded_feedback).norm()>1e-9)<<','<<slew_limited<<','<<delta.head(3).norm()<<','<<delta.segment(3,3).norm()<<','<<tracking.predicted_residual<<','<<tracking.relaxation<<','<<tracking.elapsed_ms<<','<<constraint_limited<<'\n';controls_.write(trace.str());}
         return out;
     }
 };

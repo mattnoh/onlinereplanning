@@ -35,7 +35,7 @@ PlannerCoreStepResult Controller::trySolve(const PlannerCoreInput& in){
 PlannerCoreStepResult Controller::solveOpenLoop(const PlannerCoreInput& in){std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);std::lock_guard<std::mutex> solve(impl_->solver);if(impl_->mode==ExecutionMode::DirectMpc){PlannerCoreStepResult out;out.rejection_reason="direct_mpc_requires_feedback";return out;}return impl_->rh.solveOpenLoop(in);}
 PlannerCoreStepResult Controller::sample(const PlannerCoreInput& in){std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);if(!impl_->configured)return {};return impl_->mode==ExecutionMode::DirectMpc?impl_->direct.sample(in.now,in.current_state,in.target_snapshot):impl_->rh.sampleReplay(in.now,in.target_snapshot);}
 ExecutionMode Controller::executionMode() const {std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);return impl_->mode;}
-double Controller::commandPeriod() const {std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);return impl_->mode==ExecutionMode::DirectMpc?.02:impl_->config.ocp_dt;}
+double Controller::commandPeriod() const {std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);return impl_->mode==ExecutionMode::DirectMpc?comando_parameters::MpcParameters::command_dt:impl_->config.ocp_dt;}
 double Controller::solvePollPeriod() const {return isDirect()?.1:.001;}
 int Controller::solveCount() const {std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);std::lock_guard<std::mutex> solve(impl_->solver);return impl_->accepted;}
 void Controller::openControlLog(const std::string& path){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);if(impl_->mode==ExecutionMode::DirectMpc)impl_->direct.openControlLog(path);}
@@ -283,4 +283,131 @@ void OcpSolver::setTerminalState(const Eigen::VectorXd& terminal) {
         prev_K_.clear();
         last_solve_ms_ = 0.0;
     }
+}
+
+namespace planner_core {
+namespace {
+using TrackingVector=Eigen::Matrix<double,5,1>;
+// Primal active-set QP: min .5*(z-goal)'H*(z-goal), A*z<=b.
+// A feasible phase-I starting point is supplied. All input bounds are hard.
+TrackingVector trackingQp(const Eigen::MatrixXd& a,const Eigen::VectorXd& b,
+                         const TrackingVector& goal,const TrackingVector& h,
+                         TrackingVector z) {
+    const TrackingVector root=h.cwiseSqrt(),inverse_root=root.cwiseInverse();
+    std::vector<int> active;
+    for(int iteration=0;iteration<160;++iteration) {
+        Eigen::MatrixXd aw(active.size(),5);
+        for(int i=0;i<static_cast<int>(active.size());++i)aw.row(i)=a.row(active[i]);
+        TrackingVector direction=goal-z;
+        Eigen::VectorXd lambda;
+        if(!active.empty()) {
+            // An orthonormal null space avoids subtracting large nearly equal
+            // vectors when the exact-penalty slack is on its lower bound.
+            Eigen::MatrixXd normals=inverse_root.asDiagonal()*aw.transpose();
+            Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(normals);
+            qr.setThreshold(1e-10);
+            const int rank=qr.rank();
+            if(rank<static_cast<int>(active.size())){active.pop_back();continue;}
+            Eigen::MatrixXd basis=qr.householderQ()*Eigen::MatrixXd::Identity(5,5);
+            auto null=basis.rightCols(5-rank).eval();
+            direction=inverse_root.asDiagonal()*null*(null.transpose()*root.asDiagonal()*(goal-z));
+            lambda=aw.transpose().completeOrthogonalDecomposition().solve(h.asDiagonal()*(goal-z-direction));
+        }
+        if(direction.norm()<1e-10) {
+            if(active.empty()||lambda.minCoeff()>=-1e-9)return z;
+            Eigen::Index worst;lambda.minCoeff(&worst);
+            active.erase(active.begin()+worst);continue;
+        }
+        double alpha=1;int blocker=-1;
+        for(int i=0;i<a.rows();++i) {
+            if(std::find(active.begin(),active.end(),i)!=active.end())continue;
+            const double change=a.row(i).dot(direction);
+            if(change>1e-12) {
+                const double distance=std::max(0.,b(i)-a.row(i).dot(z))/change;
+                if(distance<alpha){alpha=distance;blocker=i;}
+            }
+        }
+        z+=alpha*direction;
+        if(blocker>=0&&active.size()<5)active.push_back(blocker);
+    }
+    return z;
+}
+}
+TrackingOptimization constrainedTracking(const OCPDescriptor::Model& model,
+    const Eigen::VectorXd& state,const Eigen::Vector4d& desired,
+    const Eigen::Vector4d& previous,double sample_period) {
+    if(!model.constraints||model.nu!=4||state.size()!=model.nx||
+       !state.allFinite()||!desired.allFinite()||!previous.allFinite()||
+       !(sample_period>0&&sample_period<=.05))
+        throw std::invalid_argument("invalid constrained tracking problem");
+    const auto begin=std::chrono::steady_clock::now();
+    const Eigen::Vector4d slew=(Eigen::Vector4d()<<20,5,5,5).finished();
+    Eigen::Vector4d lower=model.bounded(Eigen::Vector4d::Constant(-1e6));
+    Eigen::Vector4d upper=model.bounded(Eigen::Vector4d::Constant(1e6));
+    lower=lower.cwiseMax(previous-slew*sample_period);
+    upper=upper.cwiseMin(previous+slew*sample_period);
+    if((lower.array()>upper.array()).any())
+        throw std::invalid_argument("inconsistent tracking input bounds");
+    const std::array<double,4> times={sample_period,
+        comando_parameters::MpcParameters::dt/2,comando_parameters::MpcParameters::dt,
+        comando_parameters::MpcParameters::tracking_preview};
+    Eigen::Vector4d seed=previous.cwiseMax(lower).cwiseMin(upper);
+    TrackingOptimization result;
+    // Linear exact penalty avoids the ill-conditioned large quadratic slack
+    // curvature. Completing the square gives .5*s*s + 1000*s for s>=0.
+    TrackingVector goal;goal<<desired,-1000;
+    TrackingVector h;h<<.3,1.5,1.5,1.5,1;
+    for(int iteration=0;iteration<10;++iteration) {
+        std::vector<Eigen::Vector4d> gradients;
+        std::vector<double> rhs;
+        double violation=0;
+        for(double time:times) {
+            auto flow=model.flow(state,seed,time,true);
+            auto limits=model.constraints(flow.x);
+            Eigen::MatrixXd g=limits.jacobian*flow.b;
+            for(int j=0;j<limits.value.size();++j) {
+                gradients.push_back(g.row(j).transpose());
+                rhs.push_back(g.row(j).dot(seed)-limits.value(j));
+                violation=std::max(violation,limits.value(j));
+            }
+        }
+        const int physical=static_cast<int>(gradients.size());
+        Eigen::MatrixXd a=Eigen::MatrixXd::Zero(physical+9,5);
+        Eigen::VectorXd b(physical+9);
+        for(int j=0;j<physical;++j){a.row(j).head<4>()=gradients[j].transpose();a(j,4)=-1;b(j)=rhs[j];}
+        for(int j=0;j<4;++j){a(physical+2*j,j)=1;b(physical+2*j)=upper(j);
+            a(physical+2*j+1,j)=-1;b(physical+2*j+1)=-lower(j);}
+        a(physical+8,4)=-1;b(physical+8)=0;
+        TrackingVector z;z<<seed,violation+1e-9;
+        z=trackingQp(a,b,goal,h,z);
+        result.iterations=iteration+1;result.relaxation=z(4);
+        // Globalize SQP with its exact-penalty merit. This is essential for
+        // the nonconvex union in a state-triggered constraint: jumping to an
+        // infeasible branch cannot be mistaken for improving the control.
+        auto merit=[&](const Eigen::Vector4d& input) {
+            double residual=0;
+            for(double time:times)residual=std::max(residual,
+                model.constraints(model.flow(state,input,time,false).x).value.maxCoeff());
+            return .5*((input-desired).array().square()*h.head<4>().array()).sum()
+                +1000*residual+.5*residual*residual;
+        };
+        const double current_merit=merit(seed);
+        Eigen::Vector4d step=z.head<4>()-seed;
+        double fraction=1;
+        for(int backtrack=0;backtrack<20;++backtrack) {
+            if(merit(seed+fraction*step)<=current_merit+1e-12)break;
+            fraction*=.5;
+        }
+        const double change=fraction*step.norm();
+        seed+=fraction*step;
+        if(change<1e-8)break;
+    }
+    result.control=seed;result.predicted_residual=0;
+    for(double time:times)
+        result.predicted_residual=std::max(result.predicted_residual,
+            model.constraints(model.flow(state,seed,time,false).x).value.maxCoeff());
+    result.elapsed_ms=std::chrono::duration<double,std::milli>(
+        std::chrono::steady_clock::now()-begin).count();
+    return result;
+}
 }

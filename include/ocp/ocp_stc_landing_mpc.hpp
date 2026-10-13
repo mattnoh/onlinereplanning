@@ -1017,12 +1017,95 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
     }
     problem->setInitialState(N,x);problem->setTerminalCost(std::make_shared<Terminal>());return problem;
 }
+// Signed physical sets for predictive tracking, including the inactive-set
+// interior. CTCS's positive-part integrand alone has zero gradient there.
+inline OCPDescriptor::StateConstraints trackingLimits(const Eigen::VectorXd& x) {
+    const auto& p=Ref::defaults.constraints;
+    const Eigen::Vector4d q=x.segment<4>(6);const double n=q.squaredNorm();
+    const double perp=q(1)*q(1)+q(2)*q(2),lateral=x.head<2>().norm();
+    const double w=q(0),a=q(1),b=q(2),d=q(3),length=x.head<3>().norm();
+    Eigen::Vector3d axis(2*(a*d+w*b),2*(b*d-w*a),w*w-a*a-b*b+d*d);
+    Eigen::Matrix<double,3,4> db;db<<2*b,2*d,2*w,2*a,-2*a,-2*w,2*d,2*b,2*w,-2*a,-2*b,2*d;
+    const double cosine=std::cos(p.los_cone_half_angle_deg*M_PI/180);
+    const double alpha=1/comando_parameters::MpcParameters::tracking_preview;
+    OCPDescriptor::StateConstraints c;c.value=Eigen::VectorXd::Constant(14,-1);
+    c.jacobian=Eigen::MatrixXd::Zero(14,x.size());auto& g=c.jacobian;
+    auto sphere=[&](int row,int offset,double limit) {
+        c.value(row)=x.segment<3>(offset).squaredNorm()/(limit*limit)-1;
+        g.block<1,3>(row,offset)=2*x.segment<3>(offset).transpose()/(limit*limit);
+    };
+    auto tilt=[&](int row,double degrees) {
+        const double limit=std::pow(std::sin(.5*degrees*M_PI/180),2);
+        c.value(row)=perp/(limit*n)-1;
+        g.block<1,4>(row,6)=-2*perp*q.transpose()/(limit*n*n);
+        g(row,7)+=2*q(1)/(limit*n);g(row,8)+=2*q(2)/(limit*n);
+    };
+    c.value(0)=-x(2);g(0,2)=-1;
+    sphere(1,3,p.spd_phase0_max);sphere(2,10,p.omega_phase0_max);tilt(3,p.theta_phase0_deg);
+    // The inactive side has a signed interior too:
+    // z>=z_trigger OR consequence<=0 <=> min(z_trigger-z,consequence)<=0.
+    // A constant inactive residual loses the gradient needed to delay entry.
+    Eigen::RowVectorXd landing_gradient=Eigen::RowVectorXd::Zero(x.size());
+    double landing_guard=p.alt_trig-x(2);landing_gradient(2)=-1;
+    if(p.capture_landing_trigger&&p.cap_land_radius-lateral<landing_guard) {
+        landing_guard=p.cap_land_radius-lateral;landing_gradient.setZero();
+        if(lateral>1e-12)landing_gradient.head<2>()=-x.head<2>().transpose()/lateral;
+    }
+    bool needs_landing_height=false;
+    auto landing=[&](int row) {
+        if(landing_guard<=c.value(row)) {
+            c.value(row)=landing_guard;g.row(row)=landing_gradient;
+            needs_landing_height=needs_landing_height||landing_gradient(2)==-1;
+        }
+    };
+    if(p.triggered_stc) {
+        c.value(4)=lateral-Ref::GS_CONE_TAN*(x(2)+p.gs_apex_offset);
+        if(lateral>1e-12)g.block<1,2>(4,0)=x.head<2>().transpose()/lateral;
+        g(4,2)=-Ref::GS_CONE_TAN;landing(4);
+        sphere(7,3,p.spd_stc_max);landing(7);
+        sphere(8,10,p.omega_stc_max);landing(8);
+        tilt(9,p.alpha_theta_stc*p.theta_stc_deg);landing(9);
+        c.value(5)=cosine*length-x.head<3>().dot(axis)/n;
+        g.block<1,3>(5,0)=-axis.transpose()/n;
+        if(length>1e-12)g.block<1,3>(5,0)+=cosine*x.head<3>().transpose()/length;
+        g.block<1,4>(5,6)=-x.head<3>().transpose()*db/n+2*x.head<3>().dot(axis)*q.transpose()/(n*n);
+        if(p.los_alt_trig-x(2)<=c.value(5)) {
+            c.value(5)=p.los_alt_trig-x(2);g.row(5).setZero();g(5,2)=-1;
+            c.value(11)=-x(5)+alpha*c.value(5);g(11,5)=-1;g(11,2)=-alpha;
+        }
+        double stage_guard=lateral-p.stage_radius;
+        Eigen::RowVectorXd stage_gradient=Eigen::RowVectorXd::Zero(x.size());
+        if(lateral>1e-12)stage_gradient.head<2>()=x.head<2>().transpose()/lateral;
+        if(p.stage_trigger=="settle") {
+            const double tilt_limit=std::pow(std::sin(.5*p.stage_settle_tilt_deg*M_PI/180),2);
+            const double omega_limit=p.stage_settle_omega_max;
+            if(perp/(n*tilt_limit)-1>=x.segment<3>(10).squaredNorm()/(omega_limit*omega_limit)-1) {
+                tilt(6,p.stage_settle_tilt_deg);stage_guard=c.value(6);stage_gradient=g.row(6);
+            } else {
+                sphere(6,10,omega_limit);stage_guard=c.value(6);stage_gradient=g.row(6);
+            }
+        }
+        c.value(6)=std::min(stage_guard,p.z_stage-x(2));g.row(6).setZero();
+        if(stage_guard<p.z_stage-x(2))g.row(6)=stage_gradient;
+        else {
+            g(6,2)=-1;c.value(10)=-x(5)+alpha*(p.z_stage-x(2));g(10,5)=-1;g(10,2)=-alpha;
+        }
+        if(needs_landing_height) {
+            c.value(12)=-x(5)+alpha*(p.alt_trig-x(2));g(12,5)=-1;g(12,2)=-alpha;
+        }
+    }
+    // First high-order barrier level: descending velocity must remain
+    // compatible with the distance to the selected altitude boundary.
+    c.value(13)=-x(5)-alpha*x(2);g(13,5)=-1;g(13,2)=-alpha;
+    return c;
+}
 inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=true; d.state_dim=13; d.control_dim=4; d.skip_altitude_validation=true; d.skip_trajectory_validation=true; d.coordinates=OCPDescriptor::Coordinates::TargetRelative; d.log_state_headers=OCPLoggerDefaults::getStateHeaders13D(); d.state_names=OCPLoggerDefaults::getStateNames13D(); d.extract_actual_state_row=OCPLoggerDefaults::getActualStateRow13D; d.make_hover_state=OCPLoggerDefaults::makeHoverState13D;d.name="stc_landing_mpc";d.execution_mode=planner_core::ExecutionMode::DirectMpc;d.dt=DT;d.variable_dt=false;
     d.make_model=[](const Eigen::Vector3d& accel) {
         auto pred=std::make_shared<Ref::ConstantAccelPredictor>(); pred->a=accel;
         auto dynamics=std::make_shared<Dynamics>(pred);
         OCPDescriptor::Model model; model.nx=NX;model.nu=NU;model.horizon=N;model.dt=DT;
         model.hover=hover();model.bounded=bounded;
+        model.constraints=trackingLimits;
         model.flow=[dynamics](const Eigen::VectorXd& x,const Eigen::VectorXd& u,double t,bool jac) {
             auto f=dynamics->flow(x,u,t,jac);return OCPDescriptor::Flow{f.x,f.a,f.b};
         };return model;
