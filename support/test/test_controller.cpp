@@ -18,7 +18,36 @@ int main(){try{
   auto acceleration=descriptor.world_acceleration(x,u);
   check(std::abs(acceleration.x()-9.81*std::sin(.2))<1e-12,"DDP thrust acceleration direction");
   check(std::abs(acceleration.z()-9.81*(std::cos(.2)-1))<1e-12,"DDP thrust acceleration magnitude");
-  check((planner_core::makePlannerCommand(planner_core::Platform::Mavros,descriptor,x,u,target).acceleration.value()-acceleration).norm()<1e-12,"target acceleration must not be added twice to world feedforward");
+  check((planner_core::makePlannerCommand(planner_core::Platform::Crazyflie,descriptor,x,u,target).acceleration.value()-acceleration).norm()<1e-12,"target acceleration must not be added twice to world feedforward");
+ }
+ // Reproduce the native PX4 conversion independently: reference changes in
+ // thrust must not change its desired body axis when the DDP attitude is fixed.
+ for(const char* name:{"landing_rh","stc_landing_noaug"}) {
+  const auto desc=OCPRegistry::getDescriptor(name);
+  for(double roll:{-.012,0.,.012})for(double pitch:{-.009,0.,.009}) {
+   const Eigen::Quaterniond q=Eigen::AngleAxisd(.4,Eigen::Vector3d::UnitZ())*
+       Eigen::AngleAxisd(pitch,Eigen::Vector3d::UnitY())*Eigen::AngleAxisd(roll,Eigen::Vector3d::UnitX());
+   Eigen::VectorXd x=Eigen::VectorXd::Zero(13);x.segment<4>(6)<<q.w(),q.x(),q.y(),q.z();
+   const Eigen::Vector3d desired=q*Eigen::Vector3d::UnitZ();
+   for(double thrust_accel:{8.,9.81,12.}) {
+    Eigen::VectorXd u=Eigen::VectorXd::Zero(4);u(0)=desc.default_mass_kg*thrust_accel;
+    TargetSnapshot target;target.valid=true;target.acceleration<<.3,-.1,.2;
+    const auto command=planner_core::makePlannerCommand(planner_core::Platform::Mavros,desc,x,u,target);
+    const Eigen::Vector3d physical=thrust_accel*desired-Eigen::Vector3d(0,0,9.81);
+    const auto& params=comando_parameters::defaults.px4;
+    const Eigen::Vector3d internal=command.acceleration.value()-
+       Eigen::Vector3d(params.velocity_d_xy,params.velocity_d_xy,params.velocity_d_z).cwiseProduct(physical);
+    const Eigen::Vector3d px4_axis=Eigen::Vector3d(internal.x(),internal.y(),
+       params.decouple_acceleration?9.81:9.81+internal.z()).normalized();
+    check((px4_axis-desired).norm()<1e-12,"PX4 reconstructed attitude must equal DDP attitude across thrust steps");
+    check(std::abs(internal.z()-physical.z())<1e-12,"PX4 conversion must preserve nominal vertical acceleration");
+    const auto cf=planner_core::makePlannerCommand(planner_core::Platform::Crazyflie,desc,x,u,target);
+    check((cf.acceleration.value()-physical).norm()<1e-12,"Crazyflie must retain physical acceleration feedforward");
+    target.acceleration.setZero();
+    const auto same=planner_core::makePlannerCommand(planner_core::Platform::Mavros,desc,x,u,target);
+    check((same.acceleration.value()-command.acceleration.value()).norm()<1e-12,"target acceleration must not enter physical PX4 mapping");
+   }
+  }
  }
  planner_core::Controller controller;
  planner_core::PlannerCoreConfig config;config.ocp_type="hover";config.ocp_dt=.05;

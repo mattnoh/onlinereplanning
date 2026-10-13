@@ -115,6 +115,13 @@ struct MpcParameters {
     double slew_rate_weight = 2.0;
     int max_iter = 60;
 };
+// Native PX4 position-controller coefficients, not planner feedback gains.
+// They must match MPC_ACC_DECOUPLE and MPC_XY/Z_VEL_D_ACC on the FCU.
+struct Px4TrackingParameters {
+    bool decouple_acceleration = true;
+    double velocity_d_xy = .2;
+    double velocity_d_z = 0.;
+};
 inline Param solverDefaults() {
     Param p;p.reg1_min=1e-3;p.reg2_min=0.1;p.mu_mul=0.1;
     p.rho=5;p.rhoT=5;p.rho_mul=10;p.tolerance=1e-6;p.max_iter=180;
@@ -127,6 +134,7 @@ struct Parameters {
     CostParameters cost;
     ConstraintsParameters constraints;
     MpcParameters mpc;
+    Px4TrackingParameters px4;
     Param solver = solverDefaults();
 };
 inline Parameters fromEnvironment() {
@@ -196,6 +204,9 @@ inline Parameters fromEnvironment() {
     p.mpc.hover_thrust=envOrQ("MPC_HOVER_THRUST",p.mpc.hover_thrust);
     p.mpc.motor_thrust_exponent=envOrQ("MPC_MOTOR_THRUST_EXPONENT",p.mpc.motor_thrust_exponent);
     p.mpc.motor_speed_offset=envOrQ("MPC_MOTOR_SPEED_OFFSET",p.mpc.motor_speed_offset);
+    p.px4.decouple_acceleration=envOrInt("PX4_ACC_DECOUPLE",p.px4.decouple_acceleration)!=0;
+    p.px4.velocity_d_xy=envOrQ("PX4_VEL_D_XY",p.px4.velocity_d_xy);
+    p.px4.velocity_d_z=envOrQ("PX4_VEL_D_Z",p.px4.velocity_d_z);
     if(p.mpc.motor_thrust_exponent<=0||p.mpc.motor_speed_offset<0)
         throw std::invalid_argument("invalid motor thrust mapping parameters");
     p.mpc.max_policy_age=envOrQ("MPC_MAX_POLICY_AGE",p.mpc.max_policy_age);

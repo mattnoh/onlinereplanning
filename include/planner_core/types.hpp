@@ -253,6 +253,7 @@ struct OCPDescriptor {
     CommandMode command_mode = CommandMode::CmdFullState;
     Coordinates coordinates = Coordinates::World;
     std::function<Eigen::Vector3d(const Eigen::VectorXd&,const Eigen::VectorXd&)> world_acceleration;
+    std::function<Eigen::Vector3d(const Eigen::VectorXd&,const Eigen::VectorXd&)> mavros_acceleration;
 
     bool disarm_on_landing_finish = false;
     bool skip_altitude_validation = false;

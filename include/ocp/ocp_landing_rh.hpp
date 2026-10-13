@@ -629,6 +629,25 @@ inline OCPDescriptor descriptor() {
         if(q.norm()<1e-8)throw std::invalid_argument("invalid DDP attitude");
         return Eigen::Vector3d(q.normalized()*Eigen::Vector3d(0,0,u(0)/MASS)+Eigen::Vector3d(0,0,-9.81));
     };
+    // Invert PX4 PositionControl's native acceleration conversion at the
+    // nominal DDP state. With zero position/velocity error and integrator,
+    // acc_internal = acc_feedforward - D_vel * acc_physical. In decoupled
+    // mode its tilt axis is [acc_internal.xy, g], rather than thrust*q_z.
+    // This is a coordinate/input conversion, without measured-error feedback.
+    d.mavros_acceleration=[physical=d.world_acceleration](const Eigen::VectorXd& x,const Eigen::VectorXd& u) {
+        const Eigen::Vector3d acceleration=physical(x,u);
+        Eigen::Quaterniond q(x(6),x(7),x(8),x(9));
+        const Eigen::Vector3d axis=q.normalized()*Eigen::Vector3d::UnitZ();
+        Eigen::Vector3d feedforward=acceleration;
+        if(defaults.px4.decouple_acceleration) {
+            if(axis.z()<=1e-6)throw std::invalid_argument("PX4 acceleration mapping requires upright thrust axis");
+            feedforward.head<2>()=9.81*axis.head<2>()/axis.z();
+        }
+        feedforward.x()+=defaults.px4.velocity_d_xy*acceleration.x();
+        feedforward.y()+=defaults.px4.velocity_d_xy*acceleration.y();
+        feedforward.z()+=defaults.px4.velocity_d_z*acceleration.z();
+        return feedforward;
+    };
     d.coordinates = OCPDescriptor::Coordinates::TargetRelative;
     d.variable_dt = true;
     d.state_dim = 13;

@@ -336,7 +336,7 @@ def run_cell(motion, level, trial, outdir, args):
             ("px4", "mavros", "target", "planner")}
     t0 = time.time()
     # Save inputs before launch, including inherited controller tuning.
-    env_snapshot = {k:v for k,v in os.environ.items() if k.startswith(("SZMUK_", "MPC_"))}
+    env_snapshot = {k:v for k,v in os.environ.items() if k.startswith(("SZMUK_", "MPC_", "PX4_"))}
     env_snapshot.update(PLANNER_ENV)
     env_snapshot.update(SZMUK_Z_STAGE=str(args.stc_z_stage), SZMUK_LOS_ALT_TRIG=str(args.stc_los_alt_trig))
     json.dump(env_snapshot, open(os.path.join(cell, "planner_environment.json"), "w"), indent=2)
