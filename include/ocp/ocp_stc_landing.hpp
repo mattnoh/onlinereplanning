@@ -23,6 +23,7 @@
 /// as the benchmark's makeXshifted did. The core carries the y-row through the
 /// replayer untouched (state_dim=13, DT at 13, y rides along at 14).
 #pragma once
+#include "target/predictor.hpp"
 
 #include <Eigen/Dense>
 #include <algorithm>
@@ -254,20 +255,7 @@ inline double computeTrigAlt(const Eigen::VectorXd& x) {
 // ── Constant-accel target predictor ───────────────────────────────────────────
 // Reset from the TargetSnapshot at every solve (see prepare_extra), then held
 // as a constant-acceleration model across the horizon.
-struct ConstantAccelPredictor {
-    Eigen::Vector3d p = Eigen::Vector3d::Zero();
-    Eigen::Vector3d v = Eigen::Vector3d::Zero();
-    Eigen::Vector3d a = Eigen::Vector3d::Zero();
-
-    void setState(const Eigen::Vector3d& p_, const Eigen::Vector3d& v_,
-                  const Eigen::Vector3d& a_) {
-        p = p_; v = v_; a = a_;
-    }
-
-    Eigen::Vector3d predictPos(double dt)   const { return p + v*dt + 0.5*a*dt*dt; }
-    Eigen::Vector3d predictVel(double dt)   const { return v + a*dt; }
-    Eigen::Vector3d predictAccel(double dt) const { (void)dt; return a; }
-};
+using ConstantAccelPredictor = target_models::ConstantAccelPredictor;
 
 struct StcLandingExtra {
     std::shared_ptr<ConstantAccelPredictor> predictor;

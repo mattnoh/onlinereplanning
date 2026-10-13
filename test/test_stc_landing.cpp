@@ -1,3 +1,4 @@
+#include "ocp/ocp_landing.hpp"
 /// @file test_stc_landing.cpp
 /// @brief Standalone (no ROS master) receding-horizon smoke test for the
 ///        "stc_landing" OCP: descriptor sanity, predictor plumbing, and 5

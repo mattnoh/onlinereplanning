@@ -90,15 +90,15 @@ def ensure_executed_csv(cell):
     bags = [b for b in os.listdir(cell) if b.startswith("flight_") and b.endswith(".bag")]
     if not bags:
         return
-    logs = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
+    logs = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "analysis")
     # ABSOLUTE paths: the command cd's into logs/ first, so a relative cell path
     # (which is what you get from `scenario_metrics.py logs/<campaign>`)
     # resolved to logs/logs/<campaign>/... and the conversion silently did
     # nothing -- leaving every touchdown and STC-violation column blank.
     acell = os.path.abspath(cell)
     cmd = ("source /opt/ros/noetic/setup.bash && "
-           "source /home/lab/mavros_ws/devel/setup.bash && "
-           f"cd {os.path.abspath(logs)} && timeout 900 python3 bag_to_stc_csv.py "
+           + os.environ.get("COMANDO_ROS_SETUP_SUFFIX", "source /home/lab/mavros_ws/devel/setup.bash && ")
+           + f"cd {os.path.abspath(logs)} && timeout 900 python3 bag_to_stc_csv.py "
            f"{os.path.join(acell, bags[0])} --out {acell}")
     r = subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True)
     if not os.path.exists(ex):

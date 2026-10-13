@@ -452,7 +452,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
 }
 
 inline OCPDescriptor descriptor() {
-    OCPDescriptor d;
+    OCPDescriptor d;d.disarm_on_landing_finish=true;
     d.name = "landing";
     d.dt = DT;
     d.default_n_replay = DEFAULT_N_REPLAY;

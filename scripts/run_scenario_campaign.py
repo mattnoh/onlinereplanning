@@ -29,9 +29,9 @@ import sys
 import time
 import zlib
 
-PKG = "/home/lab/mavros_ws/src/CoManDO_planner"
+PKG = os.environ.get("COMANDO_PACKAGE", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PX4 = "/home/lab/projects/px4/PX4-Autopilot"
-SETUP = "source /opt/ros/noetic/setup.bash && source /home/lab/mavros_ws/devel/setup.bash"
+SETUP = os.environ.get("COMANDO_ROS_SETUP", "source /opt/ros/noetic/setup.bash && source /home/lab/mavros_ws/devel/setup.bash")
 
 # Motion shape params. Speeds are held near the flown circle (0.4 m/s) so the
 # scenarios are comparable and remain physically landable.

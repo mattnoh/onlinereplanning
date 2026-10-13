@@ -6,6 +6,7 @@
 #include <Eigen/Geometry>
 
 #include <algorithm>
+#include <atomic>
 #include <any>
 #include <chrono>
 #include <cmath>
@@ -145,20 +146,20 @@ public:
         planner_config.ocp_dt = config_.ocp_dt;
         planner_config.dt = config_.ocp_dt;
         planner_config.mass_kg = desc_.default_mass_kg;
-        planner_config.t_start_abs = input.ros_time_sec;
+        planner_config.t_start_abs = input.absolute_time_sec;
         if (input.has_target_accel_buffer) {
             planner_config.target_accel_buffer = input.target_accel_buffer;
         }
 
         std::any extra;
         if (desc_.prepare_extra) {
-            extra = desc_.prepare_extra(planner_config, input.ros_time_sec, input.target_snapshot);
+            extra = desc_.prepare_extra(planner_config, input.absolute_time_sec, input.target_snapshot);
         }
 
         const Eigen::Vector3d target_accel =
             input.target_snapshot.valid ? input.target_snapshot.acceleration : Eigen::Vector3d::Zero();
         const auto warm_start_before_solve = mpc_->snapshotWarmStart();
-        auto raw = mpc_->solve(x0, target_accel, extra, input.ros_time_sec);
+        auto raw = mpc_->solve(x0, target_accel, extra, input.absolute_time_sec);
         SolverResult result = toSolverResult(raw, input.target_snapshot);
         if (desc_.post_process_result) {
             desc_.post_process_result(result, input.target_snapshot);
@@ -345,20 +346,20 @@ public:
         planner_config.ocp_dt = config_.ocp_dt;
         planner_config.dt = config_.ocp_dt;
         planner_config.mass_kg = desc_.default_mass_kg;
-        planner_config.t_start_abs = input.ros_time_sec;
+        planner_config.t_start_abs = input.absolute_time_sec;
         if (input.has_target_accel_buffer) {
             planner_config.target_accel_buffer = input.target_accel_buffer;
         }
 
         std::any extra;
         if (desc_.prepare_extra) {
-            extra = desc_.prepare_extra(planner_config, input.ros_time_sec, input.target_snapshot);
+            extra = desc_.prepare_extra(planner_config, input.absolute_time_sec, input.target_snapshot);
         }
 
         const Eigen::Vector3d target_accel =
             input.target_snapshot.valid ? input.target_snapshot.acceleration
                                         : Eigen::Vector3d::Zero();
-        auto raw = mpc_->solve(x0, target_accel, extra, input.ros_time_sec);
+        auto raw = mpc_->solve(x0, target_accel, extra, input.absolute_time_sec);
         SolverResult result = toSolverResult(raw, input.target_snapshot);
         if (desc_.post_process_result) {
             desc_.post_process_result(result, input.target_snapshot);
@@ -385,7 +386,7 @@ public:
             result.is_relative_plan = false;
         }
 
-        if (!result.success || result.state_trajectory.size() < 2) {
+        if (!result.success || !validStructure(result)) {
             reject(out, "solve_failed", "Open-loop solve failed");
             out.solve_result = std::move(result);
             return out;
@@ -757,6 +758,13 @@ private:
         return std::max(t_adv, std::max(config_.ocp_dt, 1e-3));
     }
 
+    bool validStructure(const SolverResult& r) const {
+        if(r.state_trajectory.size()<2 || r.control_trajectory.size()+1!=r.state_trajectory.size()) return false;
+        for(const auto& x:r.state_trajectory) if(x.size()<desc_.state_dim || !x.allFinite()) return false;
+        for(const auto& u:r.control_trajectory) if(u.size()<desc_.control_dim || !u.allFinite()) return false;
+        return std::isfinite(r.constraint_error);
+    }
+
     bool isSolveAcceptable(const SolverResult& result,
                            std::string& reason,
                            bool first_plan) const {
@@ -768,11 +776,11 @@ private:
             reason = "first_solve_stale";
             return false;
         }
-        if (!result.success || result.state_trajectory.size() < 2) {
+        if (!result.success || !validStructure(result)) {
             reason = "solve_failed";
             return false;
         }
-        if (result.constraint_error > config_.max_constraint_error) {
+        if (!std::isfinite(result.constraint_error) || result.constraint_error > config_.max_constraint_error) {
             reason = "constraint_error";
             return false;
         }
@@ -1087,7 +1095,7 @@ private:
     PlannerCoreConfig config_;
     OCPDescriptor desc_;
     bool configured_ = false;
-    bool primed_ = false;
+    std::atomic<bool> primed_{false};
     bool terminal_freeze_ = false;
     int solve_count_ = 0;
     double last_replan_delay_sec_ = 0.0;

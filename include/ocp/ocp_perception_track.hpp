@@ -56,6 +56,7 @@
 /// only by a platform that executes those states.
 
 #pragma once
+#include "target/predictor.hpp"
 
 #include "optimal_control_problem.h"
 #include "alipddp/alipddp.h"
@@ -245,16 +246,7 @@ template <typename S> inline S posPart(const S& z) { return z > S(0) ? z : S(0);
 template <typename S> inline S negPart(const S& z) { return z < S(0) ? -z : S(0); }
 
 // ── Constant-accel target predictor (same contract as the landing OCPs) ──────
-struct ConstantAccelPredictor {
-    Eigen::Vector3d p = Eigen::Vector3d::Zero();
-    Eigen::Vector3d v = Eigen::Vector3d::Zero();
-    Eigen::Vector3d a = Eigen::Vector3d::Zero();
-    void setState(const Eigen::Vector3d& p_, const Eigen::Vector3d& v_,
-                  const Eigen::Vector3d& a_) { p = p_; v = v_; a = a_; }
-    Eigen::Vector3d predictPos(double dt) const { return p + v*dt + 0.5*a*dt*dt; }
-    Eigen::Vector3d predictVel(double dt) const { return v + a*dt; }
-    Eigen::Vector3d predictAccel(double)  const { return a; }
-};
+using ConstantAccelPredictor = target_models::ConstantAccelPredictor;
 
 /// `staleness_init` is the RH carry: time since the last valid target fix, taken
 /// from the TargetTracker rather than from the previous plan.

@@ -1,0 +1,7 @@
+/comando_planner:
+  ros__parameters:
+    ocp_type: perception_track
+    mode: mpc
+    n_replay: 4
+    enable_terminal_freeze: false
+    land_action: none

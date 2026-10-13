@@ -76,7 +76,7 @@ planner_core::PlannerCoreInput inputAt(const Clock::time_point& now) {
     input.current_state = state(0.0);
     input.active_odom_mode = OCPDescriptor::DroneOdomMode::Absolute;
     input.now = now;
-    input.ros_time_sec = 1.0;
+    input.absolute_time_sec = 1.0;
     input.target_snapshot.valid = true;
     return input;
 }
@@ -87,6 +87,18 @@ int main() {
     try {
         const auto t0 = Clock::now();
 
+        {
+            planner_core::PlannerCore core;core.configure(hoverConfig());
+            const auto input=inputAt(t0);
+            auto invalid=solved(t0,0);invalid.constraint_error=std::numeric_limits<double>::quiet_NaN();
+            require(!core.acceptSolvedResult(input,input.current_state,invalid).solve_accepted,"NaN constraint must reject");
+            invalid=solved(t0,0);invalid.state_trajectory[0](0)=std::numeric_limits<double>::quiet_NaN();
+            require(!core.acceptSolvedResult(input,input.current_state,invalid).solve_accepted,"NaN state must reject");
+            invalid=solved(t0,0);invalid.control_trajectory.pop_back();
+            require(!core.acceptSolvedResult(input,input.current_state,invalid).solve_accepted,"inconsistent horizon must reject");
+            invalid=solved(t0,0);invalid.state_trajectory[0].resize(3);
+            require(!core.acceptSolvedResult(input,input.current_state,invalid).solve_accepted,"short state must reject");
+        }
         {
             planner_core::PlannerCore core;
             auto cfg = hoverConfig();
@@ -129,6 +141,7 @@ int main() {
             input.active_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
             input.active_odom_topic = "/drone/target_frame_odom";
             auto bad = solved(t0, 0.0);
+            for(auto& x:bad.state_trajectory) { const int n=x.size(); x.conservativeResize(20);x.tail(20-n).setZero(); }
             bad.state_trajectory.back()(2) = -20.0;
             auto out = core.acceptSolvedResult(input, input.current_state, bad);
             require(!out.solve_accepted, "divergent relative trajectory should reject");

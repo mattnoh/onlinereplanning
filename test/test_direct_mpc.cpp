@@ -1,3 +1,5 @@
+#include "ocp/ocp_stc_landing_mpc.hpp"
+#include "ocp/ocp_stc_landing_noaug.hpp"
 #include "planner_core/direct_mpc.hpp"
 #include "planner_core/direct_control_math.hpp"
 #include <iostream>

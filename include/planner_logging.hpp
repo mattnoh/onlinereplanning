@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Eigen/Dense>
-#include <ros/ros.h>
+#include <iostream>
 
 #include "planner_core/types.hpp"
 
@@ -77,11 +77,12 @@ public:
     /// @param state_names     Column names for raw OCP state vector (from descriptor().state_names)
     /// @param control_names   Column names for raw OCP control vector (from descriptor().control_names)
     /// @param command_mode    Active command mode — determines which commanded log gets written
+    template<class Logger>
     bool initialize(const std::string& drone_name,
                     const std::string& ocp_type,
                     const std::string& mode,
                     const std::string& solver_type,
-                    const std::string& /*ros_logger*/,
+                    const Logger& /*logger*/,
                     double mass_kg,
                     int state_dim,
                     const std::vector<std::string>& state_names,
@@ -90,9 +91,9 @@ public:
                     OCPDescriptor::CommandMode command_mode,
                     std::function<std::vector<double>(const Eigen::VectorXd&, const TargetSnapshot&, const std::string&)> extract_actual_state) {
         std::lock_guard<std::mutex> lk(mutex_);
-        if (initialized_) {
-            return true;
-        }
+        if (initialized_ && schema_ocp_==ocp_type && state_names_==state_names && control_names_==control_names) return true;
+        all_solves_log_.close();solver_events_log_.close();schema_ocp_=ocp_type;
+
 
         (void)log_state_headers;
         (void)command_mode;
@@ -160,7 +161,7 @@ public:
 
         initialized_ = all_solves_log_.is_open() &&
                        solver_events_log_.is_open();
-        ROS_INFO("Logging to: %s", folder.c_str());
+        std::cout << "Logging to: " << folder << std::endl;
         return initialized_;
     }
 
@@ -323,6 +324,7 @@ private:
     }
 
     mutable std::mutex mutex_;
+    std::string schema_ocp_;
     bool initialized_ = false;
     // Root for run folders. cwd-relative by default (roslaunch nodes run in
     // ~/.ros); the node overrides it with the log_dir param, which

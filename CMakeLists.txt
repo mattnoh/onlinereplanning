@@ -1,146 +1,89 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
 project(comando_planner)
-
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
-endif()
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
-
-# ── Core ROS1 dependencies ────────────────────────────────────────────────────
-find_package(catkin REQUIRED COMPONENTS
-  roscpp
-  tf2_ros
-  geometry_msgs
-  nav_msgs
-  trajectory_msgs
-  mavros_msgs
-)
-
+set(COMANDO_ROS_VERSION "$ENV{ROS_VERSION}" CACHE STRING "0=standalone, 1=ROS1, 2=ROS2")
+if(COMANDO_ROS_VERSION STREQUAL "")
+  set(COMANDO_ROS_VERSION 0)
+endif()
+set(COMANDO_SOLVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ALIPDDP-main" CACHE PATH "ALIPDDP source directory")
 find_package(Eigen3 REQUIRED)
-
-# ── Include ALIPDDP solver as a sibling ──────────────────────────────────────
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ALIPDDP-main ${CMAKE_CURRENT_BINARY_DIR}/alipddp)
-
-# ── catkin package declaration ────────────────────────────────────────────────
-catkin_package(
-  INCLUDE_DIRS include config
-  CATKIN_DEPENDS roscpp geometry_msgs nav_msgs trajectory_msgs mavros_msgs
-)
-
-# ── Interface-only library for ROS-free planner core ─────────────────────────
-add_library(planner_core INTERFACE)
-target_include_directories(planner_core INTERFACE
-  ${EIGEN3_INCLUDE_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/config
-)
-target_link_libraries(planner_core INTERFACE
-  alipddp_library
-)
-
-# ── Helper macro ──────────────────────────────────────────────────────────────
-macro(configure_target TARGET_NAME)
-  target_include_directories(${TARGET_NAME} PRIVATE
-    ${catkin_INCLUDE_DIRS}
-    ${EIGEN3_INCLUDE_DIR}
-    include
-    config
-  )
-  target_link_libraries(${TARGET_NAME}
-    planner_core
-    ${catkin_LIBRARIES}
-  )
-endmacro()
-
-# ── Executables ───────────────────────────────────────────────────────────────
-set(SHARED_SOURCES src/quadrotor_mpc.cpp)
-
-add_executable(comando_planner
-  src/planner_node.cpp
-  ${SHARED_SOURCES}
-)
-configure_target(comando_planner)
-
-add_executable(target_publisher src/target_publisher.cpp)
-configure_target(target_publisher)
-
-# ── ROS-free test executables ─────────────────────────────────────────────────
-add_executable(test_poly_ocp test/test_poly_ocp_standalone.cpp)
-target_include_directories(test_poly_ocp PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_poly_ocp planner_core)
-
-add_executable(test_trajectory_replayer test/test_trajectory_replayer.cpp)
-target_include_directories(test_trajectory_replayer PRIVATE ${EIGEN3_INCLUDE_DIR} include)
-target_link_libraries(test_trajectory_replayer planner_core)
-
-add_executable(test_target_frame_warm_start test/test_target_frame_warm_start.cpp)
-target_include_directories(test_target_frame_warm_start PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_target_frame_warm_start planner_core)
-
-add_executable(test_planner_core test/test_planner_core.cpp ${SHARED_SOURCES})
-target_include_directories(test_planner_core PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_planner_core planner_core)
-
-add_executable(test_stateswitch_predictor test/test_stateswitch_predictor.cpp)
-target_include_directories(test_stateswitch_predictor PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_stateswitch_predictor planner_core)
-
-add_executable(test_stc_landing test/test_stc_landing.cpp ${SHARED_SOURCES})
-target_include_directories(test_stc_landing PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_stc_landing planner_core)
-
-add_executable(test_perception_ablation test/test_perception_ablation.cpp ${SHARED_SOURCES})
-target_include_directories(test_perception_ablation PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_perception_ablation planner_core)
-
-add_executable(test_perception_feedback_ablation test/test_perception_feedback_ablation.cpp ${SHARED_SOURCES})
-target_include_directories(test_perception_feedback_ablation PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_perception_feedback_ablation planner_core)
-
-add_executable(test_stc_landing_noaug test/test_stc_landing_noaug.cpp ${SHARED_SOURCES})
-target_include_directories(test_stc_landing_noaug PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_stc_landing_noaug planner_core)
-
-add_executable(test_stc_landing_noaug_ctcs test/test_stc_landing_noaug_ctcs.cpp)
-target_include_directories(test_stc_landing_noaug_ctcs PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_stc_landing_noaug_ctcs planner_core)
-
 find_package(Threads REQUIRED)
-add_executable(test_direct_mpc test/test_direct_mpc.cpp ${SHARED_SOURCES})
-target_include_directories(test_direct_mpc PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(test_direct_mpc planner_core Threads::Threads)
-target_compile_options(test_direct_mpc PRIVATE -UNDEBUG)
-target_link_libraries(comando_planner Threads::Threads)
-
-add_executable(tools_seed_probe test/tools_seed_probe.cpp ${SHARED_SOURCES})
-target_include_directories(tools_seed_probe PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(tools_seed_probe planner_core)
-
-add_executable(tools_motion_screen test/tools_motion_screen.cpp ${SHARED_SOURCES})
-target_include_directories(tools_motion_screen PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(tools_motion_screen planner_core)
-
-add_executable(tools_motion_seed_screen test/tools_motion_seed_screen.cpp ${SHARED_SOURCES})
-target_include_directories(tools_motion_seed_screen PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(tools_motion_seed_screen planner_core)
-
-add_executable(tools_motion_difficulty test/tools_motion_difficulty.cpp ${SHARED_SOURCES})
-target_include_directories(tools_motion_difficulty PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
-target_link_libraries(tools_motion_difficulty planner_core)
-
-# ── Install ───────────────────────────────────────────────────────────────────
-install(TARGETS
-    comando_planner
-    target_publisher
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
-
-install(DIRECTORY launch/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
-)
+add_subdirectory(${COMANDO_SOLVER_DIR} ${CMAKE_CURRENT_BINARY_DIR}/alipddp)
+add_library(planner_core STATIC src/quadrotor_mpc.cpp src/ocp_registry.cpp src/controller.cpp)
+target_include_directories(planner_core PUBLIC include config ${EIGEN3_INCLUDE_DIR})
+target_link_libraries(planner_core PUBLIC alipddp_library Threads::Threads)
+target_compile_options(planner_core PRIVATE -Wall -Wextra -Wpedantic)
+option(COMANDO_BUILD_TESTS "Build standalone tests" ON)
+option(COMANDO_BUILD_BENCHMARKS "Build research benchmark tools" OFF)
+if(COMANDO_BUILD_TESTS)
+ enable_testing()
+ foreach(name poly_ocp trajectory_replayer target_frame_warm_start planner_core stateswitch_predictor stc_landing stc_landing_noaug stc_landing_noaug_ctcs direct_mpc controller)
+  if(name STREQUAL "poly_ocp")
+   set(test_source test/test_poly_ocp_standalone.cpp)
+  else()
+   set(test_source test/test_${name}.cpp)
+  endif()
+  add_executable(test_${name} ${test_source})
+  target_link_libraries(test_${name} PRIVATE planner_core)
+  target_compile_options(test_${name} PRIVATE -UNDEBUG)
+  add_test(NAME ${name} COMMAND test_${name})
+ endforeach()
+endif()
+if(COMANDO_BUILD_BENCHMARKS)
+ foreach(name seed_probe motion_screen motion_seed_screen motion_difficulty gs_probe)
+  add_executable(tools_${name} test/tools_${name}.cpp)
+  target_link_libraries(tools_${name} PRIVATE planner_core)
+ endforeach()
+endif()
+if(COMANDO_ROS_VERSION STREQUAL "1")
+ find_package(catkin REQUIRED COMPONENTS roscpp tf2_ros geometry_msgs nav_msgs trajectory_msgs mavros_msgs)
+ catkin_package(INCLUDE_DIRS include LIBRARIES planner_core CATKIN_DEPENDS roscpp geometry_msgs nav_msgs trajectory_msgs mavros_msgs)
+ set(transport_dir transport/ros1)
+ foreach(name comando_planner target_publisher)
+  if(name STREQUAL "comando_planner")
+   set(node_source planner_node)
+  else()
+   set(node_source target_publisher)
+  endif()
+  add_executable(${name} ${transport_dir}/src/${node_source}.cpp)
+  target_include_directories(${name} PRIVATE ${transport_dir}/include ${transport_dir}/config ${catkin_INCLUDE_DIRS})
+  target_link_libraries(${name} PRIVATE planner_core ${catkin_LIBRARIES})
+ endforeach()
+ install(TARGETS comando_planner target_publisher RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+ install(DIRECTORY ${transport_dir}/launch/ DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch)
+elseif(COMANDO_ROS_VERSION STREQUAL "2")
+ find_package(ament_cmake REQUIRED)
+ foreach(dep rclcpp tf2_ros geometry_msgs nav_msgs trajectory_msgs visualization_msgs crazyflie_interfaces)
+  find_package(${dep} REQUIRED)
+ endforeach()
+ find_package(mavros_msgs QUIET)
+ find_package(mocap4r2_msgs QUIET)
+ set(transport_dir transport/ros2)
+ foreach(name comando_planner target_publisher)
+  if(name STREQUAL "comando_planner")
+   set(node_source planner_node)
+  else()
+   set(node_source target_publisher)
+  endif()
+  add_executable(${name} ${transport_dir}/src/${node_source}.cpp)
+  target_include_directories(${name} PRIVATE ${transport_dir}/include ${transport_dir}/config)
+  target_link_libraries(${name} planner_core)
+  ament_target_dependencies(${name} rclcpp tf2_ros geometry_msgs nav_msgs trajectory_msgs visualization_msgs crazyflie_interfaces)
+  if(mavros_msgs_FOUND)
+   target_compile_definitions(${name} PRIVATE HAS_MAVROS_MSGS)
+   ament_target_dependencies(${name} mavros_msgs)
+  endif()
+  if(mocap4r2_msgs_FOUND)
+   target_compile_definitions(${name} PRIVATE HAS_MOCAP4R2_MSGS)
+   ament_target_dependencies(${name} mocap4r2_msgs)
+  endif()
+ endforeach()
+ install(TARGETS comando_planner target_publisher DESTINATION lib/${PROJECT_NAME})
+ install(DIRECTORY ${transport_dir}/launch/ DESTINATION share/${PROJECT_NAME}/launch)
+ install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
+ ament_package()
+endif()

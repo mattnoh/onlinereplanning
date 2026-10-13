@@ -4,3 +4,6 @@ __pycache__/
 # in logs/ under version control.
 logs/*
 !logs/*.py
+
+logs/**
+benchmark_runs/**

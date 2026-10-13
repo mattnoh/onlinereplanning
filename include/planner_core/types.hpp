@@ -244,7 +244,10 @@ struct OCPCreateArgs {
     double t_abs = 0.0;
 };
 
+namespace planner_core { enum class ExecutionMode { RhReplanning, DirectMpc }; }
+
 struct OCPDescriptor {
+    planner_core::ExecutionMode execution_mode=planner_core::ExecutionMode::RhReplanning;
     enum class CommandMode  { CmdFullState, CmdBodyRate };
     enum class DroneOdomMode { Absolute, AbsoluteShiftedTarget, BodyFrameRelative, TargetFrameRelative };
     enum class WarmStart    { Shift, Feedback };
@@ -258,6 +261,7 @@ struct OCPDescriptor {
     DroneOdomMode drone_odom_mode = DroneOdomMode::Absolute;
 
     bool needs_target_trajectory = false;
+    bool disarm_on_landing_finish = false;
     bool skip_altitude_validation = false;
     bool skip_trajectory_validation = false;
     bool variable_dt = false;
@@ -433,7 +437,7 @@ struct PlannerCoreInput {
     OCPDescriptor::DroneOdomMode active_odom_mode = OCPDescriptor::DroneOdomMode::Absolute;
     std::string active_odom_topic;
     std::chrono::steady_clock::time_point now{};
-    double ros_time_sec = 0.0;
+    double absolute_time_sec = 0.0;
 };
 
 struct PlannerSolveLogData {

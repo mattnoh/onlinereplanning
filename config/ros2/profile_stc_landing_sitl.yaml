@@ -1,0 +1,5 @@
+/comando_planner:
+  ros__parameters:
+    ocp_type: stc_landing
+    mode: mpc
+    land_action: force_disarm

@@ -1,11 +1,13 @@
 #pragma once
 #include "planner_core/quadrotor_mpc.hpp"
+#include "ocp/ocp_stc_landing_mpc.hpp"
 #include "planner_core/types.hpp"
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <optional>
-#include <fstream>
+#include "planner_core/async_csv_writer.hpp"
+#include <sstream>
 #include <iomanip>
 
 namespace planner_core {
@@ -32,7 +34,7 @@ class DirectMpcController {
     int memory_policy_=-1,memory_node_=-1;
     double lead_=0.35;
     int count_=0;
-    std::ofstream controls_;
+    AsyncCsvWriter controls_;
     static double seconds(Clock::time_point a,Clock::time_point b){return std::chrono::duration<double>(a-b).count();}
     static Eigen::VectorXd relative(const Eigen::VectorXd& x,const TargetSnapshot& t){
         Eigen::VectorXd r=x.head(13);r.head(3)-=t.position;r.segment<3>(3)-=t.velocity;return r;
@@ -71,7 +73,7 @@ class DirectMpcController {
             try {
             const auto origin=input.now+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(lead));
             Eigen::VectorXd x=Eigen::VectorXd::Zero(StcLandingMpcOCP::NX);x.head(13)=relative(input.current_state,input.target_snapshot);x.tail(4)=applied;
-            auto pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();pred->a=input.target_snapshot.acceleration;
+            auto pred=std::make_shared<target_models::ConstantAccelPredictor>();pred->a=input.target_snapshot.acceleration;
             StcLandingMpcOCP::Dynamics dyn(pred);
             // Project through the currently applied command over the measured
             // solve lead. High-rate feedback corrects prediction error.
@@ -82,7 +84,7 @@ class DirectMpcController {
                     const double h=std::min(0.02,lead-t);
                     const double age=std::clamp(seconds(input.now,prior->origin)+t,0.0,StcLandingMpcOCP::N*StcLandingMpcOCP::DT-1e-6);
                     const int i=static_cast<int>(age/StcLandingMpcOCP::DT);
-                    auto old_pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();old_pred->a=prior->acceleration;
+                    auto old_pred=std::make_shared<target_models::ConstantAccelPredictor>();old_pred->a=prior->acceleration;
                     StcLandingMpcOCP::Dynamics old_dyn(old_pred);
                     auto reference=old_dyn.flow(prior->result.state_trajectory[i],prior->result.control_trajectory[i],age-i*StcLandingMpcOCP::DT,false).x;
                     reference.tail(4)=prior->result.state_trajectory[i].tail(4);
@@ -113,7 +115,7 @@ class DirectMpcController {
                 solver.restoreWarmStart(warm);solver.setNextWarmStartShift(0);
             }
             auto snapshot=solver.snapshotWarmStart();
-            auto raw=solver.solve(x,input.target_snapshot.acceleration,{},input.ros_time_sec+lead);
+            auto raw=solver.solve(x,input.target_snapshot.acceleration,{},input.absolute_time_sec+lead);
             PlannerCoreStepResult out;out.solve_attempted=true;out.solve_num=number;out.x0_source="measured_latency_projected";
             out.solve_result.success=raw.success;out.solve_result.state_trajectory=raw.state_trajectory;
             out.solve_result.control_trajectory=raw.control_trajectory;out.solve_result.feedback_gains=raw.feedback_gains;
@@ -158,12 +160,11 @@ public:
         request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0.35;count_=0;last_u_=StcLandingMpcOCP::hover();feedback_memory_=last_u_;memory_policy_=-1;memory_node_=-1;
         worker_=std::thread([this]{run();});}
     void reset(){PlannerCoreConfig c; {std::lock_guard<std::mutex> lock(mutex_);c=config_;} configure(c);}
-    void openControlLog(const std::string& path){std::lock_guard<std::mutex> lock(mutex_);controls_.close();controls_.open(path);controls_<<std::setprecision(17);
-        controls_<<"time,policy,age,nom_thrust,nom_roll,nom_pitch,nom_yaw,fb_thrust,fb_roll,fb_pitch,fb_yaw,thrust,roll,pitch,yaw,saturation,jump,feedback_limited,slew_limited,pos_error,vel_error\n";}
+    void openControlLog(const std::string& path){controls_.open(path,"time,policy,age,nom_thrust,nom_roll,nom_pitch,nom_yaw,fb_thrust,fb_roll,fb_pitch,fb_yaw,thrust,roll,pitch,yaw,saturation,jump,feedback_limited,slew_limited,pos_error,vel_error\n");}
     PlannerCoreStepResult trySolve(const PlannerCoreInput& input){
         std::lock_guard<std::mutex> lock(mutex_);PlannerCoreStepResult out;
         if(completed_){out=std::move(*completed_);completed_.reset();}
-        if(input.current_state.size()<13||!input.current_state.allFinite()||!input.target_snapshot.valid){out.rejection_reason="direct_mpc_invalid_state";return out;}
+        if(input.current_state.size()<13||!input.current_state.allFinite()||!input.target_snapshot.valid||!input.target_snapshot.position.allFinite()||!input.target_snapshot.velocity.allFinite()||!input.target_snapshot.acceleration.allFinite()){out.rejection_reason="direct_mpc_invalid_state";return out;}
         auto rel=relative(input.current_state,input.target_snapshot);
         if(policy_&&config_.enable_terminal_freeze&&rel.head(3).norm()<config_.terminal_freeze_enter_pos&&rel.segment(3,3).norm()<config_.terminal_freeze_enter_vel){out.terminal_freeze_engaged=true;out.solve_accepted=false;out.rejection_reason="terminal_freeze_engaged";return out;}
         if(!busy_&&(last_request_==Clock::time_point{}||seconds(input.now,last_request_)>=0.1)){
@@ -175,10 +176,10 @@ public:
         if(pending_&&now>=pending_->origin){policy_=std::move(pending_);pending_.reset();}
         if(!policy_)return out;out.has_replay_sample=true;out.solve_num=policy_->number;
         const double age=seconds(now,policy_->origin);
-        if(age<0||age>=std::min(StcLandingMpcOCP::N*StcLandingMpcOCP::DT,StcLandingNoAugOCP::envOrQ("MPC_MAX_POLICY_AGE",1.0))||measured.size()<13||!measured.allFinite()){out.stale=true;return out;}
+        if(age<0||age>=std::min(StcLandingMpcOCP::N*StcLandingMpcOCP::DT,comando_parameters::stc_landing::envOrQ("MPC_MAX_POLICY_AGE",1.0))||measured.size()<13||!measured.allFinite()||!target.valid||!target.position.allFinite()||!target.velocity.allFinite()){out.stale=true;return out;}
         int i=std::min(static_cast<int>(age/StcLandingMpcOCP::DT),StcLandingMpcOCP::N-1);
         const auto& r=policy_->result;Eigen::VectorXd nominal=r.control_trajectory[i];
-        auto pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();
+        auto pred=std::make_shared<target_models::ConstantAccelPredictor>();
         pred->a=policy_->acceleration;
         StcLandingMpcOCP::Dynamics dyn(pred);
         Eigen::VectorXd reference=dyn.flow(r.state_trajectory[i],nominal,age-i*StcLandingMpcOCP::DT,false).x;
@@ -207,8 +208,8 @@ public:
         for(int j=0;j<4;++j)u(j)=std::clamp(u(j),last_u_(j)-slew(j)*h,last_u_(j)+slew(j)*h);
         const double jump=(u-last_u_).norm();last_u_=u;last_apply_=now;
         out.command.kind=CommandKind::BodyRate;out.command.control=u;out.command.state=reference.head(13);
-        if(controls_){controls_<<std::chrono::duration<double>(now.time_since_epoch()).count()<<','<<policy_->number<<','<<age;
-            for(const auto& v:{nominal,feedback,u})for(int j=0;j<4;++j)controls_<<','<<v(j);controls_<<','<<saturated<<','<<jump<<','<<((feedback-unbounded_feedback).norm()>1e-9)<<','<<((u-before_slew).norm()>1e-9)<<','<<delta.head(3).norm()<<','<<delta.segment(3,3).norm()<<'\n';}
+        if(controls_){std::ostringstream trace;trace<<std::setprecision(17);trace<<std::chrono::duration<double>(now.time_since_epoch()).count()<<','<<policy_->number<<','<<age;
+            for(const auto& v:{nominal,feedback,u})for(int j=0;j<4;++j)trace<<','<<v(j);trace<<','<<saturated<<','<<jump<<','<<((feedback-unbounded_feedback).norm()>1e-9)<<','<<((u-before_slew).norm()>1e-9)<<','<<delta.head(3).norm()<<','<<delta.segment(3,3).norm()<<'\n';controls_.write(trace.str());}
         return out;
     }
 };

@@ -297,7 +297,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
 }
 
 inline OCPDescriptor descriptor() {
-    OCPDescriptor d;
+    OCPDescriptor d;d.disarm_on_landing_finish=true;
     d.name = "tracking_bodyrate_tf_noimu";
     d.dt = TH_INIT;
     d.default_n_replay = DEFAULT_N_REPLAY;

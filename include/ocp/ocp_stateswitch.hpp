@@ -1,6 +1,7 @@
 /// @file ocp_stateswitch.hpp
 /// @brief OCP formulation for relative-frame landing on a moving target (state-switch).
 #pragma once
+#include "target/predictor.hpp"
 
 #include <Eigen/Dense>
 #include <memory>
@@ -77,33 +78,7 @@ inline Param getSolverParams() {
  return p;
 }
 
-struct TargetPredictor {
- Eigen::Vector3d position = Eigen::Vector3d::Zero();
- Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
- Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
- Eigen::Vector3d jerk = Eigen::Vector3d::Zero();
- Eigen::Vector3d snap = Eigen::Vector3d::Zero();
-
- Eigen::Vector3d predictPos(double dt) const {
-  const double dt2 = dt * dt;
-  const double dt3 = dt2 * dt;
-  const double dt4 = dt3 * dt;
-  return position + velocity * dt + 0.5 * acceleration * dt2
-         + (1.0 / 6.0) * jerk * dt3 + (1.0 / 24.0) * snap * dt4;
- }
-
- Eigen::Vector3d predictVel(double dt) const {
-  const double dt2 = dt * dt;
-  const double dt3 = dt2 * dt;
-  return velocity + acceleration * dt + 0.5 * jerk * dt2
-         + (1.0 / 6.0) * snap * dt3;
- }
-
- Eigen::Vector3d predictAccel(double dt) const {
-  const double dt2 = dt * dt;
-  return acceleration + jerk * dt + 0.5 * snap * dt2;
- }
-};
+using TargetPredictor = target_models::PolynomialPredictor;
 
 struct StateswitchExtra {
  std::shared_ptr<TargetPredictor> predictor;
@@ -477,7 +452,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
 }
 
 inline OCPDescriptor descriptor() {
-    OCPDescriptor d;
+    OCPDescriptor d;d.disarm_on_landing_finish=true;
     d.name = "stateswitch";
     d.dt = TH_INIT;
     d.default_n_replay = DEFAULT_N_REPLAY;

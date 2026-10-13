@@ -1,0 +1,9 @@
+/comando_planner:
+  ros__parameters:
+    ocp_type: hover
+    mode: open_loop
+    n_replay: 4
+    hover_target_x: 2.0
+    hover_target_y: 2.0
+    hover_target_z: 2.05
+    land_action: none
