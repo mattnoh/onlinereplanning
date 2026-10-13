@@ -93,7 +93,7 @@ def resolve_result_dir(path: str) -> Path:
     base = Path(path)
     if base.exists():
         return base.resolve()
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     candidate = repo / base
     if candidate.exists():
         return candidate.resolve()

@@ -245,9 +245,9 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.all or not args.runs:
-        runs = sorted(HERE.glob("stc_landing_noaug_*"))
+        runs = sorted((HERE.parents[1] / "logs").glob("stc_landing_noaug_*"))
     else:
-        runs = [Path(a) if Path(a).is_absolute() else HERE / a for a in args.runs]
+        runs = [Path(a) if Path(a).is_absolute() else HERE.parents[1] / "logs" / a for a in args.runs]
     if not runs:
         raise SystemExit("no run directories found")
     for r in runs:

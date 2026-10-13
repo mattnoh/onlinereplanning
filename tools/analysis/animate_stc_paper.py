@@ -629,7 +629,7 @@ def make_gif(data: dict, out_path: Path, step: int, dpi: int,
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", type=Path, default=HERE / "on",
+    parser.add_argument("--dir", type=Path, default=HERE.parents[1] / "logs" / "on",
                         help="Result directory containing the quad CSV and constraints.csv.")
     parser.add_argument("--csv", default="clean_terminal_eq_dense.csv",
                         help="CSV inside --dir. Dense CSV gives smoother GIFs.")

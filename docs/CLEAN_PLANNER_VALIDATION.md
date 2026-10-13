@@ -47,3 +47,9 @@ A fresh run of the unchanged installed planner (source checkout `37fc32f`) with 
 Final sequential executable checks all passed: controller, planner core, replay, CTCS (160 samples), and five warm-started noaug solves (distance 3.70945 → 0.114301 m). The candidate normalizes MAVROS body-frame velocity at its sensor boundary, including RH; the old node performed this conversion for direct MPC only. This is an explicit frame-consistency change outside the unchanged noaug OCP equations.
 
 Durable candidate copy: `/home/lab/mavros_ws/src/.Codex/comando-planner-clean-candidate`; validation data copy: `/home/lab/mavros_ws/src/.Codex/comando-planner-validation`. The workspace-level `.Codex/CATKIN_IGNORE` prevents candidate package duplication during active workspace discovery. Active planner directories still have not been renamed or replaced. Crazyflie validation and cutover remain pending.
+
+### Final ROS1 wrapper smoke
+
+After removal of the unused ROS1 Crazyflie stub, a fresh direct MPC circle run also landed and tore down cleanly: 0.0129 m lateral error, 25 accepted / 2 rejected solves, 307.8696 ms median accepted solve, maximum feedback gap 20.2843 ms, OFFBOARD throughout, and no position commands during direct control. Data: `/tmp/comando-validation/px4_final_smoke`.
+
+The moved plotters retain their existing designs; only their default log-directory lookup was adjusted for the new `tools/analysis` location. No new plot outputs were generated. Remaining polynomial prediction implementations in the Crazyflie stateswitch OCPs were replaced with the external predictor alias before ROS2 validation.

@@ -14,6 +14,7 @@
 /// and registry name `stateswitch_stc_hard`.
 
 #pragma once
+#include "target/predictor.hpp"
 
 #include "optimal_control_problem.h"
 #include "alipddp/alipddp.h"
@@ -175,28 +176,7 @@ static Scalar evalCtcsIntegrand(const Vector<Scalar>& x,
 
 // ── Target predictor (planner-side: jerk/snap available, but only predictAccel
 //    is consumed inside the dynamics RK4) ──────────────────────────────────────
-struct TargetPredictor {
-    Eigen::Vector3d position     = Eigen::Vector3d::Zero();
-    Eigen::Vector3d velocity     = Eigen::Vector3d::Zero();
-    Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
-    Eigen::Vector3d jerk         = Eigen::Vector3d::Zero();
-    Eigen::Vector3d snap         = Eigen::Vector3d::Zero();
-
-    Eigen::Vector3d predictPos(double dt) const {
-        const double dt2 = dt * dt, dt3 = dt2 * dt, dt4 = dt3 * dt;
-        return position + velocity * dt + 0.5 * acceleration * dt2 +
-               (1.0 / 6.0) * jerk * dt3 + (1.0 / 24.0) * snap * dt4;
-    }
-    Eigen::Vector3d predictVel(double dt) const {
-        const double dt2 = dt * dt, dt3 = dt2 * dt;
-        return velocity + acceleration * dt + 0.5 * jerk * dt2 +
-               (1.0 / 6.0) * snap * dt3;
-    }
-    Eigen::Vector3d predictAccel(double dt) const {
-        const double dt2 = dt * dt;
-        return acceleration + jerk * dt + 0.5 * snap * dt2;
-    }
-};
+using TargetPredictor = target_models::PolynomialPredictor;
 
 // ── Augmented relative dynamics with y-accumulator (15-D state) ───────────────
 template<typename Scalar>

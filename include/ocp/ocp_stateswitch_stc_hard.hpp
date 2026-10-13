@@ -39,6 +39,7 @@
 ///                                    constraint at 25° + terminal TERM_W_TILT=200 remain)
 /// ---------------------------------------------------------------------------------------------
 #pragma once
+#include "target/predictor.hpp"
 
 #include "optimal_control_problem.h"
 #include "alipddp/alipddp.h"
@@ -143,33 +144,7 @@ static constexpr double W_STC_GS = 0.0;
 static constexpr double W_STC_SPD = 0.0;
 static constexpr double W_STC_THRUST = 0.0;
 
-struct TargetPredictor {
-    Eigen::Vector3d position = Eigen::Vector3d::Zero();
-    Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
-    Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
-    Eigen::Vector3d jerk = Eigen::Vector3d::Zero();
-    Eigen::Vector3d snap = Eigen::Vector3d::Zero();
-
-    Eigen::Vector3d predictPos(double dt) const {
-        const double dt2 = dt * dt;
-        const double dt3 = dt2 * dt;
-        const double dt4 = dt3 * dt;
-        return position + velocity * dt + 0.5 * acceleration * dt2 +
-               (1.0 / 6.0) * jerk * dt3 + (1.0 / 24.0) * snap * dt4;
-    }
-
-    Eigen::Vector3d predictVel(double dt) const {
-        const double dt2 = dt * dt;
-        const double dt3 = dt2 * dt;
-        return velocity + acceleration * dt + 0.5 * jerk * dt2 +
-               (1.0 / 6.0) * snap * dt3;
-    }
-
-    Eigen::Vector3d predictAccel(double dt) const {
-        const double dt2 = dt * dt;
-        return acceleration + jerk * dt + 0.5 * snap * dt2;
-    }
-};
+using TargetPredictor = target_models::PolynomialPredictor;
 
 template<typename Scalar>
 class Quad6DOFVarTimeRelativePred : public Quad6DOFVarTimeRelative<Scalar> {
