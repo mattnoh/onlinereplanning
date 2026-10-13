@@ -15,7 +15,7 @@
     <env name="SZMUK_CTCS_STEP_EPS" value="0.0016"/>
     <env name="SZMUK_CTCS_Y_SCALE" value="10"/>
     <env name="SZMUK_W_LAND_GS" value="20000"/>
-    <include file="$(find comando_planner)/launch/planner_launch.launch">
+    <include file="$(dirname)/planner_launch.launch">
       <arg name="platform" value="mavros"/>
       <arg name="drone_name" value="$(arg drone_name)"/>
       <arg name="log_dir" value="$(arg log_dir)"/>

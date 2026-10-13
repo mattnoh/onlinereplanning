@@ -1,6 +1,6 @@
 # Clean planner validation
 
-Candidate source: `/tmp/comando-clean`. Active planners remain unchanged until all required SITL gates pass. No directory cutover has been performed.
+Active ROS1 source: `/home/lab/mavros_ws/src/CoManDO_planner`, installed from the validated clean `mpc` candidate (`a6d6484`). The previous ROS1 worktree and all historical logs are preserved under `/home/lab/mavros_ws/src/comando_planner_old`, with `CATKIN_IGNORE` preventing duplicate package discovery. The Crazyflie planner has not been replaced. Earlier sections below describe the candidate validation before this ROS1 cutover.
 
 Reference commits: PX4 `37fc32f`; Crazyflie `fb424a6` (checkpoint of existing log deletions). The existing Crazyflie solver changes were checkpointed as `0a3a9db`; the clean core currently links the shared CTCS solver in the MAVROS workspace.
 
@@ -104,3 +104,11 @@ The calibrated circle flight (`crazyflie_mpc/circle`) accepted policies 0–3, t
 The lower-bandwidth rate-gain experiment failed: applying 0.1× roll/pitch gains before takeoff prevented staging; applying them after normal staging destabilized the neutral body-rate command and the vehicle fell before the requested step. These are calibration failures, and the settings are not adopted. The runner now records exceptions as harness failures and records requested rate tuning in each completed calibration cell.
 
 A concrete Crazyflie state-frame discrepancy was found during review: the Python backend publishes `kalman.statePX/PY/PZ`, which are body-frame velocity components (confirmed by firmware `kalmanCoreExternalizeState`, which rotates them to form world velocity). The native ROS2 Crazyflie adapter now rotates those components using the separately received ENU pose before passing state to the core. Explicit already-relative odometry overrides remain in their declared frame. Pose/velocity callbacks reject nonfinite updates without refreshing freshness timestamps. This ROS2-only correction requires renewed Crazyflie RH/MPC checks; ROS1 numerical behavior is unchanged.
+
+## Active ROS1 cutover
+
+Following the user's explicit instruction to replace the active ROS1 planner independently of Crazyflie, the old linked worktree was moved with `git worktree move` to `comando_planner_old`. Its original directory inode, revision, 6,173 historical log files, and 6,096,129,544 log bytes were verified after the move. The active `CoManDO_planner` is now an independent Git clone on `mpc` containing the validated clean core and ROS1 transport, with an empty logs directory.
+
+The planner and target publisher both built successfully in the active MAVROS workspace, separately with one worker and the shared sibling ALIPDDP solver. Package discovery and launch parsing are checked against `/home/lab/mavros_ws/devel/setup.bash`. This cutover makes no numerical/controller changes and does not rerun the already passed six-flight validation. Cutover manifests and build records are stored in `.Codex/comando-planner-validation`. Crazyflie MPC remains pending after its failed flight checks.
+
+Cutover launch verification found and fixed the direct-MPC launcher's leftover `$(find comando_planner)/launch` include. It now uses `$(dirname)/planner_launch.launch`, resolving in both the restructured source tree and installed launch directory. RH, direct MPC, and target launch parsing passed against the active workspace; binary dependencies resolved in the sourced ROS1 environment and the new logs directory remained empty.
