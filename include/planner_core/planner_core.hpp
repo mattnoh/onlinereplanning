@@ -146,9 +146,6 @@ public:
         planner_config.dt = config_.ocp_dt;
         planner_config.mass_kg = desc_.default_mass_kg;
         planner_config.t_start_abs = input.absolute_time_sec;
-        if (input.has_target_accel_buffer) {
-            planner_config.target_accel_buffer = input.target_accel_buffer;
-        }
 
         std::any extra;
         if (desc_.prepare_extra) {
@@ -346,9 +343,6 @@ public:
         planner_config.dt = config_.ocp_dt;
         planner_config.mass_kg = desc_.default_mass_kg;
         planner_config.t_start_abs = input.absolute_time_sec;
-        if (input.has_target_accel_buffer) {
-            planner_config.target_accel_buffer = input.target_accel_buffer;
-        }
 
         std::any extra;
         if (desc_.prepare_extra) {
@@ -363,7 +357,6 @@ public:
         if (desc_.post_process_result) {
             desc_.post_process_result(result, input.target_snapshot);
         }
-
 
         if (!result.success || !validStructure(result)) {
             reject(out, "solve_failed", "Open-loop solve failed");
@@ -884,9 +877,6 @@ private:
         }
         return true;
     }
-
-
-
 
     std::vector<Eigen::VectorXd> makeTrajectoryForPublishing(const SolverResult& result) const {
         if (desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative) {

@@ -347,7 +347,6 @@ inline void subscribeOdometry(ros::NodeHandle& nh,Eigen::VectorXd& state_out,std
             h.last_odom = std::chrono::steady_clock::now();
         });
 
-
 }
 
 inline void setup(ros::NodeHandle& nh,

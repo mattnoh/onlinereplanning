@@ -2,13 +2,11 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
 from launch.substitutions import LaunchConfiguration, PythonExpression
 
-
 def _set_param(node, name, value):
     return ExecuteProcess(
         cmd=['ros2', 'param', 'set', node, name, value],
         output='screen'
     )
-
 
 def generate_launch_description():
     """
@@ -22,12 +20,12 @@ def generate_launch_description():
 
     Terminal B:
     ros2 launch comando_planner ocp_launch.py \
-        ocp_type:=landing mode:=open_loop n_replay:=5 command_seq:=1
+        ocp_type:=stc_landing_noaug mode:=open_loop n_replay:=5 command_seq:=1
     """
 
     args = [
         DeclareLaunchArgument('node_name', default_value='/comando_planner'),
-        DeclareLaunchArgument('ocp_type', default_value='landing'),
+        DeclareLaunchArgument('ocp_type', default_value='stc_landing_noaug'),
         DeclareLaunchArgument('mode', default_value='mpc'),
         # n_replay=4, NOT the descriptor NEX default 7: at 7 the warm-start
         # shift (~0.84 s) outruns the solve_lead prediction (~0.3 s) so x0

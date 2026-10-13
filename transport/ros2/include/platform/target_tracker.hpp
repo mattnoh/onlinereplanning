@@ -1,37 +1,5 @@
-/// @file target_tracker.hpp
-/// @brief Target-state subscriptions (odom + optional live accel + predicted accel).
-///
-/// EXPECTED ROS GRAPH (Target Tracker):
-/// - Planner node: `/comando_planner`
-/// - Input topics (from target estimator/sim): `<target_odom_topic>`,
-///   `<target_accel_topic>` (optional diagnostics), `<predicted_accel_topic>`
-/// - Typical defaults in launch: `/target/odom`, `/target/accel`,
-///   `/target/predicted_accel`
-/// - `/target/predicted_accel` is only required by OCPs that explicitly need an
-///   external target-acceleration profile, such as `tracking_circle_target`.
-///   `stateswitch` builds its predictor from the target snapshot instead.
-///
-/// FIXES vs original:
-///   BUG 1 — Single shared timestamp for two async topics.
-///            Original: both callbacks overwrote the same `timestamp`.
-///            If odom arrived but accel dropped out, isFresh() used the odom
-///            timestamp and returned true even though acceleration was stale.
-///            Fix: separate `odom_timestamp` and `accel_timestamp` per topic;
-///                 isFresh() requires BOTH to be individually fresh.
-///
-///   BUG 2 — `valid` was permanently true once both topics fired once.
-///            If a topic dropped mid-flight the solver continued using stale
-///            values with no way to detect the dropout at the `valid` flag.
-///            Fix: `valid` is now computed inside isFresh() dynamically rather
-///                 than cached as a permanent bool. The `odom_received` and
-///                 `accel_received` bools are kept for startup sequencing only.
-///
-///   NOTE — Lambda reference captures: `target_state`, `target_mutex`, and
-///           `node` are captured by reference in long-lived subscription
-///           callbacks. The caller (planner_node) must ensure these outlive
-///           the subscriptions. Call `handles.reset()` before destroying the
-///           referents (e.g. in the node destructor).
-
+/// Target state subscriptions: odometry and optional live acceleration.
+/// The OCP predictor consumes the latest position/velocity/acceleration snapshot.
 #pragma once
 
 #include <rclcpp/rclcpp.hpp>
@@ -42,8 +10,6 @@
 #include <Eigen/Dense>
 #include <mutex>
 #include <string>
-
-#include "target/target_accel_buffer.hpp"
 
 namespace platform {
 namespace target_tracker {
@@ -104,30 +70,15 @@ struct TargetState {
         return std::max(oa, aa);
     }
 
-    // Predicted acceleration cache used by acceleration-driven OCPs.
-    struct PredictedAccel {
-        rclcpp::Time origin_time{0, 0, RCL_ROS_TIME};
-        target_models::TargetAccelBuffer accel_buffer;
-        bool received = false;
-        
-        bool isFresh(const rclcpp::Time& now, double max_age_sec = 2.0) const {
-            if (!received) return false;
-            if (origin_time.nanoseconds() <= 0) return false;
-            return (now - origin_time).seconds() < max_age_sec;
-        }
-    };
-    PredictedAccel predicted_accel;
 };
 
 struct Handles {
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr       odom_sub;
     rclcpp::Subscription<geometry_msgs::msg::AccelStamped>::SharedPtr accel_sub;
-    rclcpp::Subscription<trajectory_msgs::msg::MultiDOFJointTrajectory>::SharedPtr predicted_accel_sub;
 
     void reset() {
         odom_sub.reset();
         accel_sub.reset();
-        predicted_accel_sub.reset();
     }
 };
 
@@ -136,7 +87,6 @@ inline void setup(
     rclcpp::CallbackGroup::SharedPtr     callback_group,
     const std::string&                   odom_topic,
     const std::string&                   accel_topic,
-    const std::string&                   predicted_accel_topic,
     TargetState&                         target_state,
     std::mutex&                          target_mutex,
     Handles&                             handles)
@@ -217,53 +167,10 @@ inline void setup(
             opts);
     }
 
-    // ── Predicted acceleration callback ──────────────────────────────────────
-    handles.predicted_accel_sub = node->create_subscription<trajectory_msgs::msg::MultiDOFJointTrajectory>(
-        predicted_accel_topic, 10,
-        [&target_state, &target_mutex, node](
-            const trajectory_msgs::msg::MultiDOFJointTrajectory::SharedPtr msg)
-        {
-            if (msg->points.empty()) return;
-
-            std::lock_guard<std::mutex> lk(target_mutex);
-            
-            auto& pred = target_state.predicted_accel;
-            pred.origin_time =
-                (msg->header.stamp.sec != 0 || msg->header.stamp.nanosec != 0)
-                    ? rclcpp::Time(msg->header.stamp)
-                    : node->now();
-            
-            const double t_start = pred.origin_time.seconds();
-            double dt = 0.05;
-            if (msg->points.size() > 1) {
-                dt = (rclcpp::Duration(msg->points[1].time_from_start) -
-                      rclcpp::Duration(msg->points[0].time_from_start)).seconds();
-            }
-            
-            std::vector<Eigen::Vector3d> accels;
-            accels.reserve(msg->points.size());
-            for (const auto& pt : msg->points) {
-                if (!pt.accelerations.empty()) {
-                    accels.emplace_back(pt.accelerations[0].linear.x,
-                                        pt.accelerations[0].linear.y,
-                                        pt.accelerations[0].linear.z);
-                } else {
-                    accels.emplace_back(0, 0, 0);
-                }
-            }
-            
-            pred.accel_buffer.t_start = t_start;
-            pred.accel_buffer.dt = dt <= 0.0 ? 0.05 : dt;
-            pred.accel_buffer.accels = std::move(accels);
-            pred.received = true;
-        },
-        opts);
-
     RCLCPP_INFO(node->get_logger(),
-        "[TargetTracker] Subscribed odom: %s  accel(diagnostics): %s  predicted_accel: %s",
+        "[TargetTracker] Subscribed odom: %s  accel(diagnostics): %s",
         odom_topic.c_str(),
-        accel_topic.empty() ? "<disabled>" : accel_topic.c_str(),
-        predicted_accel_topic.c_str());
+        accel_topic.empty() ? "<disabled>" : accel_topic.c_str());
 }
 
 } // namespace target_tracker

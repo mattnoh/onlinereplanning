@@ -22,6 +22,7 @@
 /// See docs/dynamic_target_hardware_integration.md for the message contract.
 
 #include <ros/ros.h>
+#include "target/target_generator.hpp"
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/AccelStamped.h>
 #include <geometry_msgs/PoseStamped.h>
@@ -30,13 +31,6 @@
 #include <mutex>
 #include <cmath>
 
-#include "target/circular_target.hpp"
-#include "target/figure8_target.hpp"
-#include "target/straight_target.hpp"
-#include "target/stop_and_go_target.hpp"
-#include "target/segmented_accel_target.hpp"
-#include "target/target_model_config.hpp"
-#include "target/campaign_shape.hpp"
 #include <algorithm>
 #include <random>
 
@@ -123,13 +117,13 @@ public:
         const Eigen::Vector3d ctr(c_x, c_y, c_z);
 
         // Per-trial shape randomisation, from the SHARED header that the
-        // offline feasibility screen also uses -- see campaign_shape.hpp. It
+        // offline feasibility screen also uses -- see target_generator.hpp. It
         // varies the physical parameters (radius, rate, speed, segment
         // timing), not just phase: randomising phase alone is cancelled by the
         // heading-relative staging and produces N copies of one condition.
         bool shape_random; nh_.param<bool>("target_shape_random", shape_random, true);
-        const target_campaign::Shape shp =
-            target_campaign::drawShape(static_cast<unsigned>(motion_seed));
+        const target_models::TargetConfig shp =
+            target_models::TargetGenerator::drawConfig(static_cast<unsigned>(motion_seed));
         ROS_INFO("[TargetPublisher] shape_random=%d seed=%d traj=%s -> "
                  "R=%.3f omega=%.3f omega_f8=%.3f amp=(%.3f,%.3f) speed=%.3f/%.3f "
                  "span=%.2f cruise=%.2f ramp=%.2f dwell=%.2f accel=%.3f hold=%.2f "
@@ -156,18 +150,18 @@ public:
             throw std::runtime_error("unknown target_trajectory: " + traj);
         }
         if (shape_random) {
-            motion_ = target_campaign::buildTarget(
+            motion_ = target_models::TargetGenerator::create(
                 traj, shp, static_cast<unsigned>(motion_seed));
         } else {
             // Legacy fixed-shape path: rosparams, no randomisation.
-            target_campaign::Shape fx;
+            target_models::TargetConfig fx;
             fx.R = radius; fx.omega = omega; fx.omega_f8 = omega;
             fx.amp_x = amp_x; fx.amp_y = amp_y;
             fx.speed = speed; fx.speed_sag = speed; fx.span = span;
             fx.cruise = sg_cruise; fx.ramp = sg_ramp; fx.dwell = sg_dwell;
             fx.accel_mag = pa_accel; fx.hold = pa_hold; fx.sigma = ra_sigma;
             fx.heading = heading; fx.phase = 0.0; fx.k0 = 0; fx.t_off = 0.0;
-            motion_ = target_campaign::buildTarget(
+            motion_ = target_models::TargetGenerator::create(
                 traj, fx, static_cast<unsigned>(motion_seed));
         }
 
@@ -585,7 +579,7 @@ private:
     double t0_ = 0.0;
     Eigen::Quaterniond last_target_quat_ = Eigen::Quaterniond::Identity();
 
-    target_config::SyntheticTarget motion_;
+    target_models::TargetGenerator motion_;
 
     // Target-estimate uncertainty (see constructor).
     mutable std::mt19937 noise_rng_;

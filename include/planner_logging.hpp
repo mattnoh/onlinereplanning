@@ -27,7 +27,7 @@ struct SolveLogMeta {
     double ocp_dt = 0.05;
     /// Coordinate frame of the solved trajectory.
     /// "absolute"          — world-frame absolute coordinates (hover, landing, …)
-    /// "absolute_relative" — world-frame relative to target (stateswitch, tracking_circle*)
+    /// "absolute_relative" — world-frame relative to target (RH landing)
     /// "body_relative"     — body-frame relative to target  (tracking_cmdhover)
     std::string coord_mode = "absolute";
     Eigen::Vector3d target_snapshot_pos = Eigen::Vector3d::Zero();
@@ -93,7 +93,6 @@ public:
         std::lock_guard<std::mutex> lk(mutex_);
         if (initialized_ && schema_ocp_==ocp_type && state_names_==state_names && control_names_==control_names) return true;
         all_solves_log_.close();solver_events_log_.close();schema_ocp_=ocp_type;
-
 
         (void)log_state_headers;
         (void)command_mode;

@@ -84,7 +84,6 @@ public:
         open_loop_abort_max_vz_error_mps_ = runtime_cfg.open_loop_abort_max_vz_error_mps;
         target_odom_topic_ = runtime_cfg.target_odom_topic;
         target_accel_topic_ = runtime_cfg.target_accel_topic;
-        target_predicted_accel_topic_ = runtime_cfg.target_predicted_accel_topic;
         debug_body_relative_trace_ = runtime_cfg.debug_body_relative_trace;
         body_relative_odom_topic_ = runtime_cfg.body_relative_odom_topic;
         enable_terminal_freeze_ = runtime_cfg.enable_terminal_freeze;
@@ -143,10 +142,10 @@ public:
         }
 
         // Keep target subscriptions alive regardless of active OCP type,
-        // so runtime OCP switching to stateswitch works without restart.
+        // so runtime switching between hover, RH and MPC works without restart.
         platform::target_tracker::setup(
             this, sensor_cb_group_,
-            target_odom_topic_, target_accel_topic_, target_predicted_accel_topic_,
+            target_odom_topic_, target_accel_topic_,
             state_monitor_.targetState(), state_monitor_.targetMutex(), target_handles_);
 
         traj_pub_ = this->create_publisher<nav_msgs::msg::Path>(
@@ -481,19 +480,9 @@ private:
         return snapshot.valid;
     }
 
-
-
-
-
-
-
-
-
-    // tracking_circle_target OCP uses only future target acceleration.
     // Current target pose/velocity is still required here so planner-side
     // interface plumbing can reconstruct absolute target motion for command
     // publishing and logs. This is not part of the OCP model itself.
-
 
     Eigen::VectorXd getCurrentState() const {
         if (platform_ == "mavros") {
@@ -529,8 +518,6 @@ private:
     const char* currentFrameLabel() const {
         return planner_core::frameLabel(drone_odom_mode_);
     }
-
-
 
     void setTerminalTarget(const Eigen::Vector3d& xyz) {
         hover_target_ = xyz;
@@ -884,8 +871,6 @@ private:
         input.active_odom_topic = drone_odom_topic_;
         input.now = Clock::now();
         input.absolute_time_sec = this->now().seconds();
-        input.target_accel_buffer = state_monitor_.getTargetAccelBuffer();
-        input.has_target_accel_buffer = state_monitor_.hasTargetTrajectory(this->now());
         return input;
     }
 
@@ -1346,7 +1331,6 @@ private:
         publishDebugMarkers(replay.command, replay.diagnostics);
     }
 
-
     void publishCommand(const Eigen::VectorXd& s, const Eigen::VectorXd& u) {
         const auto& desc = OCPRegistry::getDescriptor(ocp_type_);
         const auto cmd = planner_core::makePlannerCommand(
@@ -1418,19 +1402,10 @@ private:
         TargetSnapshot target_snapshot = getTargetSnapshot();
         const bool target_valid_for_ocp = isTargetValidForDescriptor(desc, target_snapshot);
 
-        if (desc.needs_target_trajectory || desc.validate_target) {
+        if (desc.validate_target) {
             if (!target_valid_for_ocp) {
                 RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
                     "[OpenLoop] IDLE — waiting for valid target state...");
-                publishPausedHoverHoldTick();
-                return;
-            }
-        }
-
-        if (desc.needs_target_trajectory) {
-            if (!state_monitor_.hasTargetTrajectory(this->now())) {
-                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                    "[OpenLoop] IDLE — waiting for /target/predicted_accel...");
                 publishPausedHoverHoldTick();
                 return;
             }
@@ -1538,7 +1513,6 @@ private:
     std::string target_frame_odom_topic_ = "/drone/target_frame_odom";
     std::string target_odom_topic_ = "/target/odom";
     std::string target_accel_topic_ = "/target/accel";
-    std::string target_predicted_accel_topic_ = "/target/predicted_accel";
     bool debug_body_relative_trace_ = false;
 
     bool enable_terminal_freeze_ = true;
@@ -1568,7 +1542,6 @@ private:
 
     Eigen::Vector3d hover_target_ = Eigen::Vector3d::Zero();
     Eigen::VectorXd terminal_state_ = Eigen::VectorXd();
-
 
     platform::crazyflie::Handles cf_handles_;
     platform::mavros::Handles mavros_handles_;

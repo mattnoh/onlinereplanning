@@ -51,7 +51,6 @@ inline PlannerRuntimeConfig loadPlannerRuntimeConfig(rclcpp::Node* node) {
     // Topics for external target tracking.
     node->declare_parameter("target_odom_topic", cfg.target_odom_topic);
     node->declare_parameter("target_accel_topic", cfg.target_accel_topic);
-    node->declare_parameter("target_predicted_accel_topic", cfg.target_predicted_accel_topic);
     node->declare_parameter("debug_body_relative_trace", cfg.debug_body_relative_trace);
 
     node->declare_parameter("enable_terminal_freeze", cfg.enable_terminal_freeze);
@@ -89,7 +88,6 @@ inline PlannerRuntimeConfig loadPlannerRuntimeConfig(rclcpp::Node* node) {
 
     cfg.target_odom_topic = node->get_parameter("target_odom_topic").as_string();
     cfg.target_accel_topic = node->get_parameter("target_accel_topic").as_string();
-    cfg.target_predicted_accel_topic = node->get_parameter("target_predicted_accel_topic").as_string();
     cfg.debug_body_relative_trace = node->get_parameter("debug_body_relative_trace").as_bool();
 
     cfg.enable_terminal_freeze = node->get_parameter("enable_terminal_freeze").as_bool();

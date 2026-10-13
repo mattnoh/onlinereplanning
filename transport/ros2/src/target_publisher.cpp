@@ -46,6 +46,7 @@
 ///       -p target_mode:=mocap -p rigid_body_name:=stmini
 
 #include <rclcpp/rclcpp.hpp>
+#include "target/target_generator.hpp"
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/accel_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -53,9 +54,6 @@
 #include <mocap4r2_msgs/msg/rigid_bodies.hpp>
 #endif
 #include <Eigen/Geometry>
-
-#include "target/circular_target.hpp"
-#include "target/figure8_target.hpp"
 
 #include <cmath>
 #include <chrono>
@@ -301,8 +299,8 @@ public:
                 "[TargetPublisher] mode=%s synthetic pose measurements  circle_center=(%.2f,%.2f,%.2f)  "
                 "circle_R=%.2f  circle_omega=%.2f rad/s  %.0f Hz",
                 target_mode_.c_str(),
-                circle_model_.center.x(), circle_model_.center.y(), circle_model_.center.z(),
-                circle_model_.R, circle_model_.omega, publish_hz_);
+                0.0, 0.0, 0.2,
+                1.0, 0.4, publish_hz_);
         }
 #else
         if (target_mode_ == "trace_replay") {
@@ -319,8 +317,8 @@ public:
                 "[TargetPublisher] mode=%s synthetic pose measurements  circle_center=(%.2f,%.2f,%.2f)  "
                 "circle_R=%.2f  circle_omega=%.2f rad/s  %.0f Hz",
                 target_mode_.c_str(),
-                circle_model_.center.x(), circle_model_.center.y(), circle_model_.center.z(),
-                circle_model_.R, circle_model_.omega, publish_hz_);
+                0.0, 0.0, 0.2,
+                1.0, 0.4, publish_hz_);
         }
 #endif
 
@@ -425,6 +423,8 @@ private:
         const rclcpp::Time stamp = now();
         const double t = stamp.seconds();
 
+        target_model_ = target_models::TargetGenerator::defaults(
+            target_mode_ == "gazebo_figure8" ? "figure8" : "circle");
         if (target_mode_ == "gazebo_circle" || target_mode_ == "gazebo_figure8") {
             const Kinematics truth = syntheticTargetTruth(t);
             publishSyntheticTruth(truth, stamp);
@@ -914,15 +914,9 @@ private:
         Eigen::Vector3d p = Eigen::Vector3d::Zero();
         Eigen::Vector3d v = Eigen::Vector3d::Zero();
         Eigen::Vector3d a = Eigen::Vector3d::Zero();
-        if (target_mode_ == "gazebo_figure8") {
-            p = figure8_model_.pos(t_rel);
-            v = figure8_model_.vel(t_rel);
-            a = figure8_model_.accel(t_rel);
-        } else {
-            p = circle_model_.pos(t_rel);
-            v = circle_model_.vel(t_rel);
-            a = circle_model_.accel(t_rel);
-        }
+        p = target_model_.pos(t_rel);
+        v = target_model_.vel(t_rel);
+        a = target_model_.accel(t_rel);
         const double psi = target_yaw_rate_ * t_rel;
         Kinematics k{};
         k.px = p.x(); k.py = p.y(); k.pz = p.z();
@@ -1011,8 +1005,7 @@ private:
     Eigen::Vector3d trace_vel_shift_ = Eigen::Vector3d::Zero();
     double trace_last_yaw_ = 0.0;
     bool trace_yaw_initialized_ = false;
-    target_models::CircularTarget circle_model_;  // circle model defaults live in circular_target.hpp
-    target_models::Figure8Target figure8_model_;  // figure-8 model defaults live in figure8_target.hpp
+    target_models::TargetGenerator target_model_;
     double t0_ = 0.0;  // wall-clock time at startup, for relative time in model source
     std::string rigid_body_name_;
     std::string drone_odom_topic_;

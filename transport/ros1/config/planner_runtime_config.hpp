@@ -48,7 +48,6 @@ inline PlannerRuntimeConfig loadPlannerRuntimeConfig(ros::NodeHandle& nh) {
     nh.param<std::string>("body_relative_odom_topic",     cfg.body_relative_odom_topic,     cfg.body_relative_odom_topic);
     nh.param<std::string>("target_odom_topic",            cfg.target_odom_topic,            cfg.target_odom_topic);
     nh.param<std::string>("target_accel_topic",           cfg.target_accel_topic,           cfg.target_accel_topic);
-    nh.param<std::string>("target_predicted_accel_topic", cfg.target_predicted_accel_topic, cfg.target_predicted_accel_topic);
     nh.param<bool>       ("debug_body_relative_trace",    cfg.debug_body_relative_trace,    cfg.debug_body_relative_trace);
 
     nh.param<double>("seed_alpha_pos",              cfg.seed_alpha_pos,              cfg.seed_alpha_pos);

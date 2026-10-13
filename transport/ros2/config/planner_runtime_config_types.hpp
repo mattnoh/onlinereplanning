@@ -5,7 +5,6 @@
 #include <optional>
 
 #include "planner_core/types.hpp"
-#include "target/target_accel_buffer.hpp"
 
 struct PlannerRuntimeConfig {
     std::string ocp_type = "";
@@ -32,7 +31,6 @@ struct PlannerRuntimeConfig {
 
     std::string target_odom_topic = "/target/odom";
     std::string target_accel_topic = "/target/accel";
-    std::string target_predicted_accel_topic = "/target/predicted_accel";
     bool debug_body_relative_trace = false;
 
     bool enable_terminal_freeze = true;
@@ -51,7 +49,6 @@ struct PlannerRuntimeConfig {
     double open_loop_abort_max_vz_error_mps = 1.00;
 
     double t_start_abs = 0.0;
-    std::optional<target_models::TargetAccelBuffer> target_accel_buffer;
 
     bool isConfigured() const {
         return !ocp_type.empty() && !mode.empty();
@@ -79,7 +76,6 @@ inline PlannerConfig toPlannerConfig(const PlannerRuntimeConfig& cfg) {
     out.body_relative_odom_topic = cfg.body_relative_odom_topic;
     out.target_odom_topic = cfg.target_odom_topic;
     out.target_accel_topic = cfg.target_accel_topic;
-    out.target_predicted_accel_topic = cfg.target_predicted_accel_topic;
     out.debug_body_relative_trace = cfg.debug_body_relative_trace;
     out.enable_terminal_freeze = cfg.enable_terminal_freeze;
     out.terminal_freeze_enter_pos = cfg.terminal_freeze_enter_pos;
@@ -95,6 +91,5 @@ inline PlannerConfig toPlannerConfig(const PlannerRuntimeConfig& cfg) {
     out.open_loop_abort_max_z_error_m = cfg.open_loop_abort_max_z_error_m;
     out.open_loop_abort_max_vz_error_mps = cfg.open_loop_abort_max_vz_error_mps;
     out.t_start_abs = cfg.t_start_abs;
-    out.target_accel_buffer = cfg.target_accel_buffer;
     return out;
 }

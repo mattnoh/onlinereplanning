@@ -39,7 +39,6 @@
   <!-- Target topics -->
   <arg name="target_odom_topic"                 default="/target/odom"/>
   <arg name="target_accel_topic"                default="/target/accel"/>
-  <arg name="target_predicted_accel_topic"      default="/target/predicted_accel"/>
 
   <!-- Terminal freeze -->
   <!-- Seed each replan from the measured state: x0 = plan(t_act) +
@@ -90,7 +89,6 @@
        MAVROS tuning run; leave them at compiled defaults for the shared,
        CF-safe baseline. -->
 
-
   <node pkg="comando_planner" type="comando_planner" name="comando_planner" output="screen">
     <env name="SZMUK_Z_STAGE"      value="$(arg stc_z_stage)"/>
     <env name="SZMUK_LOS_ALT_TRIG" value="$(arg stc_los_alt_trig)"/>
@@ -116,7 +114,6 @@
 
     <param name="target_odom_topic"                 value="$(arg target_odom_topic)"/>
     <param name="target_accel_topic"                value="$(arg target_accel_topic)"/>
-    <param name="target_predicted_accel_topic"      value="$(arg target_predicted_accel_topic)"/>
 
     <param name="seed_alpha_pos"                    type="double" value="$(arg seed_alpha_pos)"/>
     <param name="seed_alpha_vel"                    type="double" value="$(arg seed_alpha_vel)"/>

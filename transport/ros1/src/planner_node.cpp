@@ -68,7 +68,6 @@ public:
         open_loop_abort_max_vz_error_mps_ = runtime_cfg.open_loop_abort_max_vz_error_mps;
         target_odom_topic_               = runtime_cfg.target_odom_topic;
         target_accel_topic_              = runtime_cfg.target_accel_topic;
-        target_predicted_accel_topic_    = runtime_cfg.target_predicted_accel_topic;
         debug_body_relative_trace_       = runtime_cfg.debug_body_relative_trace;
         body_relative_odom_topic_        = runtime_cfg.body_relative_odom_topic;
         seed_alpha_pos_                  = runtime_cfg.seed_alpha_pos;
@@ -121,7 +120,7 @@ public:
 
         platform::target_tracker::setup(
             nh_,
-            target_odom_topic_, target_accel_topic_, target_predicted_accel_topic_,
+            target_odom_topic_, target_accel_topic_,
             state_monitor_.targetState(), state_monitor_.targetMutex(), target_handles_);
 
         traj_pub_ = nh_.advertise<nav_msgs::Path>("/" + drone_name_ + "/planned_trajectory", 10);
@@ -715,8 +714,6 @@ private:
         input.active_odom_topic   = drone_odom_topic_;
         input.now                 = Clock::now();
         input.absolute_time_sec        = ros::Time::now().toSec();
-        input.target_accel_buffer = state_monitor_.getTargetAccelBuffer();
-        input.has_target_accel_buffer = state_monitor_.hasTargetTrajectory(ros::Time::now());
         return input;
     }
 
@@ -854,14 +851,9 @@ private:
         }
         auto desc = OCPRegistry::getDescriptor(ocp_type_);
         TargetSnapshot target_snapshot = getTargetSnapshot();
-        if ((desc.needs_target_trajectory || desc.validate_target) &&
+        if ((desc.validate_target) &&
             !isTargetValidForDescriptor(desc, target_snapshot)) {
             ROS_WARN_THROTTLE(2.0, "[OpenLoop] IDLE — waiting for valid target state...");
-            publishPausedHoverHoldTick();
-            return;
-        }
-        if (desc.needs_target_trajectory && !state_monitor_.hasTargetTrajectory(ros::Time::now())) {
-            ROS_WARN_THROTTLE(2.0, "[OpenLoop] IDLE — waiting for /target/predicted_accel...");
             publishPausedHoverHoldTick();
             return;
         }
@@ -869,7 +861,6 @@ private:
         startup_timer_.stop();
 
         ROS_INFO("[OpenLoop] Solving...");
-        runtime_cfg_.target_accel_buffer = state_monitor_.getTargetAccelBuffer();
         planner_core::PlannerCoreStepResult core_out;
         {
             std::lock_guard<std::mutex> slk(solver_mutex_);
@@ -956,7 +947,6 @@ private:
     std::string target_frame_odom_topic_   = "/drone/target_frame_odom";
     std::string target_odom_topic_         = "/target/odom";
     std::string target_accel_topic_        = "/target/accel";
-    std::string target_predicted_accel_topic_ = "/target/predicted_accel";
     bool debug_body_relative_trace_ = false;
 
     double seed_alpha_pos_            = 0.70;
@@ -995,7 +985,6 @@ private:
     Eigen::VectorXd terminal_state_    = Eigen::VectorXd();
     double hover_thrust_d_             = 0.3;
     float  hover_thrust_param_         = 0.3f;
-
 
     platform::mavros::Handles         mavros_handles_;
     platform::target_tracker::Handles target_handles_;

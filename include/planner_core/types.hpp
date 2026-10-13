@@ -15,7 +15,6 @@
 
 #include "optimal_control_problem.h"
 #include "alipddp/alipddp.h"
-#include "target/target_accel_buffer.hpp"
 
 /// Snapshot of target state taken at solve time.
 /// Passed to transform_state, validate_target, post_process_result callbacks.
@@ -58,7 +57,6 @@ struct PlannerConfig {
 
     std::string target_odom_topic = "/target/odom";
     std::string target_accel_topic = "/target/accel";
-    std::string target_predicted_accel_topic = "/target/predicted_accel";
     bool debug_body_relative_trace = false;
 
     bool enable_terminal_freeze = true;
@@ -78,7 +76,6 @@ struct PlannerConfig {
     double open_loop_abort_max_vz_error_mps = 1.00;
 
     double t_start_abs = 0.0;
-    std::optional<target_models::TargetAccelBuffer> target_accel_buffer;
 
     bool isConfigured() const {
         return !ocp_type.empty() && !mode.empty();
@@ -260,7 +257,6 @@ struct OCPDescriptor {
     CommandMode command_mode = CommandMode::CmdFullState;
     DroneOdomMode drone_odom_mode = DroneOdomMode::Absolute;
 
-    bool needs_target_trajectory = false;
     bool disarm_on_landing_finish = false;
     bool skip_altitude_validation = false;
     bool skip_trajectory_validation = false;
@@ -432,8 +428,6 @@ struct PlannerCoreConfig {
 struct PlannerCoreInput {
     Eigen::VectorXd current_state;
     TargetSnapshot target_snapshot;
-    target_models::TargetAccelBuffer target_accel_buffer;
-    bool has_target_accel_buffer = false;
     OCPDescriptor::DroneOdomMode active_odom_mode = OCPDescriptor::DroneOdomMode::Absolute;
     std::string active_odom_topic;
     std::chrono::steady_clock::time_point now{};

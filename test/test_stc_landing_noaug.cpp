@@ -121,8 +121,10 @@ int main(int argc, char** argv) {
         require(desc.dt > 0.0, "descriptor dt must be positive");
         require(static_cast<bool>(desc.sanitize_warm_control),
                 "sanitize_warm_control hook must be set");
-        require(OCPRegistry::getDescriptor("rh_stc_noaug").name == "stc_landing_noaug",
-                "rh_stc_noaug alias must resolve to stc_landing_noaug");
+        bool retired_alias=false;
+        try { OCPRegistry::getDescriptor("rh_stc_noaug"); }
+        catch (const std::runtime_error&) { retired_alias=true; }
+        require(retired_alias,"retired alias must not remain in the active registry");
 
         CircularTarget tgt;
         PlannerConfig planner_cfg;

@@ -11,8 +11,6 @@
 #include <mutex>
 #include <string>
 
-#include "target/target_accel_buffer.hpp"
-
 namespace platform {
 namespace target_tracker {
 
@@ -56,28 +54,15 @@ struct TargetState {
                         (now - accel_timestamp).toSec());
     }
 
-    struct PredictedAccel {
-        ros::Time origin_time;
-        target_models::TargetAccelBuffer accel_buffer;
-        bool received = false;
-
-        bool isFresh(const ros::Time& now, double max_age_sec = 2.0) const {
-            if (!received || origin_time.isZero()) return false;
-            return (now - origin_time).toSec() < max_age_sec;
-        }
-    };
-    PredictedAccel predicted_accel;
 };
 
 struct Handles {
     ros::Subscriber odom_sub;
     ros::Subscriber accel_sub;
-    ros::Subscriber predicted_accel_sub;
 
     void reset() {
         odom_sub.shutdown();
         accel_sub.shutdown();
-        predicted_accel_sub.shutdown();
     }
 };
 
@@ -85,7 +70,6 @@ inline void setup(
     ros::NodeHandle&       nh,
     const std::string&     odom_topic,
     const std::string&     accel_topic,
-    const std::string&     predicted_accel_topic,
     TargetState&           target_state,
     std::mutex&            target_mutex,
     Handles&               handles)
@@ -140,44 +124,9 @@ inline void setup(
             });
     }
 
-    handles.predicted_accel_sub = nh.subscribe<trajectory_msgs::MultiDOFJointTrajectory>(
-        predicted_accel_topic, 10,
-        [&target_state, &target_mutex](const trajectory_msgs::MultiDOFJointTrajectory::ConstPtr& msg) {
-            if (msg->points.empty()) return;
-            std::lock_guard<std::mutex> lk(target_mutex);
-
-            auto& pred = target_state.predicted_accel;
-            pred.origin_time = msg->header.stamp.isZero() ? ros::Time::now() : msg->header.stamp;
-
-            const double t_start = pred.origin_time.toSec();
-            double dt = 0.05;
-            if (msg->points.size() > 1) {
-                dt = msg->points[1].time_from_start.toSec() -
-                     msg->points[0].time_from_start.toSec();
-            }
-
-            std::vector<Eigen::Vector3d> accels;
-            accels.reserve(msg->points.size());
-            for (const auto& pt : msg->points) {
-                if (!pt.accelerations.empty()) {
-                    accels.emplace_back(pt.accelerations[0].linear.x,
-                                        pt.accelerations[0].linear.y,
-                                        pt.accelerations[0].linear.z);
-                } else {
-                    accels.emplace_back(0, 0, 0);
-                }
-            }
-
-            pred.accel_buffer.t_start = t_start;
-            pred.accel_buffer.dt = dt <= 0.0 ? 0.05 : dt;
-            pred.accel_buffer.accels = std::move(accels);
-            pred.received = true;
-        });
-
-    ROS_INFO("[TargetTracker] Subscribed odom: %s  accel: %s  predicted_accel: %s",
+    ROS_INFO("[TargetTracker] Subscribed odom: %s  accel: %s",
         odom_topic.c_str(),
-        accel_topic.empty() ? "<disabled>" : accel_topic.c_str(),
-        predicted_accel_topic.c_str());
+        accel_topic.empty() ? "<disabled>" : accel_topic.c_str());
 }
 
 }  // namespace target_tracker

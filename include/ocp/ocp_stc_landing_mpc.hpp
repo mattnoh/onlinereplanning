@@ -17,7 +17,6 @@
 #include "alipddp/alipddp.h"
 #include "planner_core/types.hpp"
 
-
 namespace StcLandingMpcOCP::Formulation {
 
 using comando_parameters::defaults;
@@ -101,7 +100,6 @@ inline bool useTriggeredLandingStc(){return defaults.constraints.triggered_stc;}
 inline bool useRhCaptureLandingTrigger(){return defaults.constraints.capture_landing_trigger;}
 inline bool useRhFeedbackWarmStart(){return defaults.horizon.feedback_warm_start;}
 inline std::string stageTriggerMode(){return defaults.constraints.stage_trigger;}
-
 
 // ── Sigmoid helpers ───────────────────────────────────────────────────────────
 template<typename Scalar>
@@ -868,12 +866,10 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
     return row;
 }
 
-
 inline Param getSolverParams() { return defaults.solver; }
 
 // ── Warm-start / validity helpers ─────────────────────────────────────────────
 }
-
 
 namespace StcLandingMpcOCP {
 namespace Ref = Formulation;

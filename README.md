@@ -1,43 +1,31 @@
 # CoManDO planner
 
-One ROS-independent C++ library, complete OCP files, and separate ROS1/ROS2 transports.
+The active MAVROS/ROS1 planner uses a ROS-independent RH/MPC core. The previous planner and historical logs are in `../comando_planner_old`.
 
-- `include/ocp`: each file contains a complete optimal-control formulation.
-- `include/parameters`: parameter defaults and environment overrides.
-- `include/target`: prediction and synthetic target models, without ROS.
-- `include/planner_core`, `src`: solver, RH replay, direct MPC, and shared controller API.
-- `transport/ros1`, `transport/ros2`: messages, subscriptions, timers, parameter loading, and platform commands.
-- `tools/analysis`: the existing plotters and bag converters, retaining their designs.
-- `logs`: generated flight results only; starts empty.
+- `include/ocp`: three complete formulations: startup hover, `stc_landing_noaug` for RH state tracking, and `stc_landing_mpc` for direct thrust/body-rate feedback. Equations, costs, constraints and derivatives stay in each OCP file.
+- `include/parameters.hpp`: shared typed vehicle, horizon, cost-weight, constraint, MPC and ALIPDDP solver defaults. The same parameter types serve all three OCPs. Startup environment loading preserves saved tuning.
+- `include/target`: one `target_generator.hpp` for synthetic movements and seeded MC1 shapes; one `predictor.hpp` for constant-acceleration prediction. Neither depends on ROS.
+- `include/planner_core`, `src`: controller lifecycle, solving, RH replay and direct MPC feedback.
+- `transport/ros1`, `transport/ros2`: ROS adapters, nodes and launch files. The ROS2 Crazyflie adapter remains pending flight validation.
+- `config/ros1`, `config/ros2`: matching hover/RH/MPC profiles in each ROS parameter format.
+- `scripts`: profile application and RViz markers, plus the sequential SITL campaign, its bearing probe, metrics and MPC audit.
+- `tools/analysis`: the existing bag converter, flight analysis, 3D/state plots, animation and horizon overlay. Flight analysis uses the paper plot/animation scripts; their designs are retained.
+- `test`: six focused regressions, disabled by default. Retired OCP tests, offline research tools, session patches and duplicate campaign plotters are removed.
+- `logs`: runtime output only; empty after cleanup.
 
-The `comando_planner` package name, planner node name, OCP keys, and supported command topics are retained. Explicitly legacy formulations are removed.
+## Run
 
-## Execution
+Source `/opt/ros/noetic/setup.bash` and `/home/lab/mavros_ws/devel/setup.bash`. Launch `planner_launch.launch` for hover/RH or `direct_mpc_sitl.launch` for calibrated x500 MPC; apply a profile from `config/ros1` with `rosrun comando_planner apply_profile.sh`. Direct MPC accepts feedback mode only and publishes at 50 Hz; RH publishes planned state references. See `docs/MAVROS_SITL.md` and `docs/DIRECT_MPC.md` for settings.
 
-RH replanning uses `stc_landing_noaug`: planned states go to PX4 position/velocity control or Crazyflie's full-state tracker. Direct MPC uses `stc_landing_mpc`: asynchronous optimization supplies a policy evaluated at 50 Hz, and thrust acceleration plus body rates go to PX4 raw attitude commands or Crazyflie's patched `/cmd_bodyrate` input. Direct MPC is not supported in open-loop mode.
+## Build and verify
 
-Both transports call `planner_core::Controller` with ROS-free input snapshots and receive typed commands and diagnostics. Its lifecycle lock permits solve/replay concurrency and serializes configuration and resets. Absolute timestamps are scalar seconds; scheduling uses `steady_clock`.
-
-## Build
-
-Keep ALIPDDP as a sibling, or set `COMANDO_SOLVER_DIR` explicitly. Source the appropriate ROS environment before building. Never build both workspaces concurrently.
-
-ROS1: `catkin build comando_planner -j1 -p1 --make-args comando_planner`; build `target_publisher` and each test in separate invocations.
-
-ROS2: build the `comando_planner` target with one worker, then `target_publisher` separately. The CMake cache option `COMANDO_ROS_VERSION` selects 1 or 2; it defaults from `ROS_VERSION`.
-
-Standalone core:
+Keep ALIPDDP as a sibling or set `COMANDO_SOLVER_DIR`. Build each executable separately with one worker:
 
 ```sh
-cmake -S . -B build-core -DCOMANDO_ROS_VERSION=0 -DCOMANDO_SOLVER_DIR=/path/to/ALIPDDP-main
-cmake --build build-core --target test_controller -j1
-./build-core/test_controller
+catkin build comando_planner --no-deps -j1 -p1 --make-args comando_planner
+catkin build comando_planner --no-deps -j1 -p1 --make-args target_publisher
 ```
 
-Research benchmark executables are opt-in via `COMANDO_BUILD_BENCHMARKS`; the core is compiled once and linked by all executables.
+Set `COMANDO_BUILD_TESTS=ON` explicitly to build the six test targets individually. They cover controller modes, RH acceptance/handoff, trajectory replay, warm-started noaug landing, CTCS values/Jacobians, and direct MPC feedback/derivatives/expiry. Standalone builds select `COMANDO_ROS_VERSION=0`; ROS1 and ROS2 select 1 and 2.
 
-## Profiles and validation
-
-ROS1 profiles are in `config`; ROS2 parameter-file equivalents are in `config/ros2`. OCP parameter defaults are initialized from the process environment, preserving the validated startup tuning. Restart the process to change environment-based mathematical parameters; runtime target/profile commands retain their existing ROS interfaces.
-
-PX4 and Crazyflie require separate vehicle calibration and tuning. The archived planner's results remain the regression reference. See `docs/CLEAN_PLANNER_VALIDATION.md` for the actual checks, limitations, and cutover status.
+SITL runs always use one target at a time. The already completed RH/MPC circle, figure-eight and straight flights, their source revisions and remaining flown STC violations are recorded in `docs/CLEAN_PLANNER_VALIDATION.md`. Cleanup verification does not repeat those campaigns.

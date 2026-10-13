@@ -134,7 +134,6 @@ inline bool useRhCaptureLandingTrigger(){return defaults.constraints.capture_lan
 inline bool useRhFeedbackWarmStart(){return defaults.horizon.feedback_warm_start;}
 inline std::string stageTriggerMode(){return defaults.constraints.stage_trigger;}
 
-
 // ── Sigmoid helpers ───────────────────────────────────────────────────────────
 template<typename Scalar>
 inline Scalar sigmaLandVal(const Scalar& rxy2) {

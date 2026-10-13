@@ -5,7 +5,6 @@ from launch.event_handlers import OnProcessIO
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
-
 def generate_launch_description():
     """
     Bare planner launcher - infrastructure only.
@@ -33,7 +32,6 @@ def generate_launch_description():
 
         DeclareLaunchArgument('target_odom_topic', default_value='/target/odom'),
         DeclareLaunchArgument('target_accel_topic', default_value='/target/accel'),
-        DeclareLaunchArgument('target_predicted_accel_topic', default_value='/target/predicted_accel'),
 
         DeclareLaunchArgument('enable_terminal_freeze', default_value='true'),
         DeclareLaunchArgument('terminal_freeze_enter_pos', default_value='0.20'),
@@ -93,7 +91,6 @@ def generate_launch_description():
 
             'target_odom_topic': LaunchConfiguration('target_odom_topic'),
             'target_accel_topic': LaunchConfiguration('target_accel_topic'),
-            'target_predicted_accel_topic': LaunchConfiguration('target_predicted_accel_topic'),
 
             'enable_terminal_freeze': LaunchConfiguration('enable_terminal_freeze'),
             'terminal_freeze_enter_pos': LaunchConfiguration('terminal_freeze_enter_pos'),

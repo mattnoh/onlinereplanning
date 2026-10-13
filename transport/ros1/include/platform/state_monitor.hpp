@@ -49,16 +49,6 @@ public:
         return {target_state_.position, target_state_.velocity};
     }
 
-    bool hasTargetTrajectory(const ros::Time& now) const {
-        std::lock_guard<std::mutex> lk(target_mutex_);
-        return target_state_.predicted_accel.isFresh(now, 2.0);
-    }
-
-    target_models::TargetAccelBuffer getTargetAccelBuffer() const {
-        std::lock_guard<std::mutex> lk(target_mutex_);
-        return target_state_.predicted_accel.accel_buffer;
-    }
-
 private:
     Eigen::VectorXd drone_state_ = Eigen::VectorXd::Zero(13);
     platform::target_tracker::TargetState target_state_;

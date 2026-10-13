@@ -58,7 +58,7 @@ source /home/lab/mavros_ws/devel/setup.zsh
 roslaunch comando_planner direct_mpc_sitl.launch
 # First complete the existing staging hover, then activate:
 rosrun comando_planner apply_profile.sh /comando_planner \
-  /home/lab/mavros_ws/src/CoManDO_planner/config/profile_stc_landing_mpc_sitl.yaml
+  /home/lab/mavros_ws/src/CoManDO_planner/config/ros1/profile_stc_landing_mpc_sitl.yaml
 ```
 
 Calibration used steady hover and ±0.1 rad/s roll/pitch steps. The vehicle stayed
