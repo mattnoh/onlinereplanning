@@ -27,7 +27,7 @@ Current documentation for the active `mpc` branch, updated 2026-10-14. The MAVRO
 | `landing_rh` | Target-relative | RH with ordinary constraints active throughout the horizon and terminal node. |
 | `landing_mpc` | Target-relative | Direct MPC with ordinary constraints active throughout the horizon and terminal node. |
 
-RH sends planned position, velocity and yaw to PX4's tracking controller. Direct MPC sends thrust/body-rate commands on MAVROS `setpoint_raw/attitude`; PX4's rate controller remains active. An optimization worker supplies DDP controls for 50 Hz transport publication. PX4 performs rate/thrust tracking. The command path applies each optimized control with the OCP's zero-order hold; it contains no separate LQR/QP correction or post-solve slew shaping. The fixed-grid MPC horizon has 40 intervals of 0.1 seconds. The next measured-state DDP solve starts when the worker is free and its scheduled policy has activated; there is no extra 10 Hz request cap. Rejected solves retain a valid policy; stale state or policy expiry pauses into hold. Touchdown hands the landing action to PX4.
+RH sends planned position, velocity and yaw to PX4's tracking controller. Direct MPC sends thrust/body-rate commands on MAVROS `setpoint_raw/attitude`; PX4's rate controller remains active. An optimization worker supplies DDP controls for 100 Hz transport publication. PX4 performs rate/thrust tracking. The command path applies each optimized control with the OCP's zero-order hold; it contains no separate LQR/QP correction or post-solve slew shaping. The fixed-grid MPC horizon has 40 intervals of 0.1 seconds. The next measured-state DDP solve starts when the worker is free and its scheduled policy has activated; there is no extra 10 Hz request cap. Rejected solves retain a valid policy; stale state or policy expiry pauses into hold. Touchdown hands the landing action to PX4.
 
 Both CTCS OCPs use `StcStageConstraint` in density form with analytic trigger/consequence derivatives. Noaug preserves its 14-state layout, original eight implications and scaled interval budget. The migration parity checks compared the shared row with the independent density/integral, including free-time derivatives, settle/capture/disabled-STC modes and nonzero trigger floors.
 
@@ -103,7 +103,7 @@ Validated x500 direct-MPC settings:
 | Raw CTCS interval epsilon / scaling | 0.0016 / 10 |
 | Thrust-acceleration / body-rate slew | 20 m/s³ / 5 rad/s² |
 
-These are simulator calibration estimates. The first-order rate response and linear thrust mapping approximate the plant. Optimization need not achieve its requested 10 Hz cadence; command publication remains 50 Hz. Publication frequency is distinct from the DDP solve frequency.
+These are simulator calibration estimates. The first-order rate response and linear thrust mapping approximate the plant. The next solve runs when the worker and policy handoff are ready; command publication runs at 100 Hz. Publication frequency is distinct from the DDP solve frequency.
 
 ## Sequential cone-start experiment
 
@@ -228,3 +228,9 @@ Follow-up evidence: `logs/ddp_startup_landing_mpc/straight__zero__t0` ended TIME
 The sequential campaign now reads `control_stop_reason` and records policy expiry/stale-state failure promptly. This avoids waiting five minutes for a stopped controller to land and does not alter the controller, constraints or solver acceptance.
 
 The shared ROS2 planner build passed after the acceleration-feedforward and motor-mapping changes. ROS2 flight validation remains pending.
+
+RH reference consistency: accepted trajectories now use the OCP model to sample states between optimizer nodes under the unchanged optimized input. Each plan retains its own target forecast and time origin; live target measurements enter the next solve instead of deforming the active world reference. Handoff seeds convert through world coordinates when the target forecast changes. Both execution modes publish at 100 Hz, independently of solve frequency. All six standalone tests and the ROS1 build passed for these changes.
+
+The earlier feedforward-only RH straight run (`logs/ddp_feedforward_landing_rh/straight__zero__t0`) landed but failed constraints: measured speed excess 0.33991 m/s, tilt excess 7.56934 degrees, angular-speed excess 0.60325 rad/s and glideslope excess 0.21684 m. It predates the reference-consistency fixes and is not evidence that they work.
+
+PX4 inner-loop extracts are saved as `px4_inner_loop.csv` with source metadata alongside the three DDP-only MPC cases. The motor-mapping case shows approximately 148 ms between the first body-rate mode request and disabling PX4 attitude control; the first optimized control interval was not delivered as modeled. The current first-order MPC rate model also omits PX4 rate integrator and motor dynamics. These are unresolved execution-model differences; adding an independent correction controller would not resolve the requested DDP formulation.
