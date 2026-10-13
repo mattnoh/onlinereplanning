@@ -328,6 +328,14 @@ def run_cell(motion, level, trial, outdir, args):
     logs = {k: os.path.join(cell, f"{k}.log") for k in
             ("px4", "mavros", "target", "planner")}
     t0 = time.time()
+    # Save inputs before launch, including inherited controller tuning.
+    env_snapshot = {k:v for k,v in os.environ.items() if k.startswith(("SZMUK_", "MPC_"))}
+    env_snapshot.update(PLANNER_ENV)
+    env_snapshot.update(SZMUK_Z_STAGE=str(args.stc_z_stage), SZMUK_LOS_ALT_TRIG=str(args.stc_los_alt_trig))
+    json.dump(env_snapshot, open(os.path.join(cell, "planner_environment.json"), "w"), indent=2)
+    shutil.copyfile(args.profile, os.path.join(cell, "landing_profile.yaml"))
+    revision = subprocess.run(["git", "-C", PKG, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    json.dump(dict(planner_commit=revision, setup=SETUP), open(os.path.join(cell, "source.json"), "w"), indent=2)
     print(f"  [run ] {tag} seed={seed}", flush=True)
 
     teardown()

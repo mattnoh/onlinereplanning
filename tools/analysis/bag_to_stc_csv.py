@@ -30,6 +30,8 @@ import math
 import os
 from pathlib import Path
 
+import json
+
 import numpy as np
 import rosbag
 
@@ -62,8 +64,8 @@ _ENV_CONSTANTS = {
 }
 _FIXED_CONSTANTS = {
     "gs_apex_offset": 0.1,     # GS_APEX_OFFSET
-    "fmin": 0.08,              # FMIN
-    "fmax": 0.60,              # FMAX
+    "fmin": 0.12,              # FMIN
+    "fmax": 0.52,              # FMAX
     "fmin_land": 0.21,         # T_MIN_AFT
     "fmax_land": 0.40,         # T_MAX_AFT
 }
@@ -85,7 +87,9 @@ def resolve_constants() -> dict:
     # tilt_land_stc_deg is the *effective* tightened tilt bound:
     # sin(0.5 * ALPHA_THETA_STC * THETA_STC_DEG) in the integrand.
     c["tilt_land_stc_deg"] = (_env_or("SZMUK_ALPHA_THETA_STC", 1.0)
-                              * _env_or("SZMUK_TILT_STC_DEG", 2.0))
+                              * _env_or("SZMUK_TILT_STC_DEG", 0.95))
+    c["capture_landing_trigger"] = float(os.environ.get("SZMUK_RH_CAPTURE_LANDING_TRIGGER", "0") != "0")
+    c["triggered_landing"] = float(os.environ.get("SZMUK_QUAD_TRIG_STC", "1") != "0")
     c["gs_cone_tan"] = math.tan(math.radians(c["gs_cone_deg"]))
     c["los_cone_tan"] = math.tan(math.radians(c["los_cone_deg"]))
     return c
@@ -144,7 +148,10 @@ def compute_triggers(rxyz: np.ndarray, c: dict):
     trig_alt = np.maximum(0.0, c["alt_trig"] - rz)
     cap2 = c["cap_radius"] ** 2
     trig_cap = np.maximum(0.0, cap2 - rxy**2) / cap2
-    a_land = (trig_alt / c["alt_trig"]) * trig_cap
+    a_land = ((trig_alt / c["alt_trig"]) * trig_cap
+              if c["capture_landing_trigger"] else trig_alt)
+    if not c["triggered_landing"]:
+        a_land = np.ones_like(rz)
 
     # Stage trigger, default "radius" mode: active while laterally outside
     # STAGE_RADIUS of the platform.
@@ -246,6 +253,9 @@ def main():
                     help="output dir (default <bag_dir>/<bag_stem>_analysis)")
     args = ap.parse_args()
     out_dir = args.out or args.bag.parent / f"{args.bag.stem}_analysis"
+    saved_env = args.bag.parent / "planner_environment.json"
+    if saved_env.exists():
+        os.environ.update(json.loads(saved_env.read_text()))
     convert(args.bag, out_dir, args.t0, args.t1)
 
 
