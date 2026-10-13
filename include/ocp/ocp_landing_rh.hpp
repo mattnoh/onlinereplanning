@@ -257,13 +257,63 @@ public:
     }
     Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {return Eigen::MatrixXd::Zero(6,nu_);}
 };
-class TerminalLimits : public TerminalConstraintBase<double> {
-    LandingLimits limits_;int nu_;
+// Native Lorentz-cone rows avoid squaring the speed/rate bounds into scalar inequalities.
+class FloorRow : public StageConstraintBase<double> {
+    int nx_,nu_;
 public:
-    TerminalLimits(int nx=NX_SS,int nu=NU_SS):limits_(nx,nu),nu_(nu){constraint_type=ConstraintType::NO;dim_cT=6;}
-    Eigen::VectorXd cT(const Eigen::VectorXd& x) const override {return limits_.c(x,Eigen::VectorXd::Zero(nu_));}
-    Eigen::MatrixXd cTx(const Eigen::VectorXd& x) const override {return limits_.cx(x,Eigen::VectorXd::Zero(nu_));}
+    FloorRow(int nx,int nu):nx_(nx),nu_(nu){constraint_type=ConstraintType::NO;dim_c=1;}
+    Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{return Eigen::VectorXd::Constant(1,-x(2));}
+    Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{auto g=Eigen::MatrixXd::Zero(1,nx_).eval();g(0,2)=-1;return g;}
+    Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{return Eigen::MatrixXd::Zero(1,nu_);}
 };
+class SphereRow : public StageConstraintBase<double> {
+    int nx_,nu_,offset_;double limit_;
+public:
+    SphereRow(int nx,int nu,int offset,double limit):nx_(nx),nu_(nu),offset_(offset),limit_(limit){constraint_type=ConstraintType::SOC;dim_c=4;}
+    Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{Eigen::VectorXd c(4);c(0)=-1;c.tail<3>()=-x.segment<3>(offset_)/limit_;return c;}
+    Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{auto g=Eigen::MatrixXd::Zero(4,nx_).eval();g.block<3,3>(1,offset_)=-Eigen::Matrix3d::Identity()/limit_;return g;}
+    Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{return Eigen::MatrixXd::Zero(4,nu_);}
+};
+class GlideslopeRow : public StageConstraintBase<double> {
+    int nx_,nu_;
+public:
+    GlideslopeRow(int nx,int nu):nx_(nx),nu_(nu){constraint_type=ConstraintType::SOC;dim_c=3;}
+    Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{Eigen::VectorXd c(3);c<<-x(2)-GS_APEX_OFFSET,-x(0)/GS_CONE_TAN,-x(1)/GS_CONE_TAN;return c;}
+    Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{auto g=Eigen::MatrixXd::Zero(3,nx_).eval();g(0,2)=-1;g(1,0)=g(2,1)=-1/GS_CONE_TAN;return g;}
+    Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{return Eigen::MatrixXd::Zero(3,nu_);}
+};
+class TiltRow : public StageConstraintBase<double> {
+    int nx_,nu_;double sine_=std::sin(.5*TILT_SCALE*TILT_MAX_DEG*M_PI/180);
+public:
+    TiltRow(int nx,int nu):nx_(nx),nu_(nu){constraint_type=ConstraintType::SOC;dim_c=3;}
+    Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{Eigen::VectorXd c(3);c<<-1,-x(7)/(sine_*x.segment<4>(6).norm()),-x(8)/(sine_*x.segment<4>(6).norm());return c;}
+    Eigen::MatrixXd cx(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{auto g=Eigen::MatrixXd::Zero(3,nx_).eval();const auto q=x.segment<4>(6).eval();const double n=q.norm();g.block<2,4>(1,6)=x.segment<2>(7)*q.transpose()/(sine_*n*n*n);g(1,7)-=1/(sine_*n);g(2,8)-=1/(sine_*n);return g;}
+    Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{return Eigen::MatrixXd::Zero(3,nu_);}
+};
+class LosRow : public StageConstraintBase<double> {
+    int nx_,nu_;
+    static Eigen::Vector3d axis(const Eigen::VectorXd& x){return Eigen::Quaterniond(x(6),x(7),x(8),x(9)).normalized()*Eigen::Vector3d::UnitZ();}
+public:
+    LosRow(int nx,int nu):nx_(nx),nu_(nu){constraint_type=ConstraintType::SOC;dim_c=4;}
+    Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{const auto b=axis(x);const double axial=x.head<3>().dot(b);Eigen::VectorXd c(4);c(0)=-LOS_CONE_TAN*axial;c.tail<3>()=-(x.head<3>()-axial*b);return c;}
+    Eigen::MatrixXd cx(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{
+        auto g=Eigen::MatrixXd::Zero(4,nx_).eval();const auto q=x.segment<4>(6).eval();const double n=q.squaredNorm(),w=q(0),a=q(1),b=q(2),d=q(3);const auto z=axis(x);const double axial=x.head<3>().dot(z);
+        Eigen::Matrix<double,3,4> db;db<<2*b,2*d,2*w,2*a,-2*a,-2*w,2*d,2*b,2*w,-2*a,-2*b,2*d;db=db/n-2*z*q.transpose()/n;
+        g.block<1,3>(0,0)=-LOS_CONE_TAN*z.transpose();g.block<1,4>(0,6)=-LOS_CONE_TAN*x.head<3>().transpose()*db;
+        g.block<3,3>(1,0)=-Eigen::Matrix3d::Identity()+z*z.transpose();g.block<3,4>(1,6)=axial*db+z*x.head<3>().transpose()*db;return g;
+    }
+    Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{return Eigen::MatrixXd::Zero(4,nu_);}
+};
+class TerminalRow : public TerminalConstraintBase<double> {
+    std::shared_ptr<StageConstraintBase<double>> row_;int nu_;
+public:
+    TerminalRow(std::shared_ptr<StageConstraintBase<double>> row,int nu):row_(std::move(row)),nu_(nu){constraint_type=row_->getConstraintType();dim_cT=row_->getDimC();}
+    Eigen::VectorXd cT(const Eigen::VectorXd& x)const override{return row_->c(x,Eigen::VectorXd::Zero(nu_));}
+    Eigen::MatrixXd cTx(const Eigen::VectorXd& x)const override{return row_->cx(x,Eigen::VectorXd::Zero(nu_));}
+};
+inline std::vector<std::shared_ptr<StageConstraintBase<double>>> landingRows(int nx,int nu) {
+    return {std::make_shared<FloorRow>(nx,nu),std::make_shared<SphereRow>(nx,nu,3,SPEED_MAX),std::make_shared<SphereRow>(nx,nu,10,OMEGA_MAX),std::make_shared<GlideslopeRow>(nx,nu),std::make_shared<TiltRow>(nx,nu),std::make_shared<LosRow>(nx,nu)};
+}
 template<typename Scalar>
 class RelTermCost : public TerminalCostBase<Scalar> {
     double wp_xy_, wp_z_, wv_xy_, wv_z_, watt_, wom_, vz_ref_;
@@ -439,7 +489,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     auto cfmax  = std::make_shared<FmaxCon<double>>();
     auto cmom   = std::make_shared<MomentCon<double>>();
     auto cth    = std::make_shared<ThetaBounds<double>>(THL, THH);
-    auto limits = std::make_shared<LandingLimits>();
+    auto limits = landingRows(NX_SS,NU_SS);
     const double eps_cost = envOrQ("SZMUK_W_EPS", 1.0);
     const Eigen::Vector3d r_follow=Eigen::Vector3d::Zero();
     auto stage_cost = std::make_shared<LandingStageCost<double>>(
@@ -456,10 +506,10 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
         problem->addStageConstraint(k, cfmax);
         problem->addStageConstraint(k, cmom);
         problem->addStageConstraint(k, cth);
-        problem->addStageConstraint(k, limits);
+        for(const auto& row:limits)problem->addStageConstraint(k,row);
     }
     problem->setTerminalCost(tcost);
-    problem->addTerminalConstraint(std::make_shared<TerminalLimits>());
+    for(const auto& row:limits)problem->addTerminalConstraint(std::make_shared<TerminalRow>(row,NU_SS));
 
     Eigen::VectorXd x0ss(NX_SS);
     x0ss.setZero();
@@ -541,7 +591,16 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
             a_req.z()=std::clamp(2*(vertical_speed-v0.z()),-.5,.5);
             const double tabs_ws = sim14(IDX_DT);
             const Eigen::Vector3d a_tgt_ws = predictor->predictAccel(tabs_ws);
-            const Eigen::Vector3d fw = MASS * (a_req + a_tgt_ws - GRAVITY);
+            Eigen::Vector3d fw = MASS * (a_req + a_tgt_ws - GRAVITY);
+            const double horizontal_limit=fw.z()*std::tan(.9*TILT_SCALE*TILT_MAX_DEG*M_PI/180);
+            if(fw.head<2>().norm()>horizontal_limit)fw.head<2>()*=horizontal_limit/fw.head<2>().norm();
+            Eigen::Quaterniond q(sim14(6),sim14(7),sim14(8),sim14(9));q.normalize();
+            Eigen::Quaterniond goal=Eigen::Quaterniond::FromTwoVectors(q*Eigen::Vector3d::UnitZ(),fw.normalized())*q;
+            Eigen::Quaterniond error=q.conjugate()*goal;if(error.w()<0)error.coeffs()*=-1;
+            Eigen::Vector3d desired_rate=4*error.vec();
+            if(desired_rate.norm()>.9*OMEGA_MAX)desired_rate*=.9*OMEGA_MAX/desired_rate.norm();
+            const Eigen::Vector3d omega=sim14.segment<3>(10);
+            uk.segment<3>(1)=J_B*(desired_rate-omega)/TH0+omega.cross(J_B*omega);
             uk(0) = fw.norm();
             uk(IDX_THETA) = TH0;
         }

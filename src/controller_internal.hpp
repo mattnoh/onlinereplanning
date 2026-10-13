@@ -233,7 +233,7 @@ public:
             mpc_->setNextWarmStartShift(handoff.warm_start_shift);
         }
 
-        if(!primed_ && desc_.feasible_start && !desc_.feasible_start(x0)) {reject(out,"initial_state_infeasible","Initial state violates ordinary landing constraints");return out;}
+        if(!primed_ && desc_.feasible_start && !desc_.feasible_start(x0)) {out.rejection_reason="initial_state_infeasible";return out;}
         const bool apply_registry_transform = (desc_.coordinates == OCPDescriptor::Coordinates::TargetRelative);
         const double pos_err = apply_registry_transform && x0.size() >= 3
             ? x0.segment(0, 3).norm()

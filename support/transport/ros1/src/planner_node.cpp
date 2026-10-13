@@ -297,7 +297,6 @@ private:
                 }
                 if(feasible_start_since_==Clock::time_point{})feasible_start_since_=Clock::now();
                 if(std::chrono::duration<double>(Clock::now()-feasible_start_since_).count()<0.5)return;
-                nh_.setParam("prepare_cone_start",false);
                 ROS_INFO("Verified feasible cone start: r=[%.4f,%.4f,%.4f] v=%.4f omega=%.5f",live(0),live(1),live(2),live.segment<3>(3).norm(),live.segment<3>(10).norm());
             }
             last_command_seq_ = p_seq;
@@ -476,6 +475,7 @@ private:
     }
 
     void resetForNewCommand() {
+        ordinary_control_started_=false;
         stopReplayTimer();
         stopOpenLoopHoldTimer();
         setOpenLoopPhase(OpenLoopPhase::Idle);
@@ -557,6 +557,11 @@ private:
     }
 
     void publishCommand(const planner_core::PlannerCommand& cmd) {
+        if(!ordinary_control_started_ && !ocp_type_.empty() && OCPRegistry::getDescriptor(ocp_type_).feasible_start) {
+            ordinary_control_started_=true;nh_.setParam("prepare_cone_start",false);
+            ROS_INFO("Ordinary landing control started; cone preparation handed over.");
+        }
+
         if (cmd.kind == planner_core::CommandKind::BodyRate && platform_ == "mavros") {
             platform::mavros::publishBodyRateCommand(mavros_handles_, cmd.control);
         } else if (cmd.kind == planner_core::CommandKind::FullState && platform_ == "mavros") {
@@ -929,6 +934,7 @@ private:
 
     std::string ocp_type_, platform_, solver_type_, mode_, drone_name_;
     std::string land_action_ = "none";  // none | auto_land | disarm (per-profile rosparam)
+    bool ordinary_control_started_=false;
     Clock::time_point feasible_start_since_{};
     std::shared_ptr<platform::FrameNormalizer> frames_;
     std::string world_frame_="world";

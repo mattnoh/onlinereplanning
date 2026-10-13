@@ -439,7 +439,7 @@ struct PlannerSolveLogData {
     int solve_iters = 0;
     bool is_relative_plan = false;
     double ocp_dt = 0.05;
-    std::string coord_mode = "absolute";
+    std::string coord_mode;
     Eigen::Vector3d target_snapshot_pos = Eigen::Vector3d::Zero();
     Eigen::Vector3d target_snapshot_vel = Eigen::Vector3d::Zero();
     Eigen::Vector3d target_snapshot_acc = Eigen::Vector3d::Zero();

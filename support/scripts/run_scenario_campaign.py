@@ -431,7 +431,16 @@ def run_cell(motion, level, trial, outdir, args):
                timeout=60)
             if getattr(args,"start","original")=="cone":
                 activation=wait_for("feasible cone activation",lambda: "Verified feasible cone start" in open(logs["planner"]).read(),30,poll=.25)
-                result=wait_landing(logs["planner"]) if activation<30 else "NO_FEASIBLE_START"
+                if activation<30:
+                    def started():
+                        for folder,_,files in os.walk(cell):
+                            if "solver_events.csv" in files:
+                                if any(row.get("event")=="accepted" for row in csv.DictReader(open(os.path.join(folder,"solver_events.csv")))):return True
+                        return False
+                    ready=wait_for("ordinary first accepted plan",started,15,poll=.25)
+                    result=wait_landing(logs["planner"]) if ready<15 else "INITIALIZATION_FAILED"
+                else:
+                    result="NO_FEASIBLE_START"
             else:
                 result = wait_landing(logs["planner"])
     except Exception as e:                        # keep the campaign alive
@@ -440,6 +449,9 @@ def run_cell(motion, level, trial, outdir, args):
         z = vz = float("nan")
     finally:
         clean = teardown(procs)
+
+    if result=="LANDED" and "Touchdown: OCP stopped" not in open(logs["planner"],errors="ignore").read():
+        result="UNCOMMANDED_DISARM"
 
     # The planner writes its own run folder under log_dir; flatten it into the cell.
     for d in sorted(os.listdir(cell)):
