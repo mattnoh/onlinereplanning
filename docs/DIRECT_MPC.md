@@ -17,14 +17,20 @@ bound also respects normalized throttle saturation.
 
 The optimization cost includes changes from the previous applied control.
 A separate worker accepts solve requests at most every 0.1 s. The ROS command
-timer applies live-state DDP feedback every 0.02 s, independently of the solver.
+timer applies live-state local quadratic feedback every 0.02 s, independently of the solver.
 The first policy projects the staging hold through a 0.35 s initial solve
 lead; subsequent leads use measured solve latency. State prediction uses the currently applied
-command; policy age compensates for the remaining latency. Controls are shifted
+feedback policy (including command limits); policy age compensates for the remaining latency. Controls are shifted
 by elapsed time and the factory re-rolls them from the measured projected state.
 Policies are swapped without the RH node-handoff scheduler. Quaternion signs
 are aligned for feedback and the prediction-time state has zero feedback error.
-The four memory-state errors use the previous applied control.
+The optimizer’s previous-control state is held on its 0.1 s grid. The fast
+tracking gains are recomputed through a quadratic DDP/Riccati backward pass
+at 0.02 s, with physical-state tracking weights and positive control weights.
+The optimizer’s IPM/barrier gains are retained with the solve result but are
+not reused as a 50 Hz controller. Fast gains exclude the prediction-time and
+control-memory states. This avoids repeated application of 10 Hz memory gains
+and stiff barrier curvature at the wrong sample rate.
 
 DDP corrections are bounded to ±3 m/s² thrust acceleration and ±0.35 rad/s
 body rate. Commands are bounded and slew-limited (20 m/s³ thrust acceleration and 5 rad/s²
@@ -75,3 +81,9 @@ startup skipped the first policy’s solve latency, producing an excessive
 feedback correction. The failed trace is preserved in
 `logs/direct_mpc_20261013/mc1/`; it motivated first-policy latency compensation,
 correction bounds, and the 1 s policy-age cutoff before the corrected checks.
+
+A second failed straight retry exposed this gain/cadence mismatch in both SITL
+and the independent moving-target model. After recomputing command-rate gains,
+the 5 s moving-target model test passed with 13 accepted policies and 232
+feedback ticks, reducing distance to 0.70 m without policy expiry. The full
+model regression is part of `test_direct_mpc`.

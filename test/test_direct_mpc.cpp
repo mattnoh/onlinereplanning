@@ -47,5 +47,30 @@ int main(){try{
     input.current_state.segment<4>(6)*=-1;auto flipped=controller.sample(now,input.current_state,input.target_snapshot);
     check((sample.command.control-flipped.command.control).norm()<1e-10,"quaternion sign feedback");
     check(controller.sample(now+std::chrono::seconds(5),input.current_state,input.target_snapshot).stale,"expired policy");
-    controller.stop();std::cout<<"PASS dynamics="<<maxerr<<" ctcs="<<cerror<<" async feedback/expiry\n";return 0;
+    controller.stop();
+    // Moving-target closed loop exercises the 50 Hz feedback / 10 Hz memory
+    // cadence and latency projection, independently of PX4 transport.
+    planner_core::DirectMpcController moving;moving.configure(cfg);
+    auto moving_pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();O::Dynamics plant(moving_pred);
+    Eigen::VectorXd plant_state=Eigen::VectorXd::Zero(O::NX);plant_state(0)=-.6;plant_state(1)=-2;plant_state(2)=StcLandingNoAugOCP::Z_STAGE+.1;plant_state(6)=1;plant_state.tail(4)=O::hover();
+    const Eigen::Vector3d target_velocity(.134,.435,0);plant_state.segment<3>(3)=-target_velocity;
+    const double initial_distance=plant_state.head(3).norm();
+    auto begin=std::chrono::steady_clock::now(),previous=begin;
+    Eigen::VectorXd applied=O::hover();int accepted=0,ticks=0;double max_omega=0;
+    while(std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count()<5) {
+        auto tick=std::chrono::steady_clock::now();double dt=std::chrono::duration<double>(tick-previous).count();previous=tick;
+        plant_state=plant.flow(plant_state,applied,dt,false).x;
+        double elapsed=std::chrono::duration<double>(tick-begin).count();input.now=tick;
+        input.target_snapshot.velocity=target_velocity;input.target_snapshot.position=target_velocity*elapsed+Eigen::Vector3d(0,0,.2);
+        input.current_state=plant_state.head(13);input.current_state.head(3)+=input.target_snapshot.position;input.current_state.segment<3>(3)+=target_velocity;
+        auto solve=moving.trySolve(input);if(solve.solve_accepted)++accepted;
+        auto feedback=moving.sample(tick,input.current_state,input.target_snapshot);
+        check(!feedback.stale,"moving-target feedback expired");
+        if(feedback.has_replay_sample){applied=feedback.command.control;++ticks;}
+        max_omega=std::max(max_omega,plant_state.segment<3>(10).norm());
+        std::this_thread::sleep_until(tick+std::chrono::milliseconds(20));
+    }
+    moving.stop();std::cout<<"moving model: accepted="<<accepted<<" ticks="<<ticks<<" distance="<<plant_state.head(3).norm()<<" omega="<<max_omega<<'\n';
+    check(accepted>=3&&ticks>100&&plant_state.head(3).norm()<initial_distance,"moving-target closed loop");
+    std::cout<<"PASS dynamics="<<maxerr<<" ctcs="<<cerror<<" async feedback/expiry\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -16,6 +16,7 @@ class DirectMpcController {
         Clock::time_point origin;
         int number=0;
         Eigen::Vector3d acceleration=Eigen::Vector3d::Zero();
+        std::vector<Eigen::MatrixXd> command_gains;
     };
     mutable std::mutex mutex_;
     std::condition_variable ready_;
@@ -27,6 +28,8 @@ class DirectMpcController {
     PlannerCoreConfig config_;
     Clock::time_point last_request_{},last_apply_{};
     Eigen::VectorXd last_u_=StcLandingMpcOCP::hover();
+    Eigen::VectorXd feedback_memory_=StcLandingMpcOCP::hover();
+    int memory_policy_=-1,memory_node_=-1;
     double lead_=0.35;
     int count_=0;
     std::ofstream controls_;
@@ -34,13 +37,36 @@ class DirectMpcController {
     static Eigen::VectorXd relative(const Eigen::VectorXd& x,const TargetSnapshot& t){
         Eigen::VectorXd r=x.head(13);r.head(3)-=t.position;r.segment<3>(3)-=t.velocity;return r;
     }
+    // Recompute the local quadratic DDP tracking backward pass at the
+    // actual 50 Hz command interval. The optimizer's 10 Hz IPM gains carry
+    // barrier curvature and previous-control memory; they are not a 50 Hz
+    // physical feedback controller.
+    static std::vector<Eigen::MatrixXd> commandGains(const QuadrotorMPC::Result& r,
+                                                     StcLandingMpcOCP::Dynamics& dyn) {
+        constexpr int count=StcLandingMpcOCP::N*5;
+        Eigen::MatrixXd q=Eigen::MatrixXd::Zero(StcLandingMpcOCP::NX,StcLandingMpcOCP::NX);
+        q.diagonal().head(3)<<5,5,10;q.diagonal().segment(3,3)<<8,8,8;
+        q.diagonal().segment(6,4).setConstant(50);q.diagonal().segment(10,3).setConstant(.5);
+        Eigen::Matrix4d cost=Eigen::Matrix4d::Zero();cost.diagonal()<<.3,1.5,1.5,1.5;
+        Eigen::MatrixXd p=10*q;std::vector<Eigen::MatrixXd> gains(count);
+        for(int j=count-1;j>=0;--j){const int i=j/5;const double t=(j%5)*.02;
+            auto x=dyn.flow(r.state_trajectory[i],r.control_trajectory[i],t,false).x;
+            auto linear=dyn.flow(x,r.control_trajectory[i],.02);
+            Eigen::MatrixXd s=.02*cost+linear.b.transpose()*p*linear.b;
+            s.diagonal().array()+=1e-6;
+            gains[j]=-s.ldlt().solve(linear.b.transpose()*p*linear.a);
+            p=.02*q+linear.a.transpose()*p*linear.a+linear.a.transpose()*p*linear.b*gains[j];
+            p=(.5*(p+p.transpose())).eval();
+        }
+        return gains;
+    }
     void run() {
         QuadrotorMPC::Config cfg;cfg.ocp_type="stc_landing_mpc";cfg.n_shift=0;QuadrotorMPC solver(cfg);
         for(;;) {
-            PlannerCoreInput input;Eigen::VectorXd applied;double lead;int number;std::optional<Policy> prior;
+            PlannerCoreInput input;Eigen::VectorXd applied,feedback_memory;double lead;int number,prior_node;std::optional<Policy> prior;
             {
                 std::unique_lock<std::mutex> lock(mutex_);ready_.wait(lock,[&]{return stop_||request_.has_value();});
-                if(stop_)return;input=*request_;request_.reset();applied=last_u_;lead=std::min(lead_,0.4);number=count_;prior=policy_;
+                if(stop_)return;input=*request_;request_.reset();applied=last_u_;lead=std::min(lead_,0.4);number=count_;prior=policy_;feedback_memory=feedback_memory_;prior_node=prior&&memory_policy_==prior->number?memory_node_:-1;
             }
             try {
             const auto origin=input.now+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(lead));
@@ -49,7 +75,30 @@ class DirectMpcController {
             StcLandingMpcOCP::Dynamics dyn(pred);
             // Project through the currently applied command over the measured
             // solve lead. High-rate feedback corrects prediction error.
-            if(lead>0)x=dyn.flow(x,applied,lead,false).x;
+            if(lead>0 && prior) {
+                Eigen::VectorXd predicted_control=applied, memory=feedback_memory;
+                int previous_node=prior_node;
+                for(double t=0;t<lead-1e-9;) {
+                    const double h=std::min(0.02,lead-t);
+                    const double age=std::clamp(seconds(input.now,prior->origin)+t,0.0,StcLandingMpcOCP::N*StcLandingMpcOCP::DT-1e-6);
+                    const int i=static_cast<int>(age/StcLandingMpcOCP::DT);
+                    auto old_pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();old_pred->a=prior->acceleration;
+                    StcLandingMpcOCP::Dynamics old_dyn(old_pred);
+                    auto reference=old_dyn.flow(prior->result.state_trajectory[i],prior->result.control_trajectory[i],age-i*StcLandingMpcOCP::DT,false).x;
+                    reference.tail(4)=prior->result.state_trajectory[i].tail(4);
+                    if(i!=previous_node){memory=predicted_control;previous_node=i;}
+                    x.tail(4)=memory;
+                    Eigen::VectorXd error=x-reference;error(13)=0;
+                    if(x.segment<4>(6).dot(reference.segment<4>(6))<0)error.segment<4>(6)=-x.segment<4>(6)-reference.segment<4>(6);
+                    Eigen::VectorXd correction=prior->command_gains[std::min(static_cast<int>(age/.02),StcLandingMpcOCP::N*5-1)]*error;
+                    correction(0)=std::clamp(correction(0),-3.0,3.0);
+                    for(int j=1;j<4;++j)correction(j)=std::clamp(correction(j),-0.35,0.35);
+                    auto u=StcLandingMpcOCP::bounded(prior->result.control_trajectory[i]+correction);
+                    for(int j=0;j<4;++j){const double limit=j==0?20:5;u(j)=std::clamp(u(j),predicted_control(j)-limit*h,predicted_control(j)+limit*h);}
+                    x=dyn.flow(x,u,h,false).x;predicted_control=u;t+=h;
+                }
+                x.tail(4)=predicted_control;
+            } else if(lead>0) x=dyn.flow(x,applied,lead,false).x;
             x(13)=0;
             if(prior){
                 QuadrotorMPC::WarmStartSnapshot warm;
@@ -85,10 +134,13 @@ class DirectMpcController {
             for(int i=0;i<static_cast<int>(raw.state_trajectory.size());++i){auto world=raw.state_trajectory[i];double t=lead+i*StcLandingMpcOCP::DT;
                 world.head(3)+=input.target_snapshot.position+input.target_snapshot.velocity*t+0.5*input.target_snapshot.acceleration*t*t;
                 out.path.states.push_back(world.head(13));}
+            std::vector<Eigen::MatrixXd> gains;
+            if(valid) {gains=commandGains(raw,dyn);for(const auto& k:gains)valid=valid&&k.allFinite();}
+            out.solve_accepted=valid;out.rejection_reason=valid ? "" : "direct_mpc_invalid_or_stale";
             if(!valid)solver.restoreWarmStart(snapshot);
             {
                 std::lock_guard<std::mutex> lock(mutex_);if(stop_)return;
-                if(valid){pending_=Policy{raw,origin,number,input.target_snapshot.acceleration};lead_=count_==0 ? raw.solve_time_ms/1000 : 0.8*lead_+0.2*raw.solve_time_ms/1000;++count_;}
+                if(valid){pending_=Policy{raw,origin,number,input.target_snapshot.acceleration,std::move(gains)};lead_=count_==0 ? raw.solve_time_ms/1000 : 0.8*lead_+0.2*raw.solve_time_ms/1000;++count_;}
                 completed_=std::move(out);busy_=false;
             }
             } catch(const std::exception& e) {
@@ -102,7 +154,7 @@ public:
     ~DirectMpcController(){stop();}
     void stop(){ {std::lock_guard<std::mutex> lock(mutex_);stop_=true;ready_.notify_all();} if(worker_.joinable())worker_.join(); }
     void configure(const PlannerCoreConfig& c){stop();std::lock_guard<std::mutex> lock(mutex_);config_=c;stop_=false;busy_=false;
-        request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0.35;count_=0;last_u_=StcLandingMpcOCP::hover();
+        request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0.35;count_=0;last_u_=StcLandingMpcOCP::hover();feedback_memory_=last_u_;memory_policy_=-1;memory_node_=-1;
         worker_=std::thread([this]{run();});}
     void reset(){PlannerCoreConfig c; {std::lock_guard<std::mutex> lock(mutex_);c=config_;} configure(c);}
     void openControlLog(const std::string& path){std::lock_guard<std::mutex> lock(mutex_);controls_.close();controls_.open(path);controls_<<std::setprecision(17);
@@ -130,10 +182,14 @@ public:
         StcLandingMpcOCP::Dynamics dyn(pred);
         Eigen::VectorXd reference=dyn.flow(r.state_trajectory[i],nominal,age-i*StcLandingMpcOCP::DT,false).x;
         reference.tail(4)=r.state_trajectory[i].tail(4);
-        Eigen::VectorXd live=reference;live.head(13)=relative(measured,target);live.tail(4)=last_u_;
+        // The previous-control state belongs to the 0.1 s optimization
+        // grid. Updating it every 0.02 s would apply its discrete DDP gain
+        // five times per node and amplify the physical feedback.
+        if(memory_policy_!=policy_->number||memory_node_!=i){feedback_memory_=last_u_;memory_policy_=policy_->number;memory_node_=i;}
+        Eigen::VectorXd live=reference;live.head(13)=relative(measured,target);live.tail(4)=feedback_memory_;
         if(live.segment<4>(6).dot(reference.segment<4>(6))<0)live.segment<4>(6)*=-1;
         Eigen::VectorXd delta=live-reference;delta(13)=0;
-        Eigen::VectorXd feedback=r.feedback_gains[i]*delta;
+        Eigen::VectorXd feedback=policy_->command_gains[std::min(static_cast<int>(age/.02),StcLandingMpcOCP::N*5-1)]*delta;
         // Bound the local-policy correction: DDP gains are only valid near
         // the nominal trajectory, particularly after rejected solves.
         if(!feedback.allFinite()){out.stale=true;return out;}
