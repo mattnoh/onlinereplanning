@@ -336,7 +336,9 @@ def run_cell(motion, level, trial, outdir, args):
     # entirely, and meta below reads both unconditionally.
     beta, beta_wait = None, 0.0
     try:
-        procs.append(spawn(f"cd {PX4} && HEADLESS=1 make px4_sitl gz_x500 "
+        # Use the installed SITL binary; a campaign must not rebuild PX4.
+        procs.append(spawn(f"cd {PX4}/build/px4_sitl_default/rootfs && "
+                           "HEADLESS=1 PX4_SIM_MODEL=gz_x500 GZ_IP=127.0.0.1 ../bin/px4 "
                            "2>&1 | grep --line-buffered -vE '^pxh>|\\[2K'", logs["px4"]))
         # PX4 is up once it is accepting the offboard UDP link; mavros
         # connecting is the real gate, so just wait for the log banner.
