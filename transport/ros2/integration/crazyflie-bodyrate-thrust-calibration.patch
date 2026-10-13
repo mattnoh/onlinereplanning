@@ -1,0 +1,26 @@
+--- a/crazyflie/scripts/crazyflie_server.py
++++ b/crazyflie/scripts/crazyflie_server.py
+@@ -860,6 +860,9 @@
+            translates it to ROS 2 paraemeters at startup
+         """
+         for param in params:
++            if param.name in ("bodyrate_T_min_ms2", "bodyrate_T_max_ms2"):
++                return SetParametersResult(successful=isinstance(param.value, float)
++                                           and 0.0 <= param.value < float("inf"))
+             param_split = param.name.split(".")
+ 
+             if param_split[0] == "all":
+@@ -1206,7 +1209,12 @@
+     def _cmd_bodyrate_changed(self, msg, uri=""):
+         T_MAX = self.get_parameter_or("bodyrate_T_max_ms2", rclpy.parameter.Parameter(
+             "bodyrate_T_max_ms2", rclpy.parameter.Parameter.Type.DOUBLE, 16.6)).value
+-        T_pct = max(0.0, min(100.0, msg.twist.linear.z / T_MAX * 100.0))
++        T_MIN = self.get_parameter_or("bodyrate_T_min_ms2", rclpy.parameter.Parameter(
++            "bodyrate_T_min_ms2", rclpy.parameter.Parameter.Type.DOUBLE, 0.0)).value
++        if not 0.0 <= T_MIN < T_MAX:
++            self.get_logger().error("Invalid body-rate thrust calibration bounds")
++            return
++        T_pct = max(0.0, min(100.0, (msg.twist.linear.z - T_MIN) / (T_MAX - T_MIN) * 100.0))
+         self.swarm._cfs[uri].cf.commander.send_setpoint_manual(
+             degrees(msg.twist.angular.x),
+             degrees(msg.twist.angular.y),

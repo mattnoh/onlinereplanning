@@ -53,3 +53,21 @@ Durable candidate copy: `/home/lab/mavros_ws/src/.Codex/comando-planner-clean-ca
 After removal of the unused ROS1 Crazyflie stub, a fresh direct MPC circle run also landed and tore down cleanly: 0.0129 m lateral error, 25 accepted / 2 rejected solves, 307.8696 ms median accepted solve, maximum feedback gap 20.2843 ms, OFFBOARD throughout, and no position commands during direct control. Data: `/tmp/comando-validation/px4_final_smoke`.
 
 The moved plotters retain their existing designs; only their default log-directory lookup was adjusted for the new `tools/analysis` location. No new plot outputs were generated. Remaining polynomial prediction implementations in the Crazyflie stateswitch OCPs were replaced with the external predictor alias before ROS2 validation.
+
+## Crazyflie runtime validation
+
+The ROS2 candidate planner and target executables rebuilt sequentially against the same shared CTCS solver. CrazySim uses prebuilt firmware, one server and one target, and a streamed CSV recorder instead of rosbag. The temporary validation runner is now saved as `scripts/run_crazysim_validation.py` for reproducibility.
+
+| RH target | Accepted / rejected solves | Measured lateral offset at shutdown (m) | Relative height at shutdown (m) |
+|---|---:|---:|---:|
+| circle | 19 / 7 | 0.2825 | 0.2442 |
+| figure8 | 19 / 0 | 0.0582 | 0.1935 |
+| straight | 19 / 0 | 0.2567 | 0.2016 |
+
+These runs dispatched `notify_setpoints_stop -> arm(false)` at terminal freeze and settled to the simulator floor. The RH freeze follows the planned state, so actual tracking error must also be reviewed; reaching shutdown alone is not an accuracy gate. Historical Crazyflie reference CSVs contain planned solver trajectories, without a matched executed-trajectory record. The saved reference horizon was 40 with timestep ceiling 0.16, and circle activation was phase-matched to 4.294 rad where possible.
+
+The existing body-rate backend mapped SI acceleration through an offset PWM range (10001–60000). With CrazySim's current mass and motor model, the corresponding acceleration bounds are 2.994533 and 17.965402 m/s². An uncorrected 8 m/s² step climbed from about 1.82 to 2.71 m. The calibrated 9.81 m/s² roll/pitch steps retained approximately 1.8 m altitude. Rate steps showed coupled ringing; disabling rate integral gains worsened this, and that experimental tuning is not used for the first MPC flight check.
+
+The backend now supports an optional `bodyrate_T_min_ms2`, default 0, retaining the existing mapping unless explicitly calibrated. Backend transport checkpoint: `af31b0b`; required CFlib manual packet checkpoint: `ffd667a`. Unrelated backend working-tree changes remain unstaged and unchanged. A focused calibration patch is saved under `transport/ros2/integration`.
+
+Crazyflie direct MPC validation and both directory cutovers remain pending.
