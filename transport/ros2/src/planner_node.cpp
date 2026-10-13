@@ -499,7 +499,13 @@ private:
             std::lock_guard<std::mutex> lk(state_monitor_.stateMutex());
             return mavros_handles_.current;
         }
-        return state_monitor_.getCurrentState(platform_);
+        auto state = state_monitor_.getCurrentState(platform_);
+        // Native cflib odometry contains Kalman body-frame velocity; pose is ENU.
+        // Explicit odometry overrides already carry the selected OCP frame.
+        if (platform_ == "crazyflie" && drone_odom_topic_.empty() &&
+            state.size() >= 13 && state.allFinite() && state.segment<4>(6).norm() > 1e-8)
+            return planner_core::bodyOdometryToWorld(std::move(state));
+        return state;
     }
 
     // Convert only sensor states that are explicitly published in shifted coordinates.

@@ -177,6 +177,9 @@ inline void setup(
             "/" + drone_name + "/pose", 10,
             [&](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
                 std::lock_guard<std::mutex> lk(state_mutex);
+                const Eigen::Vector3d position(msg->pose.position.x,msg->pose.position.y,msg->pose.position.z);
+                const Eigen::Vector4d attitude(msg->pose.orientation.w,msg->pose.orientation.x,msg->pose.orientation.y,msg->pose.orientation.z);
+                if (!position.allFinite() || !attitude.allFinite() || attitude.norm()<1e-8) return;
                 state.current(0) = msg->pose.position.x;
                 state.current(1) = msg->pose.position.y;
                 state.current(2) = msg->pose.position.z;
@@ -195,6 +198,9 @@ inline void setup(
             "/" + drone_name + "/odom", 10,
             [&](const nav_msgs::msg::Odometry::SharedPtr msg) {
                 std::lock_guard<std::mutex> lk(state_mutex);
+                const Eigen::Vector3d velocity(msg->twist.twist.linear.x,msg->twist.twist.linear.y,msg->twist.twist.linear.z);
+                const Eigen::Vector3d rates(msg->twist.twist.angular.x,msg->twist.twist.angular.y,msg->twist.twist.angular.z);
+                if (!velocity.allFinite() || !rates.allFinite()) return;
                 state.current(3) = msg->twist.twist.linear.x;
                 state.current(4) = msg->twist.twist.linear.y;
                 state.current(5) = msg->twist.twist.linear.z;
