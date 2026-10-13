@@ -363,7 +363,7 @@ def run_cell(motion, level, trial, outdir, args):
         procs.append(spawn(
             f"{SETUP} && export {env} && roslaunch comando_planner planner_launch.launch "
             f"platform:=mavros drone_name:=px4_drone hover_thrust:={args.hover_thrust} terminal_freeze_enter_vel:=0.30 "
-            f"stc_z_stage:=1.55 stc_los_alt_trig:=1.2 log_dir:={cell}", logs["planner"]))
+            f"stc_z_stage:={args.stc_z_stage} stc_los_alt_trig:={args.stc_los_alt_trig} log_dir:={cell}", logs["planner"]))
         wait_for("planner node", lambda: node_alive("comando_planner"), 45)
         # ...then wait for it to actually be flying-ready, and give the
         # position hold a moment to stabilise before overriding the target.
@@ -470,6 +470,8 @@ def main():
     ap.add_argument("--reuse", action="store_true")
     ap.add_argument("--profile", default=os.path.join(PKG,"config/profile_stc_landing_noaug_sitl.yaml"))
     ap.add_argument("--hover-thrust", type=float, default=0.3)
+    ap.add_argument("--stc-z-stage", type=float, default=1.55)
+    ap.add_argument("--stc-los-alt-trig", type=float, default=1.2)
     ap.add_argument("--motions", default=",".join(MOTIONS))
     ap.add_argument("--levels", default=",".join(UNCERT))
     args = ap.parse_args()

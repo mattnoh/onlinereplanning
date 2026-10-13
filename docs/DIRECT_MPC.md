@@ -10,7 +10,8 @@ for the new controller.
 The fixed horizon is 40 × 0.1 s. The solver state is physical position,
 velocity, quaternion, angular rate (13), prediction time (1), and previous
 control (4). A first-order rate response models the remaining PX4 controller.
-Four RK4 substeps integrate each interval. The eight original noaug CTCS
+Adaptive RK4 substeps integrate each interval (two at the calibrated 0.08 s
+rate time constant, with more substeps for faster rate responses). The eight original noaug CTCS
 implications and scaled aggregate interval budget use the shared interface.
 Thrust and body-rate bounds replace thrust/moment bounds. The upper thrust
 bound also respects normalized throttle saturation.
@@ -87,3 +88,8 @@ and the independent moving-target model. After recomputing command-rate gains,
 the 5 s moving-target model test passed with 13 accepted policies and 232
 feedback ticks, reducing distance to 0.70 m without policy expiry. The full
 model regression is part of `test_direct_mpc`.
+
+The dedicated `direct_mpc_sitl.launch` supplies the calibrated thrust/rate
+parameters, 0.35 rad/s command bounds, 120 iterations, a 2 s policy-age limit,
+and a 1.3 m staging floor. Other STC thresholds and interval budgets remain
+those of the saved profile. The speed cone retains the original 3 m/s bound.

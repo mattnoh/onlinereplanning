@@ -115,6 +115,7 @@ find_package(Threads REQUIRED)
 add_executable(test_direct_mpc test/test_direct_mpc.cpp ${SHARED_SOURCES})
 target_include_directories(test_direct_mpc PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
 target_link_libraries(test_direct_mpc planner_core Threads::Threads)
+target_compile_options(test_direct_mpc PRIVATE -UNDEBUG)
 target_link_libraries(comando_planner Threads::Threads)
 
 add_executable(tools_seed_probe test/tools_seed_probe.cpp ${SHARED_SOURCES})

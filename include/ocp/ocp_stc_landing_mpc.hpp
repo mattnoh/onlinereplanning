@@ -8,8 +8,9 @@ constexpr int NU = 4;
 constexpr int MEMORY = 14;
 constexpr double DT = 0.1;
 constexpr int N = 40;
-constexpr int SUBSTEPS = 4;
+
 inline double rateTau() { return std::max(0.02, Ref::envOrQ("MPC_RATE_TAU", 0.08)); }
+inline int substeps() { return std::max(2,static_cast<int>(std::ceil(DT/(0.65*rateTau())))); }
 inline double rateLimit() { return Ref::envOrQ("MPC_RATE_LIMIT", 1.0); }
 inline double thrustMax() { return std::min(Ref::FMAX/Ref::MASS,9.81/std::max(0.1,Ref::envOrQ("MPC_HOVER_THRUST",0.7282821834))); }
 inline Eigen::VectorXd bounded(Eigen::VectorXd u) {
@@ -39,13 +40,13 @@ public:
     }
     Eigen::MatrixXd intervalRatesU(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const {
         Eigen::MatrixXd b=Eigen::MatrixXd::Zero(NX,NU);
-        b.topRows(14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRatesU(x.head(14),u);
+        b.topRows(14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRatesU(x.head(14),u).leftCols(NU);
         b.block(10,0,3,NU).setZero();b.block<3,3>(10,1)=Eigen::Matrix3d::Identity()/rateTau();return b;
     }
     struct Flow {Eigen::VectorXd x;Eigen::MatrixXd a,b;};
     Flow flow(Eigen::VectorXd x,const Eigen::VectorXd& u,double duration,bool jac=true) const {
         Eigen::MatrixXd a=Eigen::MatrixXd::Identity(NX,NX),b=Eigen::MatrixXd::Zero(NX,NU);
-        const int steps=std::max(1,static_cast<int>(std::ceil(duration/(DT/SUBSTEPS))));
+        const int steps=std::max(1,static_cast<int>(std::ceil(duration/(DT/substeps()))));
         const double h=duration/steps;
         for(int j=0;j<steps;++j) {
             auto k1=intervalRates(x,u);Eigen::VectorXd p2=x+h/2*k1;
@@ -68,9 +69,19 @@ public:
         x.segment<4>(6)=q/norm;x.segment(MEMORY,NU)=u;
         a.bottomRows(NU).setZero();b.bottomRows(NU).setIdentity();return {x,a,b};
     }
+private:
+    mutable Eigen::VectorXd cache_x_,cache_u_;
+    mutable Flow cache_;
+    const Flow& jacobian(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const {
+        if(cache_x_.size()!=x.size() || cache_u_.size()!=u.size() || !(cache_x_.array()==x.array()).all() || !(cache_u_.array()==u.array()).all()) {
+            cache_=flow(x,u,DT);cache_x_=x;cache_u_=u;
+        }
+        return cache_;
+    }
+public:
     Eigen::VectorXd f(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {return flow(x,u,DT,false).x;}
-    Eigen::MatrixXd fx(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {return flow(x,u,DT).a;}
-    Eigen::MatrixXd fu(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {return flow(x,u,DT).b;}
+    Eigen::MatrixXd fx(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {return jacobian(x,u).a;}
+    Eigen::MatrixXd fu(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {return jacobian(x,u).b;}
 };
 
 class Cost : public StageCostBase<double> {
@@ -115,17 +126,24 @@ public:
     Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {Eigen::MatrixXd a=Eigen::MatrixXd::Zero(dim_c,NX);a(8,2)=-1;return a;}
     Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {Eigen::MatrixXd b=Eigen::MatrixXd::Zero(dim_c,NU);b(0,0)=-1;b(1,0)=1;for(int i=1;i<NU;++i){b(2*i,i)=1;b(2*i+1,i)=-1;}return b;}
 };
+class SpeedBound : public StageConstraintBase<double> {
+public:
+    SpeedBound(){constraint_type=ConstraintType::SOC;dim_c=4;}
+    Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&) const override {Eigen::VectorXd v(4);v(0)=Ref::SPD_PHASE0_MAX;v.tail(3)=x.segment(3,3);return -v;}
+    Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {Eigen::MatrixXd a=Eigen::MatrixXd::Zero(4,NX);a.block<3,3>(1,3)=-Eigen::Matrix3d::Identity();return a;}
+    Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {return Eigen::MatrixXd::Zero(4,NU);}
+};
 inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs& args) {
     auto pred=std::make_shared<Ref::ConstantAccelPredictor>();pred->a=args.target_accel;
     auto dyn=std::make_shared<Dynamics>(pred);auto problem=std::make_shared<OptimalControlProblem<double>>(N);
-    auto cost=std::make_shared<Cost>();auto bounds=std::make_shared<Bounds>();
-    auto stc=Ref::makeCtcsConstraint<double>(dyn,Ref::CTCS_STEP_EPS/Ref::CTCS_Y_SCALE,-1,DT,SUBSTEPS);
+    auto cost=std::make_shared<Cost>();auto bounds=std::make_shared<Bounds>();auto speed=std::make_shared<SpeedBound>();
+    auto stc=Ref::makeCtcsConstraint<double>(dyn,Ref::CTCS_STEP_EPS/Ref::CTCS_Y_SCALE,-1,DT,substeps());
     Eigen::VectorXd x=Eigen::VectorXd::Zero(NX);x.head(13)=args.current_state.head(13);
     x.tail(NU)=args.current_state.size()==NX ? args.current_state.tail(NU).eval() : hover();
     for(int k=0;k<N;++k){problem->setInitialState(k,x);Eigen::VectorXd u=hover();
         if(k<static_cast<int>(args.prev_U.size())&&args.prev_U[k].size()==NU)u=bounded(args.prev_U[k]);
         problem->setInitialControl(k,u);problem->setStageDynamics(k,dyn);problem->setStageCost(k,cost);
-        problem->addStageConstraint(k,bounds);problem->addStageConstraint(k,stc);x=dyn->f(x,u);
+        problem->addStageConstraint(k,bounds);problem->addStageConstraint(k,speed);problem->addStageConstraint(k,stc);x=dyn->f(x,u);
     }
     problem->setInitialState(N,x);problem->setTerminalCost(std::make_shared<Terminal>());return problem;
 }

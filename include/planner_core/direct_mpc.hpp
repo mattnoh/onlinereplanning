@@ -66,7 +66,7 @@ class DirectMpcController {
             PlannerCoreInput input;Eigen::VectorXd applied,feedback_memory;double lead;int number,prior_node;std::optional<Policy> prior;
             {
                 std::unique_lock<std::mutex> lock(mutex_);ready_.wait(lock,[&]{return stop_||request_.has_value();});
-                if(stop_)return;input=*request_;request_.reset();applied=last_u_;lead=std::min(lead_,0.4);number=count_;prior=policy_;feedback_memory=feedback_memory_;prior_node=prior&&memory_policy_==prior->number?memory_node_:-1;
+                if(stop_)return;input=*request_;request_.reset();applied=last_u_;lead=std::min(lead_,0.8);number=count_;prior=policy_;feedback_memory=feedback_memory_;prior_node=prior&&memory_policy_==prior->number?memory_node_:-1;
             }
             try {
             const auto origin=input.now+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(lead));
@@ -141,6 +141,7 @@ class DirectMpcController {
             {
                 std::lock_guard<std::mutex> lock(mutex_);if(stop_)return;
                 if(valid){pending_=Policy{raw,origin,number,input.target_snapshot.acceleration,std::move(gains)};lead_=count_==0 ? raw.solve_time_ms/1000 : 0.8*lead_+0.2*raw.solve_time_ms/1000;++count_;}
+                if(!valid && !policy_ && raw.solve_time_ms>0)lead_=std::clamp(raw.solve_time_ms/1000,0.05,0.8);
                 completed_=std::move(out);busy_=false;
             }
             } catch(const std::exception& e) {
