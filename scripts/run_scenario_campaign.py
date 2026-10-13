@@ -401,7 +401,7 @@ def run_cell(motion, level, trial, outdir, args):
                f"rosparam set /comando_planner/land_action none && "
                f"rosparam set /comando_planner/hover_target_x {hx:.3f} && "
                f"rosparam set /comando_planner/hover_target_y {hy:.3f} && "
-               f"rosparam set /comando_planner/hover_target_z 2.05 && "
+               f"rosparam set /comando_planner/hover_target_z 1.8 && "
                f"rosparam set /comando_planner/command_seq 1")
         sh(f"{SETUP} && {hov}", timeout=60)
         settled, z, vz = wait_settle()
