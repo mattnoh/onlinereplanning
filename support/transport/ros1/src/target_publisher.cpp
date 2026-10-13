@@ -14,7 +14,7 @@
 ///   target_source="relative_estimate" → stage 2 subscribes to that topic and
 ///       synthesizes world-frame /target/odom + /target/accel from it
 ///       (target z pinned to pad_z); ground truth moves to /target/odom_gt.
-/// See docs/dynamic_target_hardware_integration.md for the message contract.
+/// See README.md (estimator and frame contract) for the message contract.
 
 #include <ros/ros.h>
 #include "target/target_generator.hpp"

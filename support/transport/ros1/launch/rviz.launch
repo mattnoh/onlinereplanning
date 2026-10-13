@@ -4,7 +4,7 @@
        Live sim:    roslaunch comando_planner rviz.launch
        Bag replay:  roslaunch comando_planner rviz.launch replay:=true
                     then play the bag with the clock and loop flags
-                    (exact command in docs/MAVROS_SITL.md, section 8).
+                    (exact command in README.md, logs, analysis and plots section).
 
        Publishes static identity transforms tying together the frames used
        by the different topics: mavros odometry is stamped 'map' (child

@@ -1,4 +1,4 @@
-# Hover profile for the PX4 SITL smoke test (see docs/MAVROS_SITL.md).
+# Hover profile for the PX4 SITL smoke test (see README.md).
 # Loaded into the comando_planner private namespace by scripts/apply_profile.sh.
 ocp_type: hover
 # open_loop: solve once from the current state and replay the whole plan —

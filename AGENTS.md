@@ -7,4 +7,4 @@
 - Run SITL cases sequentially. Scenario campaigns launch the installed PX4
   binary directly, without rebuilding PX4.
 - MC1 baseline settings and CTCS migration results are documented in
-  `docs/CTCS_NOAUG_MIGRATION.md`.
+  `README.md`.
