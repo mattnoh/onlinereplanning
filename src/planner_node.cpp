@@ -282,6 +282,11 @@ private:
                     return;
                 }
             }
+            if (ocp_type_ == "stc_landing_mpc" &&
+                std::abs(hover_thrust_d_ - StcLandingNoAugOCP::envOrQ("MPC_HOVER_THRUST",0.7282821834)) > 1e-3) {
+                ROS_ERROR_THROTTLE(2.0,"Direct MPC requires hover_thrust to match MPC_HOVER_THRUST");
+                return;
+            }
             last_command_seq_ = p_seq;
             if (platform_ == "mavros") platform::mavros::resetForNewFlight(mavros_handles_);
             if (hasState() && is_configured_ && mass_kg_ > 0.0) {

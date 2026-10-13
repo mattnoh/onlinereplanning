@@ -70,6 +70,14 @@ def solver_stats(cell):
             out["src_predicted"] += 1
         elif s == "recovery_live":
             out["src_recovery"] += 1
+    controls = os.path.join(cell, "direct_mpc_controls.csv")
+    if os.path.exists(controls):
+        ticks = list(csv.DictReader(open(controls)))
+        if ticks and "pos_error" in ticks[0]:
+            pos = [float(t["pos_error"]) for t in ticks]
+            vel = [float(t["vel_error"]) for t in ticks]
+            out["track_err_med"], out["track_err_max"] = med(pos), round(max(pos),4)
+            out["vel_err_med"] = med(vel)
     return out
 
 

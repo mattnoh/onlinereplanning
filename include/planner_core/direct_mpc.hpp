@@ -6,6 +6,7 @@
 #include <thread>
 #include <optional>
 #include <fstream>
+#include <iomanip>
 
 namespace planner_core {
 class DirectMpcController {
@@ -26,7 +27,7 @@ class DirectMpcController {
     PlannerCoreConfig config_;
     Clock::time_point last_request_{},last_apply_{};
     Eigen::VectorXd last_u_=StcLandingMpcOCP::hover();
-    double lead_=0;
+    double lead_=0.35;
     int count_=0;
     std::ofstream controls_;
     static double seconds(Clock::time_point a,Clock::time_point b){return std::chrono::duration<double>(a-b).count();}
@@ -39,7 +40,7 @@ class DirectMpcController {
             PlannerCoreInput input;Eigen::VectorXd applied;double lead;int number;std::optional<Policy> prior;
             {
                 std::unique_lock<std::mutex> lock(mutex_);ready_.wait(lock,[&]{return stop_||request_.has_value();});
-                if(stop_)return;input=*request_;request_.reset();applied=last_u_;lead=policy_ ? std::min(lead_,0.2) : 0.0;number=count_;prior=policy_;
+                if(stop_)return;input=*request_;request_.reset();applied=last_u_;lead=std::min(lead_,0.4);number=count_;prior=policy_;
             }
             try {
             const auto origin=input.now+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(lead));
@@ -87,7 +88,7 @@ class DirectMpcController {
             if(!valid)solver.restoreWarmStart(snapshot);
             {
                 std::lock_guard<std::mutex> lock(mutex_);if(stop_)return;
-                if(valid){pending_=Policy{raw,origin,number,input.target_snapshot.acceleration};++count_;lead_=0.8*lead_+0.2*raw.solve_time_ms/1000;}
+                if(valid){pending_=Policy{raw,origin,number,input.target_snapshot.acceleration};lead_=count_==0 ? raw.solve_time_ms/1000 : 0.8*lead_+0.2*raw.solve_time_ms/1000;++count_;}
                 completed_=std::move(out);busy_=false;
             }
             } catch(const std::exception& e) {
@@ -101,11 +102,11 @@ public:
     ~DirectMpcController(){stop();}
     void stop(){ {std::lock_guard<std::mutex> lock(mutex_);stop_=true;ready_.notify_all();} if(worker_.joinable())worker_.join(); }
     void configure(const PlannerCoreConfig& c){stop();std::lock_guard<std::mutex> lock(mutex_);config_=c;stop_=false;busy_=false;
-        request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0;count_=0;last_u_=StcLandingMpcOCP::hover();
+        request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0.35;count_=0;last_u_=StcLandingMpcOCP::hover();
         worker_=std::thread([this]{run();});}
     void reset(){PlannerCoreConfig c; {std::lock_guard<std::mutex> lock(mutex_);c=config_;} configure(c);}
-    void openControlLog(const std::string& path){std::lock_guard<std::mutex> lock(mutex_);controls_.close();controls_.open(path);
-        controls_<<"time,policy,age,nom_thrust,nom_roll,nom_pitch,nom_yaw,fb_thrust,fb_roll,fb_pitch,fb_yaw,thrust,roll,pitch,yaw,saturation,jump\n";}
+    void openControlLog(const std::string& path){std::lock_guard<std::mutex> lock(mutex_);controls_.close();controls_.open(path);controls_<<std::setprecision(17);
+        controls_<<"time,policy,age,nom_thrust,nom_roll,nom_pitch,nom_yaw,fb_thrust,fb_roll,fb_pitch,fb_yaw,thrust,roll,pitch,yaw,saturation,jump,feedback_limited,slew_limited,pos_error,vel_error\n";}
     PlannerCoreStepResult trySolve(const PlannerCoreInput& input){
         std::lock_guard<std::mutex> lock(mutex_);PlannerCoreStepResult out;
         if(completed_){out=std::move(*completed_);completed_.reset();}
@@ -121,7 +122,7 @@ public:
         if(pending_&&now>=pending_->origin){policy_=std::move(pending_);pending_.reset();}
         if(!policy_)return out;out.has_replay_sample=true;out.solve_num=policy_->number;
         const double age=seconds(now,policy_->origin);
-        if(age<0||age>=StcLandingMpcOCP::N*StcLandingMpcOCP::DT||measured.size()<13||!measured.allFinite()){out.stale=true;return out;}
+        if(age<0||age>=std::min(StcLandingMpcOCP::N*StcLandingMpcOCP::DT,StcLandingNoAugOCP::envOrQ("MPC_MAX_POLICY_AGE",1.0))||measured.size()<13||!measured.allFinite()){out.stale=true;return out;}
         int i=std::min(static_cast<int>(age/StcLandingMpcOCP::DT),StcLandingMpcOCP::N-1);
         const auto& r=policy_->result;Eigen::VectorXd nominal=r.control_trajectory[i];
         auto pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();
@@ -132,17 +133,25 @@ public:
         Eigen::VectorXd live=reference;live.head(13)=relative(measured,target);live.tail(4)=last_u_;
         if(live.segment<4>(6).dot(reference.segment<4>(6))<0)live.segment<4>(6)*=-1;
         Eigen::VectorXd delta=live-reference;delta(13)=0;
-        Eigen::VectorXd feedback=r.feedback_gains[i]*delta;Eigen::VectorXd raw=nominal+feedback;
+        Eigen::VectorXd feedback=r.feedback_gains[i]*delta;
+        // Bound the local-policy correction: DDP gains are only valid near
+        // the nominal trajectory, particularly after rejected solves.
+        if(!feedback.allFinite()){out.stale=true;return out;}
+        const Eigen::VectorXd unbounded_feedback=feedback;
+        feedback(0)=std::clamp(feedback(0),-3.0,3.0);
+        for(int j=1;j<4;++j)feedback(j)=std::clamp(feedback(j),-0.35,0.35);
+        Eigen::VectorXd raw=nominal+feedback;
         if(!raw.allFinite()){out.stale=true;return out;}
         Eigen::VectorXd u=StcLandingMpcOCP::bounded(raw);
         const bool saturated=(u-raw).norm()>1e-9;
+        const Eigen::VectorXd before_slew=u;
         const double h=last_apply_==Clock::time_point{}?0.02:std::clamp(seconds(now,last_apply_),0.0,0.05);
         Eigen::Vector4d slew;slew<<20,5,5,5;
         for(int j=0;j<4;++j)u(j)=std::clamp(u(j),last_u_(j)-slew(j)*h,last_u_(j)+slew(j)*h);
         const double jump=(u-last_u_).norm();last_u_=u;last_apply_=now;
         out.command.kind=CommandKind::BodyRate;out.command.control=u;out.command.state=reference.head(13);
         if(controls_){controls_<<std::chrono::duration<double>(now.time_since_epoch()).count()<<','<<policy_->number<<','<<age;
-            for(const auto& v:{nominal,feedback,u})for(int j=0;j<4;++j)controls_<<','<<v(j);controls_<<','<<saturated<<','<<jump<<'\n';}
+            for(const auto& v:{nominal,feedback,u})for(int j=0;j<4;++j)controls_<<','<<v(j);controls_<<','<<saturated<<','<<jump<<','<<((feedback-unbounded_feedback).norm()>1e-9)<<','<<((u-before_slew).norm()>1e-9)<<','<<delta.head(3).norm()<<','<<delta.segment(3,3).norm()<<'\n';}
         return out;
     }
 };

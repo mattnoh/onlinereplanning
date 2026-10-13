@@ -42,6 +42,7 @@ int main(){try{
     std::cout<<"cold solve: accepted="<<solved.solve_accepted<<" error="<<solved.solve_result.constraint_error<<" ms="<<solved.solve_result.solve_time_ms<<'\n';
     check(solved.solve_accepted,"cold direct MPC solve rejected");
     auto now=std::chrono::steady_clock::now();auto sample=controller.sample(now,input.current_state,input.target_snapshot);
+    for(int i=0;i<100&&!sample.has_replay_sample;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));now=std::chrono::steady_clock::now();sample=controller.sample(now,input.current_state,input.target_snapshot);}
     check(sample.has_replay_sample&&!sample.stale&&sample.command.control.allFinite(),"feedback sample");
     input.current_state.segment<4>(6)*=-1;auto flipped=controller.sample(now,input.current_state,input.target_snapshot);
     check((sample.command.control-flipped.command.control).norm()<1e-10,"quaternion sign feedback");

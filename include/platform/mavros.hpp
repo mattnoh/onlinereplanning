@@ -336,6 +336,9 @@ inline void setup(ros::NodeHandle& nh,
             const auto& q = msg->pose.pose.orientation;
             const auto& v = msg->twist.twist.linear;
             const auto& w = msg->twist.twist.angular;
+            const Eigen::Vector4d attitude(q.w,q.x,q.y,q.z);
+            const Eigen::VectorXd values=(Eigen::VectorXd(12)<<p.x,p.y,p.z,v.x,v.y,v.z,w.x,w.y,w.z,q.w,q.x,q.y).finished();
+            if (!values.allFinite() || !attitude.allFinite() || attitude.norm()<1e-8) return;
             state_out(0)=p.x; state_out(1)=p.y; state_out(2)=p.z;
             state_out(3)=v.x; state_out(4)=v.y; state_out(5)=v.z;
             state_out(6)=q.w; state_out(7)=q.x;

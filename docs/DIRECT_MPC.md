@@ -18,16 +18,18 @@ bound also respects normalized throttle saturation.
 The optimization cost includes changes from the previous applied control.
 A separate worker accepts solve requests at most every 0.1 s. The ROS command
 timer applies live-state DDP feedback every 0.02 s, independently of the solver.
-State prediction over the estimated solve lead uses the currently applied
+The first policy projects the staging hold through a 0.35 s initial solve
+lead; subsequent leads use measured solve latency. State prediction uses the currently applied
 command; policy age compensates for the remaining latency. Controls are shifted
 by elapsed time and the factory re-rolls them from the measured projected state.
 Policies are swapped without the RH node-handoff scheduler. Quaternion signs
 are aligned for feedback and the prediction-time state has zero feedback error.
 The four memory-state errors use the previous applied control.
 
-Commands are bounded and slew-limited (20 m/s³ thrust acceleration and 5 rad/s²
+DDP corrections are bounded to ±3 m/s² thrust acceleration and ±0.35 rad/s
+body rate. Commands are bounded and slew-limited (20 m/s³ thrust acceleration and 5 rad/s²
 body-rate changes). Invalid/rejected solves retain the prior valid policy;
-policy expiry or stale odometry/target state switches to PX4 position hold and
+a policy older than 1 s or stale odometry/target state switches to PX4 position hold and
 pauses. Normal touchdown uses the existing PX4 landing handoff.
 `direct_mpc_controls.csv` logs nominal controls, feedback, output, saturation,
 policy age, and command jumps. The command queue/heartbeat serialize publication.
@@ -59,7 +61,7 @@ rosrun comando_planner apply_profile.sh /comando_planner \
 `MPC_MAX_ITER` defaults to 60, `MPC_RATE_LIMIT` to 1 rad/s, and
 `MPC_SLEW_THR`/`MPC_SLEW_RATE` set the optimizer's control-change cost weights.
 The calibrated defaults are intended for x500 SITL. Explicit `hover_thrust`
-must match `MPC_HOVER_THRUST` for actuator bounds and command scaling to agree.
+is checked at activation and must match `MPC_HOVER_THRUST` for actuator bounds and command scaling to agree.
 
 ## Tests
 
@@ -67,3 +69,9 @@ Build one target at a time with `catkin build comando_planner --no-deps -j1 -p1
 --make-args <target>`. `test_direct_mpc` checks discrete dynamics and CTCS
 Jacobians, world/body velocity conversion, thrust normalization, nonblocking
 solve submission, live feedback, quaternion-sign equivalence, and policy expiry.
+
+The initial three-motion check passed circle/figure8 but failed straight after
+startup skipped the first policy’s solve latency, producing an excessive
+feedback correction. The failed trace is preserved in
+`logs/direct_mpc_20261013/mc1/`; it motivated first-policy latency compensation,
+correction bounds, and the 1 s policy-age cutoff before the corrected checks.
