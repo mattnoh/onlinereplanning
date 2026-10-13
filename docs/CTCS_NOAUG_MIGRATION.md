@@ -66,3 +66,31 @@ catkin build comando_planner --no-deps -j1 -p1 --make-args test_stc_landing_noau
 catkin build comando_planner --no-deps -j1 -p1 --make-args test_stc_landing_noaug
 catkin build comando_planner --no-deps -j1 -p1 --make-args comando_planner
 ```
+
+All parity modes passed (including nonzero stage/LOS trigger floors).
+Maximum relative value discrepancy was below `6e-16`, and maximum normalized
+Jacobian discrepancy against finite differences was below `3.7e-7`.
+The existing noaug regression passed its cold solve and all five warm-started
+solves; relative distance decreased from 3.70945 m to 0.114301 m.
+
+## Post-migration SITL check
+
+Planner commit `a450204`, same saved tuning, trial seeds, and motion settings.
+Full artifacts: `logs/ctcs_interface_20261013/ctcs_interface/`.
+Manifest and per-trial metrics are also committed in
+`docs/benchmarks/ctcs_noaug/ctcs_manifest.json` and `ctcs_samples.csv`.
+
+| Motion | Result | Lateral error before → after (m) | Median solve time before → after (ms) | Rejected solves after |
+|---|---|---:|---:|---:|
+| circle | LANDED | 0.1031 → 0.1070 | 132.8057 → 84.8193 | 0 |
+| figure8 | LANDED | 0.1610 → 0.2910 | 128.2894 → 81.5908 | 0 |
+| straight | LANDED | 0.0366 → 0.0543 | 135.9274 → 88.5059 | 0 |
+
+All three cases had zero logged deadline misses and clean teardown. Solve
+times were lower in these checks; touchdown error increased, especially for
+figure8. These are single closed-loop trials, and target phase/engagement
+geometry varies with wall-clock timing, so they do not establish a general
+landing-accuracy improvement or identify the cause of the figure8 difference.
+The independent parity checks establish that the migrated row preserves the
+original density and interval budget; it now uses analytic interval derivatives
+in place of differences of the complete interval integral.
