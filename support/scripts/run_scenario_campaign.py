@@ -300,6 +300,13 @@ def wait_landing(planner_log, timeout=300):
     t_end = time.time() + timeout
     seen_armed = False
     while time.time() < t_end:
+        # A paused controller cannot finish this command without a new command
+        # sequence. Preserve the failure and finalize its bag immediately.
+        stopped = sh(f"{SETUP} && rosparam get /comando_planner/control_stop_reason 2>/dev/null", timeout=15).stdout.strip()
+        if "direct MPC expired policy" in stopped:
+            return "POLICY_EXPIRED"
+        if "direct MPC stale state" in stopped:
+            return "STALE_STATE"
         r = sh(f"{SETUP} && timeout 5 rostopic echo -n1 /mavros/state 2>/dev/null "
                "| grep -E '^armed:'", timeout=15)
         txt = r.stdout.strip()

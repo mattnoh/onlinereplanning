@@ -301,6 +301,7 @@ private:
                 ROS_INFO("Verified feasible cone start: r=[%.4f,%.4f,%.4f] v=%.4f omega=%.5f",live(0),live(1),live(2),live.segment<3>(3).norm(),live.segment<3>(10).norm());
             }
             last_command_seq_ = p_seq;
+            nh_.setParam("control_stop_reason",std::string{});
             if (platform_ == "mavros") platform::mavros::resetForNewFlight(mavros_handles_);
             if (hasState() && is_configured_ && mass_kg_ > 0.0) {
                 const Eigen::VectorXd x_now = convertStateToAbsoluteFrame(getCurrentState());
@@ -557,6 +558,7 @@ private:
                 ROS_INFO("Command finished (%s). Holding hover and waiting for next command_seq.", r);
             },
             [this]() { resetForNewCommand(); ocp_active_.store(false); });
+        nh_.setParam("control_stop_reason",reason);
     }
 
     void publishCommand(const Eigen::VectorXd& s, const Eigen::VectorXd& u) {
