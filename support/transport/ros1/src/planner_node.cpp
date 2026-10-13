@@ -214,6 +214,7 @@ private:
         open_loop_abort_max_vz_error_mps_ = p_vze;
 
         if (profile_changed) {
+            nh_.setParam("ordinary_start_verified",false);
             feasible_start_since_={};
             if (new_ocp_type.empty()) {
                 ROS_ERROR("Cannot apply profile: ocp_type is not set.");
@@ -312,6 +313,7 @@ private:
             command_paused_.store(false);
             ocp_active_.store(true);
             resetForNewCommand();
+            if(OCPRegistry::getDescriptor(ocp_type_).feasible_start)nh_.setParam("ordinary_start_verified",true);
             ROS_INFO("Accepted command_seq=%d. Starting OCP=%s mode=%s n_replay=%d.",
                 last_command_seq_, ocp_type_.c_str(), mode_.c_str(), n_replay_);
         }

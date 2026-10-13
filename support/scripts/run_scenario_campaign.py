@@ -430,7 +430,7 @@ def run_cell(motion, level, trial, outdir, args):
                f"{args.profile}",
                timeout=60)
             if getattr(args,"start","original")=="cone":
-                activation=wait_for("feasible cone activation",lambda: "Verified feasible cone start" in open(logs["planner"]).read(),30,poll=.25)
+                activation=wait_for("feasible cone activation",lambda: "true" in sh(f"{SETUP} && rosparam get /comando_planner/ordinary_start_verified",timeout=10).stdout.lower(),30,poll=.25)
                 if activation<30:
                     def started():
                         for folder,_,files in os.walk(cell):
