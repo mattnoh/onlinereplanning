@@ -498,9 +498,29 @@ private:
         bool prepare=false;nh_.param<bool>("prepare_cone_start",prepare,false);
         if(prepare && hasState() && hasFreshTargetState()) {
             auto hold=getCurrentState();const auto target=getTargetSnapshot();
-            hold.head<3>()=target.position+Eigen::Vector3d(0,0,1.85);hold.segment<3>(3)=target.velocity;
-            publishCommandAbsolute(hold,Eigen::VectorXd::Zero(4));return;
+            if(target.valid) {
+                const auto now=Clock::now();const double h=prep_last_==Clock::time_point{}?.05:std::clamp(std::chrono::duration<double>(now-prep_last_).count(),.001,.1);
+                const auto& limits=comando_parameters::defaults.constraints;
+                const double acceleration_limit=.6*9.81*std::tan(limits.alpha_theta_stc*limits.theta_stc_deg*M_PI/180);
+                const double jerk_limit=.5*9.81*limits.omega_stc_max;
+                const double jerk=prep_last_==Clock::time_point{}?0:(target.acceleration-prep_last_accel_).head<2>().norm()/h;
+                if(!prep_filter_&&(target.acceleration.head<2>().norm()>acceleration_limit||jerk>jerk_limit)) {
+                    prep_filter_=true;prep_position_=hold.head<3>();prep_velocity_=hold.segment<3>(3);prep_acceleration_.setZero();
+                    ROS_INFO("Cone preparation: limiting reference acceleration and jerk for high-curvature target motion.");
+                }
+                if(prep_filter_) {
+                    Eigen::Vector3d requested=.5*(target.position-prep_position_)+(target.velocity-prep_velocity_)+target.acceleration;
+                    requested.z()=0;const double norm=requested.head<2>().norm();if(norm>acceleration_limit)requested.head<2>()*=acceleration_limit/norm;
+                    Eigen::Vector3d change=requested-prep_acceleration_;const double delta=change.norm();if(delta>jerk_limit*h)change*=jerk_limit*h/delta;
+                    prep_acceleration_+=change;prep_position_+=h*prep_velocity_+.5*h*h*prep_acceleration_;prep_velocity_+=h*prep_acceleration_;
+                    hold.head<3>()=prep_position_;hold.segment<3>(3)=prep_velocity_;
+                } else {hold.head<3>()=target.position;hold.segment<3>(3)=target.velocity;}
+                hold(2)=target.position.z()+1.85;hold(5)=target.velocity.z();
+                prep_last_=now;prep_last_accel_=target.acceleration;
+                publishCommandAbsolute(hold,Eigen::VectorXd::Zero(4));return;
+            }
         }
+        if(!prepare){prep_last_={};prep_filter_=false;}
 
         if (command_mode_ == OCPDescriptor::CommandMode::CmdBodyRate) {
             // MAVROS keepalive handled by heartbeat_timer in mavros.hpp
@@ -934,6 +954,9 @@ private:
 
     std::string ocp_type_, platform_, solver_type_, mode_, drone_name_;
     std::string land_action_ = "none";  // none | auto_land | disarm (per-profile rosparam)
+    Clock::time_point prep_last_{};
+    bool prep_filter_=false;
+    Eigen::Vector3d prep_position_=Eigen::Vector3d::Zero(),prep_velocity_=Eigen::Vector3d::Zero(),prep_acceleration_=Eigen::Vector3d::Zero(),prep_last_accel_=Eigen::Vector3d::Zero();
     bool ordinary_control_started_=false;
     Clock::time_point feasible_start_since_{};
     std::shared_ptr<platform::FrameNormalizer> frames_;
