@@ -406,6 +406,12 @@ def load_current_bounds(kind: str, base: Path) -> dict:
         for key, bound_name in csv_mapping.items():
             if key in values and isinstance(values[key], float):
                 bounds[bound_name] = values[key]
+        bounds["ordinary_constraints"] = bool(values.get("ordinary_constraints", 0))
+        if bounds["ordinary_constraints"]:
+            for key in ("v", "omega"):
+                bounds[key + "_pre"] = bounds[key + "_post"]
+            bounds["tilt_pre_deg"] = bounds["tilt_post_deg"]
+            bounds["z_stage"] = 0.0
         if "gs_cone_tan" in values and isinstance(values["gs_cone_tan"], float):
             bounds["gs_post_tan"] = values["gs_cone_tan"]
             bounds["gs_post_deg"] = float(np.degrees(np.arctan(bounds["gs_post_tan"])))
@@ -1076,6 +1082,8 @@ def main():
         ("$a_{\\mathrm{los}}$", los_idx, C_TRIG_THR),
         ("$a_{\\mathrm{land}}$", land_idx, C_TRIG_ALT),
     )
+    if b.get("ordinary_constraints"):
+        trig_land = trig_los = trig_stage = trigger_markers_3d = ()
 
     # ── Layout knobs (edit these to retune EACH figure) ────────────────────
     # All x/y/w/h values are FIGURE FRACTIONS in [0, 1].
@@ -1263,6 +1271,7 @@ def main():
                      switch_t=land_t,
                      upper_pre=b["omega_pre"], upper_post=b["omega_post"],
                      ymin=0.0, triggers=trig_land)
+    ax_om.yaxis.set_major_formatter(mpl.ticker.FormatStrFormatter("%.2f"))
 
     ax_tilt = figS.add_axes([x0s[1], y_r2, state_w, state_h])
     panel_constraint(ax_tilt, t, tilt_deg,
@@ -1273,7 +1282,7 @@ def main():
 
     ax_trig = figS.add_axes([x0s[2], y_r2, state_w, state_h])
     panel_constraint(ax_trig, t, rxyz[:, 2],
-                     ylabel="Stage altitude, $z$ [m]",
+                     ylabel="Relative altitude, $z$ [m]" if b.get("ordinary_constraints") else "Stage altitude, $z$ [m]",
                      switch_t=stage_t,
                      lower_pre=b["z_stage"],
                      ymin=0.0,

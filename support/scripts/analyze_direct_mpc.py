@@ -4,7 +4,10 @@ import argparse,csv,json,pathlib,statistics
 import rosbag
 
 def analyze(cell):
-    rows=list(csv.DictReader((cell/'direct_mpc_controls.csv').open()))
+    control_file=cell/'direct_mpc_controls.csv'
+    rows=list(csv.DictReader(control_file.open())) if control_file.exists() else []
+    if len(rows)<2:
+        return dict(motion=cell.name.split('__')[0],controller_started=False,outcome=json.loads((cell/'cell.json').read_text())['result'])
     periods=[float(b['time'])-float(a['time']) for a,b in zip(rows,rows[1:])]
     commands=[];states=[];positions=[];starts=[];stops=[]
     with rosbag.Bag(str(next(cell.glob('flight_*.bag')))) as bag:
@@ -43,14 +46,25 @@ def physical_audit(cell, audit_bin):
         bag=next(cell.glob('*.bag'))
         ocp=next(line.split(':',1)[1].strip() for line in (cell/'landing_profile.yaml').read_text().splitlines() if line.startswith('ocp_type:'))
         ordinary=ocp.startswith('landing_')
-        starts=[];stops=[]
+        starts=[];stops=[];controls=[]
         with rosbag.Bag(str(bag)) as stream:
             for _,msg,stamp in stream.read_messages(topics=['/rosout']):
                 if 'Starting OCP='+ocp+' ' in msg.msg:starts.append(stamp.to_sec())
-                if 'Touchdown: OCP stopped' in msg.msg:stops.append(stamp.to_sec())
+                if 'Touchdown: OCP stopped' in msg.msg or 'Command finished (direct MPC expired policy)' in msg.msg or 'Command finished (direct MPC stale state)' in msg.msg:stops.append(stamp.to_sec())
+                if 'Ordinary landing control started;' in msg.msg:controls.append(stamp.to_sec())
         if not starts:raise RuntimeError('No landing activation: '+str(cell))
-        start=starts[-1];end=min((t for t in stops if t>=start),default=float('inf'))
+        activation=starts[-1]
+        started=[t for t in controls if t>=activation]
+        if ordinary and not started:
+            result={'ocp':ocp,'controller_started':False,'outcome':json.loads((cell/'cell.json').read_text())['result'],'measured_constraints':None}
+            if audit_bin:
+                run=subprocess.run([str(audit_bin),ocp,str(cell)],env=os.environ.copy(),capture_output=True,text=True,check=True)
+                result['predicted']=json.loads(run.stdout)
+            (cell/'constraint_audit.json').write_text(json.dumps(result,indent=2)+'\n');return result
+        start=started[0] if ordinary else activation
+        end=min((t for t in stops if t>=start),default=float('inf'))
         drone,target=converter.read_bag(bag)
+        end=min(end,float(drone[-1,0]))
         c=converter.resolve_constants()
         active=drone[(drone[:,0]>=start)&(drone[:,0]<=end)]
         t=active[:,0]
@@ -73,6 +87,7 @@ def physical_audit(cell, audit_bin):
             'angular_rate_rad_s':omega-np.where(land,c['omega_land_stc_max'],c['omega_phase0_max']),
             'glideslope_m':np.where(land,rxy-c['gs_cone_tan']*(relative[:,2]+c['gs_apex_offset']),0),
             'los_deg':np.where(los_active,los-c['los_cone_deg'],0),
+            'los_cone_m':np.where(los_active,np.linalg.norm(relative-np.sum(axis*relative,axis=1)[:,None]*axis,axis=1)-math.tan(math.radians(c['los_cone_deg']))*np.sum(axis*relative,axis=1),0),
             'staging_height_m':np.zeros(len(t)) if ordinary else np.where(rxy>c['stage_radius'],c['z_stage']-relative[:,2],0),
         }
         dt=np.r_[np.diff(t),0]
@@ -80,7 +95,7 @@ def physical_audit(cell, audit_bin):
         for name,values in residuals.items():
             tolerance=.01 if name.endswith('_deg') else 1e-4
             stats[name]={'max_violation':float(np.maximum(values,0).max()),'violation_duration_sec':float(dt[values>tolerance].sum()),'tolerance':tolerance}
-        result={'ocp':ocp,'controlled_duration_sec':float(t[-1]-t[0]),'measured_constraints':stats,'initial_relative_position_m':relative[0].tolist(),'initial_relative_speed_m_s':float(np.linalg.norm(velocity[0])),'initial_tilt_deg':float(tilt[0]),'initial_angular_rate_rad_s':float(omega[0])}
+        result={'ocp':ocp,'controller_started':True,'controlled_start_from_first_odom_sec':float(start-drone[0,0]),'controlled_end_from_first_odom_sec':float(end-drone[0,0]),'controlled_duration_sec':float(t[-1]-t[0]),'measured_constraints':stats,'initial_relative_position_m':relative[0].tolist(),'initial_relative_speed_m_s':float(np.linalg.norm(velocity[0])),'initial_tilt_deg':float(tilt[0]),'initial_angular_rate_rad_s':float(omega[0])}
         if audit_bin:
             run=subprocess.run([str(audit_bin),ocp,str(cell)],env=os.environ.copy(),capture_output=True,text=True,check=True)
             result['predicted']=json.loads(run.stdout)

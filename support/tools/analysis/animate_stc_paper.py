@@ -102,6 +102,8 @@ def load_animation_data(result_dir: Path, csv_name: str, kind: str) -> dict:
     land_idx = _first_active_idx(a_land)
     los_idx = _first_active_idx(a_los)
     stage_idx = _last_active_idx(a_stage)
+    if bounds.get("ordinary_constraints"):
+        land_idx = los_idx = stage_idx = None
     return {
         "kind": detected_kind,
         "csv_path": csv_path,
@@ -409,6 +411,13 @@ def draw_panel(ax, data: dict, k: int, y: np.ndarray, ylabel: str,
                upper_post: float | None = None,
                lower_pre: float | None = None,
                lower_post: float | None = None):
+    if data["bounds"].get("ordinary_constraints"):
+        upper_pre = upper_post if upper_post is not None else upper_pre
+        upper_post = lower_post = None
+        switch_t = None
+        if ylabel.startswith("Stage altitude"):
+            ylabel = "Relative altitude [m]"
+            lower_pre = 0.0
     t = data["t"]
     kk = slice(0, k + 1)
     ax.plot(t[kk], y[kk], c=paper.C_STATE, lw=1.5, label="State")
@@ -497,6 +506,8 @@ def render_frame(data: dict, k: int, frame_path: Path, dpi: int, frame: str = "r
     cbar.ax.tick_params(labelsize=10)
 
     handles = static_3d_legend_handles()
+    if data["bounds"].get("ordinary_constraints"):
+        handles = handles[:4]
     ax3d.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.00, 1.18),
                 bbox_transform=ax3d.transAxes, fontsize=10, framealpha=0.92,
                 edgecolor="0.7", handlelength=1.7, borderpad=0.45,
@@ -562,6 +573,8 @@ def render_frame_twin(data: dict, k: int, frame_path: Path, dpi: int):
     # so they never show up in get_legend_handles_labels() and have to be
     # appended explicitly.
     for h in static_3d_legend_handles():
+        if data["bounds"].get("ordinary_constraints") and h.get_label().startswith("$a_"):
+            continue
         l = h.get_label()
         if l and l not in seen:
             seen.add(l)

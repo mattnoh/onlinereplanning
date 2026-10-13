@@ -10,4 +10,6 @@ For another estimator, select its odometry topic and velocity convention. Provid
 
 Mocap can feed PX4 through MAVROS vision/mocap for fused local odometry, or feed an external full-state estimator. Raw pose alone lacks velocity and body rates. Vehicle and target origins and axes must be calibrated consistently.
 
+Odometry must describe the vehicle body origin and FLU axes; the producer handles mocap marker-to-body calibration. Target odometry describes the landing point. Configure estimator topics and frame conventions at node startup. A ROS1 example for world-velocity odometry is `roslaunch comando_planner planner_launch.launch platform:=mavros drone_odom_topic:=/estimator/odom state_velocity_frame:=world world_frame:=map command_frame:=map`. Target input still uses `/target/odom` and `/target/accel` by default.
+
 Removed: shifted and rotating relative input modes, relative vehicle topic switches, and target-publisher planning-frame output switches. New solver logs use `absolute` or `relative`; historical CSVs remain readable. Frame choice does not certify physical constraint feasibility.
