@@ -71,3 +71,7 @@ The existing body-rate backend mapped SI acceleration through an offset PWM rang
 The backend now supports an optional `bodyrate_T_min_ms2`, default 0, retaining the existing mapping unless explicitly calibrated. Backend transport checkpoint: `af31b0b`; required CFlib manual packet checkpoint: `ffd667a`. Unrelated backend working-tree changes remain unstaged and unchanged. A focused calibration patch is saved under `transport/ros2/integration`.
 
 Crazyflie direct MPC validation and both directory cutovers remain pending.
+
+### Crazyflie MPC first attempt — failed
+
+The calibrated circle flight (`crazyflie_mpc/circle`) accepted policies 0–3, then its measured state diverged and subsequent policies were rejected. The retained policy reached its 2 s expiry and the wrapper switched to hold. Final height was zero after the vehicle fell; this is a failed flight, not a landing. Rate-loop calibration and the physical-model mismatch must be resolved before any Crazyflie MPC acceptance or directory cutover. Disabling rate integral gains worsened the standalone rate step; a reduced-bandwidth calibration is under investigation. All failed attempts remain recorded.
