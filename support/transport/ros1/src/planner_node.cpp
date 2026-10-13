@@ -155,7 +155,11 @@ public:
 private:
     // ── Parameter poll (replaces ROS2 on_set_parameters callback) ────────────
     void pollParameters(const ros::TimerEvent&) {
-        std::unique_lock<std::shared_mutex> session(session_mutex_);
+        // A waiting writer can block replay readers until an in-flight solve
+        // finishes. Parameter changes can retry on the next poll; references
+        // must keep their wall-clock cadence throughout that solve.
+        std::unique_lock<std::shared_mutex> session(session_mutex_,std::try_to_lock);
+        if (!session.owns_lock()) return;
         std::lock_guard<std::mutex> lk(command_mutex_);
 
         std::string new_ocp_type = ocp_type_;
