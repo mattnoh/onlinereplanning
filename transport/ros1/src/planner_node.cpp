@@ -111,10 +111,9 @@ public:
         if (platform_ == "mavros") {
             platform::mavros::setup(
                 nh_, hover_thrust_param_,
-                state_monitor_.crazyflieState().current,
+                state_monitor_.droneState(),
                 state_monitor_.stateMutex(),
                 mavros_handles_);
-            state_monitor_.crazyflieState().odom_received = false;
         } else {
             ROS_ERROR("Unknown platform: %s (only 'mavros' supported on ROS1 branch)", platform_.c_str());
             throw std::runtime_error("Unknown platform: " + platform_);
@@ -379,13 +378,13 @@ private:
         drone_state_is_relative_ = needs_relative;
         drone_odom_topic_        = desired_topic;
         mavros_handles_.odom_topic=desired_topic.empty()?"/mavros/local_position/odom":desired_topic;
-        if(rebuild_subscriptions && mavros_handles_.odom_sub) platform::mavros::subscribeOdometry(nh_,state_monitor_.crazyflieState().current,state_monitor_.stateMutex(),mavros_handles_);
+        if(rebuild_subscriptions && mavros_handles_.odom_sub) platform::mavros::subscribeOdometry(nh_,state_monitor_.droneState(),state_monitor_.stateMutex(),mavros_handles_);
     }
 
     // ── State / target access ─────────────────────────────────────────────────
     bool hasState() const {
-        if (platform_ == "mavros") {std::lock_guard<std::mutex> lock(state_monitor_.stateMutex());return mavros_handles_.odom_received;}
-        return state_monitor_.hasState(platform_);
+        std::lock_guard<std::mutex> lock(state_monitor_.stateMutex());
+        return mavros_handles_.odom_received;
     }
 
     bool hasFreshTargetState() const {
@@ -411,12 +410,8 @@ private:
     }
 
     Eigen::VectorXd getCurrentState() const {
-        if (platform_ == "mavros") {
-            std::lock_guard<std::mutex> lk(state_monitor_.stateMutex());
-            Eigen::VectorXd x = mavros_handles_.current;
-            return x;
-        }
-        return state_monitor_.getCurrentState(platform_);
+        std::lock_guard<std::mutex> lock(state_monitor_.stateMutex());
+        return mavros_handles_.current;
     }
 
     Eigen::VectorXd convertStateToAbsoluteFrame(const Eigen::VectorXd& state) const {

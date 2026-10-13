@@ -9,42 +9,19 @@
 #include <string>
 #include <utility>
 
-#include "platform/crazyflie.hpp"
 #include "platform/target_tracker.hpp"
 #include "planner_core/ocp_registry.hpp"
 
 class StateMonitor {
 public:
-    struct StateDebugSnapshot {
-        bool has_state = false;
-        bool cf_pose_received = false;
-        bool cf_odom_received = false;
-    };
-
     explicit StateMonitor(double target_state_max_age_sec = 0.2)
-        : target_state_max_age_sec_(target_state_max_age_sec) {
-        fallback_state_ = Eigen::VectorXd::Zero(13);
-        fallback_state_(6) = 1.0;
-    }
+        : target_state_max_age_sec_(target_state_max_age_sec) {}
 
-    platform::crazyflie::State& crazyflieState() { return cf_state_; }
+    Eigen::VectorXd& droneState() { return drone_state_; }
     platform::target_tracker::TargetState& targetState() { return target_state_; }
     std::mutex& stateMutex() { return state_mutex_; }
     std::mutex& stateMutex() const { return state_mutex_; }
     std::mutex& targetMutex() { return target_mutex_; }
-
-    bool hasState(const std::string& /*platform*/) const {
-        return cf_state_.hasFullState();
-    }
-
-    StateDebugSnapshot getStateDebugSnapshot(const std::string& /*platform*/) const {
-        std::lock_guard<std::mutex> lk(state_mutex_);
-        StateDebugSnapshot snap;
-        snap.cf_pose_received = cf_state_.pose_received;
-        snap.cf_odom_received = cf_state_.odom_received;
-        snap.has_state = cf_state_.hasFullState();
-        return snap;
-    }
 
     bool hasFreshTargetState(bool needs_target, const ros::Time& now) const {
         if (!needs_target) return true;
@@ -82,17 +59,11 @@ public:
         return target_state_.predicted_accel.accel_buffer;
     }
 
-    Eigen::VectorXd getCurrentState(const std::string& /*platform*/) const {
-        std::lock_guard<std::mutex> lk(state_mutex_);
-        return cf_state_.current;
-    }
-
 private:
-    platform::crazyflie::State cf_state_;
+    Eigen::VectorXd drone_state_ = Eigen::VectorXd::Zero(13);
     platform::target_tracker::TargetState target_state_;
 
     mutable std::mutex state_mutex_;
     mutable std::mutex target_mutex_;
     double target_state_max_age_sec_ = 0.2;
-    Eigen::VectorXd fallback_state_;
 };

@@ -27,3 +27,15 @@ New campaign cells save the planner revision, launch setup, landing profile, and
 | straight | LANDED | 0.0396 | 93.2906 | 34 / 0 | 0 | CLEAN |
 
 Figure-eight constraint rejections occurred during one measured-seed transition below the landing altitude trigger, around solve 24. The valid active trajectory remained available and the planner recovered without a logged deadline miss. The old reference had 37 accepted / 0 rejected solves and 0.2910 m lateral error. This regression remains under review; phase-dependent single trials do not isolate its cause. Full new data: `/tmp/comando-validation/px4_rh`.
+
+### Clean ROS1 direct MPC results
+
+| Motion | Result | Lateral error (m) | Median solve (ms) | Accepted / rejected | Maximum feedback gap (ms) |
+|---|---|---:|---:|---:|---:|
+| circle | LANDED | 0.0421 | 299.4026 | 25 / 1 | 20.11 |
+| figure8 | LANDED | 0.0458 | 306.4716 | 12 / 13 | 21.41 |
+| straight | LANDED | 0.0393 | 162.3043 | 29 / 0 | 20.10 |
+
+All three had clean teardown, remained OFFBOARD during direct control, emitted zero interleaved position commands, and respected the 20 m/s³ thrust and 5 rad/s² rate slew bounds. Figure-eight's maximum retained policy age was 1.8918 s against the saved 2 s limit. Executed STC violations remain nonzero; landing success does not demonstrate exact constraint satisfaction on the simulated plant. Existing audit tool results and complete data are under `/tmp/comando-validation/px4_mpc`; binary/source hashes are in `/tmp/comando-validation/ros1_manifest.json`.
+
+The direct MPC test rebuilt against the current shared library and passed derivatives (7.53015e-10 dynamics, 3.43396e-10 CTCS), moving-target feedback (13 accepted solves, 228 ticks), and expiry. A subsequent ROS1-only cleanup removed the unused Crazyflie state stub and unreachable platform fallbacks; the planner rebuilt successfully. No OCP/controller math changed in this cleanup.

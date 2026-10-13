@@ -1,9 +1,6 @@
-build
+build/
 __pycache__/
-# Ignore flight data (bags, run folders) but keep the analysis/plot scripts
-# in logs/ under version control.
-logs/*
-!logs/*.py
-
+*.pyc
 logs/**
 benchmark_runs/**
+cache/
