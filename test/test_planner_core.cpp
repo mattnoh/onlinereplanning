@@ -102,7 +102,7 @@ int main() {
         {
             planner_core::PlannerCore core;
             auto cfg = hoverConfig();
-            cfg.ocp_type = "tracking_bodyrate_tf_imu";
+            cfg.ocp_type = "stc_landing_noaug";
             cfg.skip_trajectory_validation = true;
             core.configure(cfg);
             auto input = inputAt(t0);
@@ -116,13 +116,15 @@ int main() {
         {
             planner_core::PlannerCore core;
             auto cfg = hoverConfig();
-            cfg.ocp_type = "tracking_bodyrate_tf_imu";
+            cfg.ocp_type = "stc_landing_noaug";
             cfg.skip_trajectory_validation = true;
             cfg.max_first_solve_age_sec = 1.0;
             core.configure(cfg);
+            // Exercise generic relative-frame guards with the active descriptor.
+            core.desc_.drone_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
             auto input = inputAt(t0);
             input.active_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
-            input.active_odom_topic = "/drone/target_frame_odom";
+            input.active_odom_topic = "/mavros/local_position/odom";
             auto stale = solved(t0, 0.0);
             stale.solve_time_ms = 2000.0;
             auto out = core.acceptSolvedResult(input, input.current_state, stale);
@@ -134,12 +136,14 @@ int main() {
         {
             planner_core::PlannerCore core;
             auto cfg = hoverConfig();
-            cfg.ocp_type = "tracking_bodyrate_tf_imu";
+            cfg.ocp_type = "stc_landing_noaug";
             cfg.skip_trajectory_validation = true;
             core.configure(cfg);
+            // Exercise generic relative-frame guards with the active descriptor.
+            core.desc_.drone_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
             auto input = inputAt(t0);
             input.active_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
-            input.active_odom_topic = "/drone/target_frame_odom";
+            input.active_odom_topic = "/mavros/local_position/odom";
             auto bad = solved(t0, 0.0);
             for(auto& x:bad.state_trajectory) { const int n=x.size(); x.conservativeResize(20);x.tail(20-n).setZero(); }
             bad.state_trajectory.back()(2) = -20.0;

@@ -1108,11 +1108,6 @@ private:
         }
 
         if (profile_changed) {
-            if (new_ocp_type == "tracking_circle_target" && new_mode == "mpc") {
-                result.successful = false;
-                result.reason = "tracking_circle_target supports open_loop only";
-                return result;
-            }
 
             ocp_type_ = new_ocp_type;
             mode_ = new_mode;
@@ -1165,11 +1160,6 @@ private:
                 result.reason = "planner not configured";
                 return result;
             }
-            if (ocp_type_ == "tracking_circle_target" && mode_ == "mpc") {
-                result.successful = false;
-                result.reason = "tracking_circle_target supports open_loop only";
-                return result;
-            }
             last_command_seq_ = new_command_seq;
             // Capture current drone position as the pre-solve hover target.
             // mpcReplayTick publishes this hold while !is_primed_ (solver working on first plan).
@@ -1198,11 +1188,6 @@ private:
             return;
         }
         if (command_paused_.load()) {
-            return;
-        }
-        if (ocp_type_ == "tracking_circle_target") {
-            RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                "tracking_circle_target is open_loop-only; rejecting MPC solve loop");
             return;
         }
 

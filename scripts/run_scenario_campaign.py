@@ -476,7 +476,7 @@ def main():
     ap.add_argument("--trials", type=int, default=4)
     ap.add_argument("--out", default=None)
     ap.add_argument("--reuse", action="store_true")
-    ap.add_argument("--profile", default=os.path.join(PKG,"config/profile_stc_landing_noaug_sitl.yaml"))
+    ap.add_argument("--profile", default=os.path.join(PKG,"config/ros1/profile_stc_landing_noaug_sitl.yaml"))
     ap.add_argument("--hover-thrust", type=float, default=0.3)
     ap.add_argument("--stc-z-stage", type=float, default=1.55)
     ap.add_argument("--stc-los-alt-trig", type=float, default=1.2)

@@ -7,7 +7,7 @@
 #include <Eigen/Dense>
 
 #include "planner_core/quadrotor_mpc.hpp"
-#include "parameters/stc_landing.hpp"
+#include "parameters.hpp"
 #include "planner_core/direct_control_math.hpp"
 #include "planner_core/ocp_registry.hpp"
 #include "platform/mavros.hpp"
@@ -212,10 +212,6 @@ private:
                 ROS_ERROR("Cannot apply profile: ocp_type is not set.");
                 return;
             }
-            if (new_ocp_type == "tracking_circle_target" && new_mode == "mpc") {
-                ROS_ERROR("tracking_circle_target supports open_loop only");
-                return;
-            }
             ocp_type_ = new_ocp_type;
             mode_     = new_mode;
             n_replay_ = new_n_replay;
@@ -261,10 +257,6 @@ private:
                 ROS_ERROR("Cannot start: configure ocp_type and mode first.");
                 return;
             }
-            if (ocp_type_ == "tracking_circle_target" && mode_ == "mpc") {
-                ROS_ERROR("tracking_circle_target supports open_loop only");
-                return;
-            }
             // Target-relative OCPs solve against the target snapshot; starting
             // without one silently lands on garbage. Hold the command (seq not
             // consumed) until /target/odom is fresh — it auto-starts once the
@@ -285,7 +277,7 @@ private:
                 }
             }
             if (planner_core_.isDirect() &&
-                std::abs(hover_thrust_d_ - comando_parameters::stc_landing::envOrQ("MPC_HOVER_THRUST",0.7282821834)) > 1e-3) {
+                std::abs(hover_thrust_d_ - comando_parameters::defaults.mpc.hover_thrust) > 1e-3) {
                 ROS_ERROR_THROTTLE(2.0,"Direct MPC requires hover_thrust to match MPC_HOVER_THRUST");
                 return;
             }
@@ -732,10 +724,6 @@ private:
     void solverLoop(const ros::TimerEvent&) {
         std::shared_lock<std::shared_mutex> session(session_mutex_);
         if (mode_ != "mpc" || command_paused_.load()) return;
-        if (ocp_type_ == "tracking_circle_target") {
-            ROS_ERROR_THROTTLE(2.0, "tracking_circle_target is open_loop-only");
-            return;
-        }
         if (!hasState()) {
             ROS_WARN_THROTTLE(2.0, "Waiting for state... platform=%s relative_mode=%s odom_topic='%s'",
                 platform_.c_str(), drone_state_is_relative_ ? "true" : "false", drone_odom_topic_.c_str());

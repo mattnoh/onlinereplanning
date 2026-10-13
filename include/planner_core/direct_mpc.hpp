@@ -176,7 +176,7 @@ public:
         if(pending_&&now>=pending_->origin){policy_=std::move(pending_);pending_.reset();}
         if(!policy_)return out;out.has_replay_sample=true;out.solve_num=policy_->number;
         const double age=seconds(now,policy_->origin);
-        if(age<0||age>=std::min(StcLandingMpcOCP::N*StcLandingMpcOCP::DT,comando_parameters::stc_landing::envOrQ("MPC_MAX_POLICY_AGE",1.0))||measured.size()<13||!measured.allFinite()||!target.valid||!target.position.allFinite()||!target.velocity.allFinite()){out.stale=true;return out;}
+        if(age<0||age>=std::min(StcLandingMpcOCP::N*StcLandingMpcOCP::DT,comando_parameters::defaults.mpc.max_policy_age)||measured.size()<13||!measured.allFinite()||!target.valid||!target.position.allFinite()||!target.velocity.allFinite()){out.stale=true;return out;}
         int i=std::min(static_cast<int>(age/StcLandingMpcOCP::DT),StcLandingMpcOCP::N-1);
         const auto& r=policy_->result;Eigen::VectorXd nominal=r.control_trajectory[i];
         auto pred=std::make_shared<target_models::ConstantAccelPredictor>();

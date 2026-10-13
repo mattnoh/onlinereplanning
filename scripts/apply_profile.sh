@@ -5,12 +5,12 @@
 #   ./apply_profile.sh [param-namespace] [profile.yaml]
 #
 # Defaults: namespace /comando_planner (the node's private ~ namespace),
-# profile config/profile_hover_sitl.yaml. Loads the profile's params and
+# profile config/ros1/profile_hover_sitl.yaml. Loads the profile's params and
 # bumps command_seq to trigger the command.
 set -euo pipefail
 
 NS="${1:-/comando_planner}"
-PROFILE="${2:-$(dirname "$0")/../config/profile_hover_sitl.yaml}"
+PROFILE="${2:-$(rospack find comando_planner)/config/ros1/profile_hover_sitl.yaml}"
 
 if [[ ! -f "$PROFILE" ]]; then
   echo "Profile file not found: $PROFILE" >&2

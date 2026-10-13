@@ -33,7 +33,7 @@
 /// ocp_stc_landing.hpp does — minus the y-rebase, which no longer exists.
 #pragma once
 #include "target/predictor.hpp"
-#include "parameters/stc_landing.hpp"
+#include "parameters.hpp"
 
 #include <Eigen/Dense>
 #include <algorithm>
@@ -52,7 +52,88 @@
 
 namespace StcLandingNoAugOCP {
 
-using namespace comando_parameters::stc_landing;
+using comando_parameters::defaults;
+using comando_parameters::envOrQ;
+using comando_parameters::envOrInt;
+constexpr int NX=13, NU=4, NX_SS=14, NU_SS=5, IDX_DT=13, IDX_THETA=4;
+inline const auto& MASS = defaults.vehicle.mass;
+inline const auto& IXX = defaults.vehicle.ixx;
+inline const auto& IYY = defaults.vehicle.iyy;
+inline const auto& IZZ = defaults.vehicle.izz;
+inline const auto& ACTUATOR_FMIN = defaults.vehicle.actuator_fmin;
+inline const auto& ACTUATOR_FMAX = defaults.vehicle.actuator_fmax;
+inline const auto& FMIN = defaults.vehicle.fmin;
+inline const auto& FMAX = defaults.vehicle.fmax;
+inline const auto& L_ARM = defaults.vehicle.l_arm;
+inline const auto& HORIZON = defaults.horizon.horizon;
+inline const auto& NEX = defaults.horizon.nex;
+inline const auto& TH0 = defaults.horizon.th0;
+inline const auto& THL = defaults.horizon.thl;
+inline const auto& THH = defaults.horizon.thh;
+inline const auto& TERM_W_POS_XY = defaults.cost.term_w_pos_xy;
+inline const auto& TERM_W_POS_Z = defaults.cost.term_w_pos_z;
+inline const auto& TERM_W_VEL_XY = defaults.cost.term_w_vel_xy;
+inline const auto& TERM_W_VEL_Z = defaults.cost.term_w_vel_z;
+inline const auto& TERM_W_TILT = defaults.cost.term_w_tilt;
+inline const auto& TERM_W_OM = defaults.cost.term_w_om;
+inline const auto& TERM_VZ_REF = defaults.cost.term_vz_ref;
+inline const auto& STAGE_W_TIME = defaults.cost.stage_w_time;
+inline const auto& R_THETA = defaults.cost.r_theta;
+inline const auto& THETA_REF = defaults.cost.theta_ref;
+inline const auto& R_CTRL_THR = defaults.cost.r_ctrl_thr;
+inline const auto& R_CTRL_MOM = defaults.cost.r_ctrl_mom;
+inline const auto& W_TOUCH_VEL = defaults.cost.w_touch_vel;
+inline const auto& TOUCH_ALT = defaults.cost.touch_alt;
+inline const auto& TOUCH_SCALE = defaults.cost.touch_scale;
+inline const auto& W_STAGE_TARGET_XY = defaults.cost.w_stage_target_xy;
+inline const auto& W_STAGE_TARGET_Z = defaults.cost.w_stage_target_z;
+inline const auto& W_STAGE_TARGET_VEL = defaults.cost.w_stage_target_vel;
+inline const auto& W_LAND_SPEED = defaults.cost.w_land_speed;
+inline const auto& W_LAND_TILT = defaults.cost.w_land_tilt;
+inline const auto& W_LAND_OMEGA = defaults.cost.w_land_omega;
+inline const auto& W_LAND_GS = defaults.cost.w_land_gs;
+inline const auto& W_STC_LOS = defaults.cost.w_stc_los;
+inline const auto& W_STC_STAGE = defaults.cost.w_stc_stage;
+inline const auto& CAP_COST_RADIUS = defaults.cost.cap_cost_radius;
+inline const auto& K_CAP = defaults.cost.k_cap;
+inline const auto& CAP_DESC_RADIUS = defaults.cost.cap_desc_radius;
+inline const auto& K_DESC = defaults.cost.k_desc;
+inline const auto& GS_APEX_OFFSET = defaults.constraints.gs_apex_offset;
+inline const auto& VZ_LAND_MAX = defaults.constraints.vz_land_max;
+inline const auto& THETA_PHASE0_DEG = defaults.constraints.theta_phase0_deg;
+inline const auto& OMEGA_PHASE0_MAX = defaults.constraints.omega_phase0_max;
+inline const auto& SPD_PHASE0_MAX = defaults.constraints.spd_phase0_max;
+inline const auto& THETA_STC_DEG = defaults.constraints.theta_stc_deg;
+inline const auto& ALPHA_THETA_STC = defaults.constraints.alpha_theta_stc;
+inline const auto& OMEGA_STC_MAX = defaults.constraints.omega_stc_max;
+inline const auto& GS_CONE_HALF_ANGLE_DEG = defaults.constraints.gs_cone_half_angle_deg;
+inline const auto& SPD_STC_MAX = defaults.constraints.spd_stc_max;
+inline const auto& LOS_CONE_HALF_ANGLE_DEG = defaults.constraints.los_cone_half_angle_deg;
+inline const auto& LOS_ALT_TRIG = defaults.constraints.los_alt_trig;
+inline const auto& LOS_TRIGGER_SCALE = defaults.constraints.los_trigger_scale;
+inline const auto& LOS_TRIGGER_FLOOR = defaults.constraints.los_trigger_floor;
+inline const auto& ALT_TRIG = defaults.constraints.alt_trig;
+inline const auto& CAP_LAND_RADIUS = defaults.constraints.cap_land_radius;
+inline const auto& Z_STAGE = defaults.constraints.z_stage;
+inline const auto& STAGE_RADIUS = defaults.constraints.stage_radius;
+inline const auto& STAGE_TRIGGER_SCALE = defaults.constraints.stage_trigger_scale;
+inline const auto& STAGE_TRIGGER_FLOOR = defaults.constraints.stage_trigger_floor;
+inline const auto& STAGE_SETTLE_TILT_DEG = defaults.constraints.stage_settle_tilt_deg;
+inline const auto& STAGE_SETTLE_OMEGA_MAX = defaults.constraints.stage_settle_omega_max;
+inline const auto& CTCS_Y_SCALE = defaults.constraints.ctcs_y_scale;
+inline const auto& CTCS_STEP_EPS = defaults.constraints.ctcs_step_eps;
+inline const double J_SCALE = 1.0/IXX;
+inline const double TAU_MAX = L_ARM*(ACTUATOR_FMAX/4.0-ACTUATOR_FMIN/4.0)*J_SCALE;
+inline const Eigen::Matrix3d J_B = (Eigen::Matrix3d()<<IXX*J_SCALE,0,0,0,IYY*J_SCALE,0,0,0,IZZ*J_SCALE).finished();
+inline const Eigen::Vector3d GRAVITY{0,0,-9.81};
+inline const double HOVER_THRUST = MASS*9.81;
+inline const double GS_CONE_TAN = std::tan(GS_CONE_HALF_ANGLE_DEG*M_PI/180.0);
+inline const double LOS_CONE_TAN = std::tan(LOS_CONE_HALF_ANGLE_DEG*M_PI/180.0);
+inline bool useTriggeredLandingStc(){return defaults.constraints.triggered_stc;}
+inline bool useRhCaptureLandingTrigger(){return defaults.constraints.capture_landing_trigger;}
+inline bool useRhFeedbackWarmStart(){return defaults.horizon.feedback_warm_start;}
+inline std::string stageTriggerMode(){return defaults.constraints.stage_trigger;}
+
 
 // ── Sigmoid helpers ───────────────────────────────────────────────────────────
 template<typename Scalar>
@@ -900,23 +981,7 @@ inline Eigen::VectorXd ensureNoAugStateSize(const Eigen::VectorXd& x) {
 }
 
 // ── Solver params ─────────────────────────────────────────────────────────────
-inline Param getSolverParams() {
-    Param p;
-    p.reg1_min = 1e-3;
-    p.reg2_min = envOrQ("SZMUK_REG2_MIN", 0.1);
-    p.mu_mul   = 0.1;
-    p.rho      = envOrQ("SZMUK_RHO", 5.0);
-    p.rhoT     = envOrQ("SZMUK_RHOT", 5.0);
-    p.rho_mul  = envOrQ("SZMUK_RHO_MUL", 10.0);
-    p.tolerance = envOrQ("SZMUK_TOL", 1e-6);
-    p.max_iter  = envOrInt("SZMUK_MAX_ITER", 180);
-    // Console I/O perturbs solve timing in the real-time SITL/hardware loop.
-    // Opt back into the solver's iteration table when diagnosing convergence.
-    p.verbose = envOrInt("SZMUK_SOLVER_VERBOSE", 0) != 0;
-    p.is_quaternion_in_state = false;
-    p.use_ddp_terms = false;
-    return p;
-}
+inline Param getSolverParams() { return defaults.solver; }
 
 // ── Warm-start / validity helpers ─────────────────────────────────────────────
 inline void clampWarmControl(Eigen::VectorXd& u) {

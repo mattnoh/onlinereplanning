@@ -1,5 +1,6 @@
 // ocp_hover.hpp
 #pragma once
+#include "parameters.hpp"
 
 #include <Eigen/Dense>
 #include <memory>
@@ -10,66 +11,25 @@
 
 namespace HoverOCP {
 
-// ── Fixed parameters ─────────────────────────────────────────────
-const int HORIZON = 100;
-const double DT = 0.05;
-const double MASS = 0.0282;
-const int DEFAULT_N_REPLAY = 4;
-const double DEFAULT_MASS_KG = MASS;
-
-const double J_SCALE = 1.0 / 1.66e-5;
-const Eigen::Matrix3d INERTIA = (Eigen::Matrix3d() <<
- 1.66e-5 * J_SCALE, 0.0, 0.0,
- 0.0, 1.66e-5 * J_SCALE, 0.0,
- 0.0, 0.0, 2.92e-5 * J_SCALE).finished();
-
-// ── Constraint parameters ────────────────────────────────────────
-// Keep the planned agility mild (thrust-to-weight ~1.5): the plan is tracked
-// by the platform's own position controller (PX4 on this branch), and a
-// cf-agility plan (FMAX 1.2, t/w 4.3) outruns it — tracking error then trips
-// handoff recovery every replan and the drone limit-cycles around the target.
-const double FMAX = 0.42;
-const double FMIN = 0.08;
-
-// ── Solver parameters ────────────────────────────────────────────
-const double SOLVER_REG1_MIN = 1e-6;
-const double SOLVER_REG2_MIN = 1.0;
-const double SOLVER_MU_MUL = 0.1;
-const double SOLVER_RHO = 20.0;
-const double SOLVER_RHO_MUL = 9.0;
-const double SOLVER_TOLERANCE = 1e-3;
-const int SOLVER_MAX_ITER = 200;
-
-// ── Stage cost weights ───────────────────────────────────────────
-const double W_POS_STAGE = 15.0;
-const double W_VEL_STAGE = 20.0;
-const double W_ATT_STAGE = 2.0;
-const double W_ANGRATE_STAGE = 5.0;
-const double W_THRUST = 1e-1;
-const double W_MOMENT = 1e-1;
-
-// ── Terminal cost weights ────────────────────────────────────────
-// High enough that the plan ends AT the target within the 5 s horizon even
-// with the mild stage weights above — open_loop mode holds the plan's
-// terminal state forever, so any terminal offset becomes a permanent offset.
-const double TERM_POS_WEIGHT = 600.0;
-const double TERM_VEL_WEIGHT = 100.0;
-const double TERM_ATT_WEIGHT = 200.0;
-const double TERM_ANGRATE_WEIGHT = 100.0;
-
-// ─────────────────────────────────────────────────────────────────
-inline Param getSolverParams() {
- Param p;
- p.reg1_min = SOLVER_REG1_MIN;
- p.reg2_min = SOLVER_REG2_MIN;
- p.mu_mul = SOLVER_MU_MUL;
- p.rho = SOLVER_RHO;
- p.rho_mul = SOLVER_RHO_MUL;
- p.tolerance = SOLVER_TOLERANCE;
- p.max_iter = SOLVER_MAX_ITER;
- p.is_quaternion_in_state = false;
- return p;
-}
+inline const auto parameters = comando_parameters::hoverDefaults();
+inline const int HORIZON=parameters.horizon.horizon;
+inline const double DT=parameters.horizon.th0;
+inline const double MASS=parameters.vehicle.mass;
+inline const int DEFAULT_N_REPLAY=parameters.horizon.nex;
+inline const double DEFAULT_MASS_KG=MASS;
+inline const double J_SCALE=1.0/parameters.vehicle.ixx;
+inline const Eigen::Matrix3d INERTIA=(Eigen::Matrix3d()<<parameters.vehicle.ixx*J_SCALE,0,0,0,parameters.vehicle.iyy*J_SCALE,0,0,0,parameters.vehicle.izz*J_SCALE).finished();
+inline const double FMAX=parameters.vehicle.fmax, FMIN=parameters.vehicle.fmin;
+inline const double W_POS_STAGE=parameters.cost.w_stage_target_xy;
+inline const double W_VEL_STAGE=parameters.cost.w_stage_target_vel;
+inline const double W_ATT_STAGE=parameters.cost.stage_attitude;
+inline const double W_ANGRATE_STAGE=parameters.cost.stage_angular_rate;
+inline const double W_THRUST=parameters.cost.r_ctrl_thr, W_MOMENT=parameters.cost.r_ctrl_mom;
+inline const double TERM_POS_WEIGHT=parameters.cost.term_w_pos_xy;
+inline const double TERM_VEL_WEIGHT=parameters.cost.term_w_vel_xy;
+inline const double TERM_ATT_WEIGHT=parameters.cost.term_w_tilt;
+inline const double TERM_ANGRATE_WEIGHT=parameters.cost.term_w_om;
+inline Param getSolverParams(){return parameters.solver;}
 
 // ─────────────────────────────────────────────────────────────────
 // Stage cost – penalises tracking error and control effort

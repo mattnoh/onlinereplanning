@@ -20,7 +20,6 @@
 #include "planner_core/types.hpp"
 #include "planner_core/quadrotor_mpc.hpp"
 #include "dynamics/quad_6dof_target_frame.h"
-#include "ocp/ocp_tracking_circle_target.hpp"
 #include "planner_core/adapters.hpp"
 #include "planner_core/types.hpp"
 #include "trajectory_replayer.hpp"
@@ -365,26 +364,6 @@ public:
             desc_.post_process_result(result, input.target_snapshot);
         }
 
-        // tracking_circle_target replays absolute states: rebuild them from
-        // the predicted-accel buffer so replay needs no live target frame.
-        if (config_.ocp_type == "tracking_circle_target" && result.is_relative_plan) {
-            TrackingCircleTargetOCP::TrackingCircleTargetExtra ex;
-            if (!tryGetTrackingCircleTargetExtra(result.extra, ex)) {
-                reject(out, "open_loop_missing_target_buffer",
-                       "tracking_circle_target open-loop solve is missing the predicted accel buffer");
-                out.solve_result = std::move(result);
-                return out;
-            }
-            std::vector<Eigen::Vector3d> tgt_pos_nodes, tgt_vel_nodes;
-            result.state_trajectory = reconstructTrackingCircleTargetAbsoluteTrajectory(
-                result.state_trajectory, result.target_snapshot_pos,
-                result.target_snapshot_vel, ex.buf, ex.t_abs,
-                &tgt_pos_nodes, &tgt_vel_nodes);
-            result.target_world_pos_trajectory = std::move(tgt_pos_nodes);
-            result.target_world_vel_trajectory = std::move(tgt_vel_nodes);
-            result.target_motion_source = "odom+predicted_accel";
-            result.is_relative_plan = false;
-        }
 
         if (!result.success || !validStructure(result)) {
             reject(out, "solve_failed", "Open-loop solve failed");
@@ -906,74 +885,8 @@ private:
         return true;
     }
 
-    void integrateTargetSegment(Eigen::Vector3d& pos,
-                                Eigen::Vector3d& vel,
-                                double t_abs_start,
-                                double t_abs_end,
-                                const target_models::TargetAccelBuffer& buffer) const {
-        if (t_abs_end <= t_abs_start) {
-            return;
-        }
-        const double nominal_step = (buffer.dt > 1e-6) ? buffer.dt : 0.05;
-        const double integration_step = std::clamp(nominal_step, 0.005, 0.05);
-        double t = t_abs_start;
-        while (t < t_abs_end - 1e-9) {
-            const double h = std::min(integration_step, t_abs_end - t);
-            const Eigen::Vector3d a = buffer.getAccel(t);
-            pos += vel * h + 0.5 * a * h * h;
-            vel += a * h;
-            t += h;
-        }
-    }
 
-    bool tryGetTrackingCircleTargetExtra(
-        const std::any& extra,
-        TrackingCircleTargetOCP::TrackingCircleTargetExtra& out) const {
-        if (!extra.has_value()) {
-            return false;
-        }
-        try {
-            out = std::any_cast<TrackingCircleTargetOCP::TrackingCircleTargetExtra>(extra);
-            return true;
-        } catch (const std::bad_any_cast&) {
-            return false;
-        }
-    }
 
-    std::vector<Eigen::VectorXd> reconstructTrackingCircleTargetAbsoluteTrajectory(
-        const std::vector<Eigen::VectorXd>& rel_traj,
-        const Eigen::Vector3d& target_pos0,
-        const Eigen::Vector3d& target_vel0,
-        const target_models::TargetAccelBuffer& buffer,
-        double t0_abs,
-        std::vector<Eigen::Vector3d>* tgt_pos_nodes = nullptr,
-        std::vector<Eigen::Vector3d>* tgt_vel_nodes = nullptr) const {
-        std::vector<Eigen::VectorXd> abs_traj;
-        abs_traj.reserve(rel_traj.size());
-        if (tgt_pos_nodes) { tgt_pos_nodes->clear(); tgt_pos_nodes->reserve(rel_traj.size()); }
-        if (tgt_vel_nodes) { tgt_vel_nodes->clear(); tgt_vel_nodes->reserve(rel_traj.size()); }
-        Eigen::Vector3d tgt_pos = target_pos0;
-        Eigen::Vector3d tgt_vel = target_vel0;
-        double prev_t_node = 0.0;
-        for (int i = 0; i < static_cast<int>(rel_traj.size()); ++i) {
-            const Eigen::VectorXd& x_rel = rel_traj[i];
-            if (tgt_pos_nodes) tgt_pos_nodes->push_back(tgt_pos);
-            if (tgt_vel_nodes) tgt_vel_nodes->push_back(tgt_vel);
-            if (x_rel.size() < desc_.state_dim) {
-                abs_traj.push_back(x_rel);
-                continue;
-            }
-            const double raw_t_node = stateNodeTime(x_rel, i);
-            const double t_node = std::max(prev_t_node, raw_t_node);
-            integrateTargetSegment(tgt_pos, tgt_vel, t0_abs + prev_t_node, t0_abs + t_node, buffer);
-            prev_t_node = t_node;
-            Eigen::VectorXd x_abs = x_rel;
-            x_abs.segment(0, 3) = x_rel.segment(0, 3) + tgt_pos;
-            x_abs.segment(3, 3) = x_rel.segment(3, 3) + tgt_vel;
-            abs_traj.push_back(x_abs);
-        }
-        return abs_traj;
-    }
 
     std::vector<Eigen::VectorXd> makeTrajectoryForPublishing(const SolverResult& result) const {
         if (desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative) {
@@ -1027,14 +940,6 @@ private:
                 }
             }
             return traj_abs;
-        }
-        if (config_.ocp_type == "tracking_circle_target") {
-            TrackingCircleTargetOCP::TrackingCircleTargetExtra ex;
-            if (tryGetTrackingCircleTargetExtra(result.extra, ex)) {
-                return reconstructTrackingCircleTargetAbsoluteTrajectory(
-                    result.state_trajectory, result.target_snapshot_pos,
-                    result.target_snapshot_vel, ex.buf, ex.t_abs);
-            }
         }
         std::vector<Eigen::VectorXd> traj_abs = result.state_trajectory;
         for (int i = 0; i < static_cast<int>(traj_abs.size()); ++i) {
