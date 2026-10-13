@@ -54,6 +54,31 @@ After removal of the unused ROS1 Crazyflie stub, a fresh direct MPC circle run a
 
 The moved plotters retain their existing designs; only their default log-directory lookup was adjusted for the new `tools/analysis` location. No new plot outputs were generated. Remaining polynomial prediction implementations in the Crazyflie stateswitch OCPs were replaced with the external predictor alias before ROS2 validation.
 
+## Current ROS1 revalidation before further Crazyflie work
+
+At the user's request, Crazyflie MPC investigation is paused. The clean candidate at `d58e631` was rebuilt for MAVROS/ROS1, with one executable target and one build worker at a time. Solver revision: `d0c05cfb`. Ten standalone executables passed: controller, planner core, replay, target-frame warm start, stateswitch prediction, polynomial OCP, augmented STC landing, noaug STC landing, noaug CTCS, and direct MPC. CTCS parity also passed default, settle, capture, disabled-STC, and nonzero-floor configurations (160 samples each). Direct MPC passed analytic derivatives, asynchronous submission, quaternion-sign feedback, policy expiry, and moving-target model feedback (14 accepted solves, 230 feedback ticks).
+
+The augmented STC test initially failed when incorrectly run under the direct-MPC stage/LOS tuning; it passed with its own default benchmark tuning. No formulation or assertion was changed to make it pass.
+
+All six fresh flights below ran strictly sequentially, using the saved MC1 target seeds and RH/MPC tuning. All disarmed after terminal freeze and had clean teardown and zero logged deadline misses. Open-loop hover/staging and the runtime transition into RH or direct MPC were exercised in each cell.
+
+| Mode | Motion | Result | Lateral offset at touchdown (m) | Median solve (ms) | Accepted / rejected |
+|---|---|---|---:|---:|---:|
+| RH | circle | LANDED | 0.0978 | 85.676 | 31 / 0 |
+| RH | figure8 | LANDED | 0.2256 | 88.0465 | 32 / 0 |
+| RH | straight | LANDED | 0.0527 | 89.726 | 37 / 0 |
+| MPC | circle | LANDED | 0.0285 | 306.4575 | 24 / 2 |
+| MPC | figure8 | LANDED | 0.0303 | 316.5348 | 18 / 0 |
+| MPC | straight | LANDED | 0.0395 | 181.3877 | 28 / 0 |
+
+Direct control audits passed for all three motions: median feedback period 20 ms, maximum gap 20.37 ms, OFFBOARD throughout, no interleaved position commands, and bounded thrust/rate slew (20 m/s³ and 5 rad/s², within floating-point tolerance). Maximum retained policy age was 0.9004 s, below the saved 2 s expiry. Recorded MAVROS attitude packets were finite, had the correct IGNORE_ATTITUDE mask, normalized thrust within [0,1], and body rates within ±0.35 rad/s. Core policy expiry is covered by the standalone test; transport sensor-loss behavior was reviewed in source but not separately fault-injected in these six flights.
+
+Landing/transport checks passed; exact flown STC satisfaction did not. Nonzero executed glideslope/tilt/rate violations remain in the metrics, particularly figure-eight. These are single trials with wall-clock target phase differences, not a statistical MC1 repeat or proof of identical historical trajectories.
+
+A queued MPC command initially had the wrong hover-thrust argument; it was cancelled before MPC launched. Cancelling that queue interrupted its RH figure-eight child before campaign finalization, despite a logged terminal freeze. Its logs are retained separately under `ros1_queue_interrupted`, with an explicit interruption record; it is not counted as a validated landing. The repeated figure-eight cell above completed normally. All three MPC cells used hover thrust `0.7282821834`, matching `MPC_HOVER_THRUST`.
+
+Artifacts: `ros1_current_rh`, `ros1_current_mpc`, `ros1_current_checks`, and `ros1_queue_interrupted` beneath `/tmp/comando-validation` and the durable `.Codex/comando-planner-validation` copy. The checks directory includes tested source/solver revisions, executable SHA-256 hashes, build/test logs, and transport-packet audit. Candidate logs remain empty. Active planner directories have not been replaced or renamed; Crazyflie MPC still has an actual failed flight and remains unvalidated.
+
 ## Crazyflie runtime validation
 
 The ROS2 candidate planner and target executables rebuilt sequentially against the same shared CTCS solver. CrazySim uses prebuilt firmware, one server and one target, and a streamed CSV recorder instead of rosbag. The temporary validation runner is now saved as `scripts/run_crazysim_validation.py` for reproducibility.
