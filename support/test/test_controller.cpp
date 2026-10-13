@@ -12,7 +12,7 @@ int main(){try{
  controller.configure(config);check(!controller.isDirect(),"hover must use RH");
  controller.setTerminalTarget(Eigen::Vector3d(0,0,1));controller.reset();
  config.ocp_type="stc_landing_mpc";controller.configure(config);
- check(controller.isDirect() && controller.commandPeriod()==.01,"direct MPC cadence");
+ check(controller.isDirect() && controller.commandPeriod()==.02,"direct MPC cadence");
  planner_core::PlannerCoreInput input;input.current_state=Eigen::VectorXd::Zero(13);input.current_state(6)=1;
  check(controller.trySolve(input).rejection_reason=="direct_mpc_invalid_state","invalid target must reject");
  check(controller.solveOpenLoop(input).rejection_reason=="direct_mpc_requires_feedback","direct open-loop must reject");

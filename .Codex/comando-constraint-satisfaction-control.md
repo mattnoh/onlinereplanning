@@ -1,11 +1,11 @@
-# CoManDO constraint satisfaction through predictive constrained control
+# CoManDO DDP-to-PX4 constraint satisfaction
 
-Goal: maintain physical landing constraints with both ordinary and CTCS OCPs at a measured fast command rate. Preserve tight published limits, complete OCP files, the ROS-free core, and sequential builds/flights. Do not substitute per-solve approval gates for constrained control.
+The user requires DDP to compute the states and controls, with PX4 performing tracking. No separate LQR, QP, safety filter or invented tracking controller is authorized. The unflown QP experiment was checkpointed and removed.
 
-1. Identify applied versus nominal commands and measured response from existing bags. Separate delay, actuator error, feedback excursions, target prediction, feasibility and intersample effects. Fit and validate on separate cases; tracking error alone is not a disturbance bound.
-2. Derive constrained fast tracking for plant-facing inputs. Include actuator evolution, slew, viability and sample/hold margins. Ordinary constraints stay always active. Anticipate CTCS/STC activation so entry into the tighter set is feasible. Keep residuals and Jacobians in each complete OCP.
-3. Implement consistent constrained feedback and prediction, including timing. Preserve RH and MPC. RH's PX4 state-tracking loop needs its own execution model or equivalent constrained reference controller.
-4. Verify derivatives, active-boundary feasibility, sampled closed-loop invariance, held-out model mismatch and computation latency. Report infeasible states honestly; recovery is not an invariance guarantee.
-5. Build sequentially. Validate ordinary/CTCS, RH/MPC, circle/figure-eight/straight in SITL one target at a time. Score dense predicted and measured constraints with fixed physical tolerances. Failed initialization or policy expiry is a failure. Save evidence under logs and reuse existing plots.
+1. Restore exact DDP control delivery, preserving the optimizer's hold convention and node timing. Remove the custom LQR correction, its latency-prediction replica and post-solve command shaping. RH continues to send the DDP state references to PX4.
+2. Compare non-ROS DDP rollouts with ROS command delivery using matching saved configurations. Treat the user's constraint-satisfying non-ROS runs as the reference; identify any configuration/model mismatch rather than infer failure of DDP from hardware tracking.
+3. Identify PX4 actuator/tracking response, frame conventions, target/state age and planning/command latency. Place the necessary dynamics and mathematical constraint margins in the full DDP OCP, not a separate optimizer.
+4. Improve warm-started DDP iteration frequency. Measure solver frequency separately from command-publication frequency; fast publication alone is not fast MPC.
+5. Validate ordinary and CTCS, RH and MPC, using circle/figure-eight/straight sequentially. Retain physical limits, saved settings, bags and CSVs. Score predicted and measured constraints independently and retain failed cases.
 
-Completion requires the original limits to hold in all formulations/modes/motions at a verified fast update rate. Landing and nominal-only tests are insufficient. If target motion is outside the limits' viability region, derive and demonstrate the incompatibility rather than silently relax a limit.
+Completion requires constraint satisfaction on simulated hardware in every requested formulation/mode at a verified fast MPC update rate. Removing external corrections is necessary but does not prove the remaining model/timing mismatch is fixed.

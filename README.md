@@ -27,7 +27,7 @@ Current documentation for the active `mpc` branch, updated 2026-10-14. The MAVRO
 | `landing_rh` | Target-relative | RH with ordinary constraints active throughout the horizon and terminal node. |
 | `landing_mpc` | Target-relative | Direct MPC with ordinary constraints active throughout the horizon and terminal node. |
 
-RH sends planned position, velocity and yaw to PX4's tracking controller. Direct MPC sends thrust/body-rate commands on MAVROS `setpoint_raw/attitude`; PX4's rate controller remains active. A separate optimization worker supplies policies to 50 Hz feedback. The fixed-grid MPC horizon has 40 intervals of 0.1 seconds. Rejected solves retain a valid policy; stale state or policy expiry pauses into hold. Touchdown hands the landing action to PX4.
+RH sends planned position, velocity and yaw to PX4's tracking controller. Direct MPC sends thrust/body-rate commands on MAVROS `setpoint_raw/attitude`; PX4's rate controller remains active. An optimization worker supplies DDP controls for 50 Hz transport publication. PX4 performs rate/thrust tracking. The command path applies each optimized control with the OCP's zero-order hold; it contains no separate LQR/QP correction or post-solve slew shaping. The fixed-grid MPC horizon has 40 intervals of 0.1 seconds. The next measured-state DDP solve starts when the worker is free and its scheduled policy has activated; there is no extra 10 Hz request cap. Rejected solves retain a valid policy; stale state or policy expiry pauses into hold. Touchdown hands the landing action to PX4.
 
 Both CTCS OCPs use `StcStageConstraint` in density form with analytic trigger/consequence derivatives. Noaug preserves its 14-state layout, original eight implications and scaled interval budget. The migration parity checks compared the shared row with the independent density/integral, including free-time derivatives, settle/capture/disabled-STC modes and nonzero trigger floors.
 
@@ -103,7 +103,7 @@ Validated x500 direct-MPC settings:
 | Raw CTCS interval epsilon / scaling | 0.0016 / 10 |
 | Thrust-acceleration / body-rate slew | 20 m/s³ / 5 rad/s² |
 
-These are simulator calibration estimates. The first-order rate response and linear thrust mapping approximate the plant. Optimization need not achieve its requested 10 Hz cadence; command feedback remains 50 Hz.
+These are simulator calibration estimates. The first-order rate response and linear thrust mapping approximate the plant. Optimization need not achieve its requested 10 Hz cadence; command publication remains 50 Hz. Publication frequency is distinct from the DDP solve frequency.
 
 ## Sequential cone-start experiment
 
@@ -207,3 +207,12 @@ The comparison changes both start geometry and formulation/objective. CTCS retai
 | RH straight | [States](logs/ordinary_landing_rh/straight__zero__t0/flight_states.png) | [3D](logs/ordinary_landing_rh/straight__zero__t0/flight_3d.png) | [GIF](logs/ordinary_landing_rh/straight__zero__t0/flight.gif) |
 | MPC circle | [States](logs/ordinary_landing_mpc/circle__zero__t0/flight_states.png) | [3D](logs/ordinary_landing_mpc/circle__zero__t0/flight_3d.png) | [GIF](logs/ordinary_landing_mpc/circle__zero__t0/flight.gif) |
 | MPC straight | [States](logs/ordinary_landing_mpc/straight__zero__t0/flight_states.png) | [3D](logs/ordinary_landing_mpc/straight__zero__t0/flight_3d.png) | [GIF](logs/ordinary_landing_mpc/straight__zero__t0/flight.gif) |
+
+
+## DDP-to-PX4 execution correction (in progress)
+
+The unflown separate tracking-QP experiment was removed. The older custom LQR backward pass, feedback correction and post-solve command shaping were also removed. Both ordinary and CTCS direct MPC now publish the DDP-optimized inputs unchanged, and latency projection uses the same ZOH controls. RH continues to publish DDP state references for PX4 tracking.
+
+The non-ROS solver runs are the reference for checking the ROS/PX4 mismatch. This correction does not establish physical constraint satisfaction: matched simulator checks, actuator/tracking model validation, and faster warm-started DDP updates remain required. No physical limit or solve-acceptance threshold was changed.
+
+Verification for this correction: all six core tests passed, including exact DDP control delivery and scheduled-policy handoff. ROS1 and shared ROS2 planner builds passed sequentially. The historical ROS horizon audits are not matched comparisons with the non-ROS driver. New SITL constraint validation remains pending.

@@ -499,7 +499,7 @@ private:
             if(mpc_replay_timer_) {mpc_replay_timer_->cancel();mpc_replay_timer_.reset();}
             if (!solver_timer_) {
                 solver_timer_ = this->create_wall_timer(
-                    std::chrono::milliseconds(planner_core_.isDirect()?100:1),
+                    std::chrono::milliseconds(1),
                     std::bind(&PlannerNode::solverLoop, this),
                     solver_cb_group_);
             }

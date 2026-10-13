@@ -548,15 +548,6 @@ inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=tru
         auto dynamics=std::make_shared<Dynamics>(pred);
         OCPDescriptor::Model model; model.nx=NX;model.nu=NU;model.horizon=N;model.dt=DT;
         model.hover=hover();model.bounded=bounded;
-        model.constraints=[](const Eigen::VectorXd& x) {
-            Ref::LandingLimits limits(NX,NU);
-            OCPDescriptor::StateConstraints c{limits.c(x,hover()),limits.cx(x,hover())};
-            const double alpha=1/comando_parameters::MpcParameters::tracking_preview;
-            c.value.conservativeResize(7);c.jacobian.conservativeResize(7,NX);
-            c.value(6)=-x(5)-alpha*x(2);c.jacobian.row(6).setZero();
-            c.jacobian(6,5)=-1;c.jacobian(6,2)=-alpha;
-            return c;
-        };
         model.flow=[dynamics](const Eigen::VectorXd& x,const Eigen::VectorXd& u,double t,bool jac) {
             auto f=dynamics->flow(x,u,t,jac);return OCPDescriptor::Flow{f.x,f.a,f.b};
         };return model;

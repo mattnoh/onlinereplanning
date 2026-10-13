@@ -285,14 +285,11 @@ struct OCPDescriptor {
     std::function<void(Eigen::VectorXd&)> sanitize_warm_control;
 
     struct Flow { Eigen::VectorXd x; Eigen::MatrixXd a, b; };
-    struct StateConstraints { Eigen::VectorXd value; Eigen::MatrixXd jacobian; };
     struct Model {
         int nx = 0, nu = 4, horizon = 0;
         double dt = 0.1;
         std::function<Flow(const Eigen::VectorXd&, const Eigen::VectorXd&, double, bool)> flow;
         std::function<Eigen::VectorXd(Eigen::VectorXd)> bounded;
-        // Signed physical residuals (<=0), defined by the complete OCP.
-        std::function<StateConstraints(const Eigen::VectorXd&)> constraints;
         Eigen::VectorXd hover;
     };
     std::function<Model(const Eigen::Vector3d&)> make_model;
