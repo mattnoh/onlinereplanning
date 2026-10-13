@@ -27,11 +27,11 @@ struct PlannerRuntimeConfig {
 
     int n_replay = 0;
 
-    std::string body_relative_odom_topic = "/drone/body_relative_odom";
+    std::string world_frame = "world";
+    std::string drone_odom_topic = "";
 
     std::string target_odom_topic = "/target/odom";
     std::string target_accel_topic = "/target/accel";
-    bool debug_body_relative_trace = false;
 
     // Measured-state seeding (see PlannerCoreConfig in planner_core/types.hpp).
     double seed_alpha_pos = 0.70;
@@ -81,10 +81,9 @@ inline PlannerConfig toPlannerConfig(const PlannerRuntimeConfig& cfg) {
     out.circle_omega = cfg.circle_omega;
     out.circle_phi0 = cfg.circle_phi0;
     out.n_replay = cfg.n_replay;
-    out.body_relative_odom_topic = cfg.body_relative_odom_topic;
+
     out.target_odom_topic = cfg.target_odom_topic;
     out.target_accel_topic = cfg.target_accel_topic;
-    out.debug_body_relative_trace = cfg.debug_body_relative_trace;
     out.enable_terminal_freeze = cfg.enable_terminal_freeze;
     out.terminal_freeze_enter_pos = cfg.terminal_freeze_enter_pos;
     out.terminal_freeze_enter_vel = cfg.terminal_freeze_enter_vel;

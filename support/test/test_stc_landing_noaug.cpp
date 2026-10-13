@@ -1,3 +1,4 @@
+#include "planner_core/adapters.hpp"
 /// @file test_stc_landing_noaug.cpp
 /// @brief Standalone (no ROS master) receding-horizon smoke test for the
 ///        "stc_landing_noaug" OCP: descriptor sanity, predictor plumbing, 5
@@ -168,7 +169,7 @@ int main(int argc, char** argv) {
             // the planner ever engages from.
             xq_hover.segment(3,3) = x_rel_hover.segment(3,3);
             xq_hover.segment(6,7) = x_rel_hover.segment(6,7);
-            const Eigen::VectorXd x_rel = desc.transform_state(xq_hover, snap);
+            const Eigen::VectorXd x_rel = planner_core::prepareOcpState(desc,xq_hover,snap);
             auto extra = desc.prepare_extra(planner_cfg, 0.0, snap);
             auto res = cold_mpc.solve(x_rel, snap.acceleration, extra, 0.0);
             require(res.success, "staging-hover cold solve must succeed");
@@ -205,7 +206,7 @@ int main(int argc, char** argv) {
 
         for (int s = 0; s < n_solves; ++s) {
             const TargetSnapshot snap = tgt.snapshot(t_abs);
-            const Eigen::VectorXd x_rel = desc.transform_state(xq, snap);
+            const Eigen::VectorXd x_rel = planner_core::prepareOcpState(desc,xq,snap);
             auto extra = desc.prepare_extra(planner_cfg, t_abs, snap);
 
             auto res = mpc.solve(x_rel, snap.acceleration, extra, t_abs);

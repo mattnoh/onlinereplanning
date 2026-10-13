@@ -1,3 +1,4 @@
+#include <optional>
 /// @file mavros.hpp
 /// @brief MAVROS platform adapter.
 ///
@@ -52,6 +53,9 @@ struct Handles {
     // State
     Eigen::VectorXd current = Eigen::VectorXd::Zero(13);
     bool odom_received = false;
+    std::function<Eigen::VectorXd(const Eigen::VectorXd&)> command_to_local;
+    std::string odom_topic="/mavros/local_position/odom";
+    std::function<std::optional<nav_msgs::msg::Odometry>(const nav_msgs::msg::Odometry&)> normalize_odom;
 
     // Pre-arm
     ArmState arm_state = ArmState::Idle;
@@ -128,13 +132,15 @@ inline void setup(rclcpp::Node* node,
 
     // State subscription
     h.odom_sub = node->create_subscription<nav_msgs::msg::Odometry>(
-        "/mavros/local_position/odom", rclcpp::SensorDataQoS(),
+        h.odom_topic, rclcpp::SensorDataQoS(),
         [&state_out, &state_mutex, &h](const nav_msgs::msg::Odometry::SharedPtr msg) {
+            auto converted=h.normalize_odom?h.normalize_odom(*msg):std::optional<nav_msgs::msg::Odometry>(*msg);
+            if(!converted)return;const auto& sample=*converted;
             std::lock_guard<std::mutex> lk(state_mutex);
-            const auto& p = msg->pose.pose.position;
-            const auto& q = msg->pose.pose.orientation;
-            const auto& v = msg->twist.twist.linear;
-            const auto& w = msg->twist.twist.angular;
+            const auto& p = sample.pose.pose.position;
+            const auto& q = sample.pose.pose.orientation;
+            const auto& v = sample.twist.twist.linear;
+            const auto& w = sample.twist.twist.angular;
             // 13D ENU state: [px, py, pz, vx, vy, vz, qw, qx, qy, qz, wx, wy, wz]
             state_out(0) = p.x;  state_out(1) = p.y;  state_out(2) = p.z;
             state_out(3) = v.x;  state_out(4) = v.y;  state_out(5) = v.z;
@@ -235,7 +241,8 @@ inline void publishBodyRateCommand(Handles& h, const Eigen::VectorXd& u) {
 // s = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, wx, wy, wz]
 // Sends position + velocity + yaw via PositionTarget (ENU)
 // ─────────────────────────────────────────────────────────────────────────────
-inline void publishFullStateCommand(Handles& h, const Eigen::VectorXd& s) {
+inline void publishFullStateCommand(Handles& h, const Eigen::VectorXd& world) {
+    Eigen::VectorXd s;try{s=h.command_to_local?h.command_to_local(world):world;}catch(const std::exception&){return;}
     h.last_state_cmd   = s;
     h.last_cmd_is_bodyrate = false;
     if (h.arm_state != ArmState::Armed) return;

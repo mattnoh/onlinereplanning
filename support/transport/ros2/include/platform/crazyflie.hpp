@@ -1,3 +1,5 @@
+#include <optional>
+#include <functional>
 /// @file crazyflie.hpp
 /// @brief Crazyflie platform abstraction - direct subscribe/publish, no intermediate bridge.
 ///
@@ -85,6 +87,8 @@ struct State {
 // Subscription/Publisher pair - owns the ROS2 handles
 // ─────────────────────────────────────────────────────────────────────────────
 struct Handles {
+    std::function<std::optional<nav_msgs::msg::Odometry>(const nav_msgs::msg::Odometry&)> normalize_odom;
+    std::function<std::optional<nav_msgs::msg::Odometry>(const nav_msgs::msg::Odometry&)> normalize_pose;
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr bodyrate_pub;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
@@ -145,22 +149,24 @@ inline void setup(
         handles.odom_sub = node->create_subscription<nav_msgs::msg::Odometry>(
             odom_topic_override, 10,
             [&](const nav_msgs::msg::Odometry::SharedPtr msg) {
+                auto converted=handles.normalize_odom?handles.normalize_odom(*msg):std::optional<nav_msgs::msg::Odometry>(*msg);
+                if(!converted)return;const auto& sample=*converted;
                 std::lock_guard<std::mutex> lk(state_mutex);
-                state.current(0) = msg->pose.pose.position.x;
-                state.current(1) = msg->pose.pose.position.y;
-                state.current(2) = msg->pose.pose.position.z;
-                state.current(3) = msg->twist.twist.linear.x;
-                state.current(4) = msg->twist.twist.linear.y;
-                state.current(5) = msg->twist.twist.linear.z;
-                state.current(6) = msg->pose.pose.orientation.w;
-                state.current(7) = msg->pose.pose.orientation.x;
-                state.current(8) = msg->pose.pose.orientation.y;
-                state.current(9) = msg->pose.pose.orientation.z;
+                state.current(0) = sample.pose.pose.position.x;
+                state.current(1) = sample.pose.pose.position.y;
+                state.current(2) = sample.pose.pose.position.z;
+                state.current(3) = sample.twist.twist.linear.x;
+                state.current(4) = sample.twist.twist.linear.y;
+                state.current(5) = sample.twist.twist.linear.z;
+                state.current(6) = sample.pose.pose.orientation.w;
+                state.current(7) = sample.pose.pose.orientation.x;
+                state.current(8) = sample.pose.pose.orientation.y;
+                state.current(9) = sample.pose.pose.orientation.z;
                 // Odom override topics (e.g. /drone/body_relative_odom) are expected
                 // to be in SI units already (rad/s). Do not convert again.
-                state.current(10) = msg->twist.twist.angular.x;
-                state.current(11) = msg->twist.twist.angular.y;
-                state.current(12) = msg->twist.twist.angular.z;
+                state.current(10) = sample.twist.twist.angular.x;
+                state.current(11) = sample.twist.twist.angular.y;
+                state.current(12) = sample.twist.twist.angular.z;
                 state.last_pose=std::chrono::steady_clock::now();
                 state.pose_received = true;
                 state.last_odom=std::chrono::steady_clock::now();
@@ -176,17 +182,20 @@ inline void setup(
         handles.pose_sub = node->create_subscription<geometry_msgs::msg::PoseStamped>(
             "/" + drone_name + "/pose", 10,
             [&](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+                nav_msgs::msg::Odometry odom;odom.header=msg->header;odom.pose.pose=msg->pose;
+                auto converted=handles.normalize_pose?handles.normalize_pose(odom):std::optional<nav_msgs::msg::Odometry>(odom);
+                if(!converted)return;const auto& sample=*converted;
                 std::lock_guard<std::mutex> lk(state_mutex);
-                const Eigen::Vector3d position(msg->pose.position.x,msg->pose.position.y,msg->pose.position.z);
-                const Eigen::Vector4d attitude(msg->pose.orientation.w,msg->pose.orientation.x,msg->pose.orientation.y,msg->pose.orientation.z);
+                const Eigen::Vector3d position(sample.pose.pose.position.x,sample.pose.pose.position.y,sample.pose.pose.position.z);
+                const Eigen::Vector4d attitude(sample.pose.pose.orientation.w,sample.pose.pose.orientation.x,sample.pose.pose.orientation.y,sample.pose.pose.orientation.z);
                 if (!position.allFinite() || !attitude.allFinite() || attitude.norm()<1e-8) return;
-                state.current(0) = msg->pose.position.x;
-                state.current(1) = msg->pose.position.y;
-                state.current(2) = msg->pose.position.z;
-                state.current(6) = msg->pose.orientation.w;
-                state.current(7) = msg->pose.orientation.x;
-                state.current(8) = msg->pose.orientation.y;
-                state.current(9) = msg->pose.orientation.z;
+                state.current(0) = sample.pose.pose.position.x;
+                state.current(1) = sample.pose.pose.position.y;
+                state.current(2) = sample.pose.pose.position.z;
+                state.current(6) = sample.pose.pose.orientation.w;
+                state.current(7) = sample.pose.pose.orientation.x;
+                state.current(8) = sample.pose.pose.orientation.y;
+                state.current(9) = sample.pose.pose.orientation.z;
                 state.last_pose=std::chrono::steady_clock::now();
                 state.pose_received = true;
             },

@@ -26,9 +26,7 @@ struct PlannerCoreTestAccess {
     static Eigen::VectorXd selectInitialState(const PlannerCore& core,Args&&... args) {
         return core.selectInitialState(std::forward<Args>(args)...);
     }
-    static void setOdomMode(PlannerCore& core,OCPDescriptor::DroneOdomMode mode) {
-        core.desc_.drone_odom_mode=mode;
-    }
+
 };
 }
 
@@ -89,7 +87,7 @@ planner_core::PlannerCoreConfig hoverConfig() {
 planner_core::PlannerCoreInput inputAt(const Clock::time_point& now) {
     planner_core::PlannerCoreInput input;
     input.current_state = state(0.0);
-    input.active_odom_mode = OCPDescriptor::DroneOdomMode::Absolute;
+
     input.now = now;
     input.absolute_time_sec = 1.0;
     input.target_snapshot.valid = true;
@@ -114,62 +112,11 @@ int main() {
             invalid=solved(t0,0);invalid.state_trajectory[0].resize(3);
             require(!core.acceptSolvedResult(input,input.current_state,invalid).solve_accepted,"short state must reject");
         }
-        {
-            planner_core::PlannerCore core;
-            auto cfg = hoverConfig();
-            cfg.ocp_type = "stc_landing_noaug";
-            cfg.skip_trajectory_validation = true;
-            core.configure(cfg);
-            auto input = inputAt(t0);
-            input.active_odom_mode = OCPDescriptor::DroneOdomMode::BodyFrameRelative;
-            input.active_odom_topic = "/drone/body_relative_odom";
-            const auto out = core.trySolve(input);
-            require(!out.solve_accepted, "frame mismatch should reject solve");
-            require(out.rejection_reason == "frame_contract", "frame mismatch reason");
-        }
 
-        {
-            planner_core::PlannerCore core;
-            auto cfg = hoverConfig();
-            cfg.ocp_type = "stc_landing_noaug";
-            cfg.skip_trajectory_validation = true;
-            cfg.max_first_solve_age_sec = 1.0;
-            core.configure(cfg);
-            // Exercise generic relative-frame guards with the active descriptor.
-            planner_core::PlannerCoreTestAccess::setOdomMode(
-                core,OCPDescriptor::DroneOdomMode::TargetFrameRelative);
-            auto input = inputAt(t0);
-            input.active_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
-            input.active_odom_topic = "/mavros/local_position/odom";
-            auto stale = solved(t0, 0.0);
-            stale.solve_time_ms = 2000.0;
-            auto out = core.acceptSolvedResult(input, input.current_state, stale);
-            require(!out.solve_accepted, "stale first relative solve should reject");
-            require(out.rejection_reason == "first_solve_stale",
-                    "stale first relative solve rejection reason");
-        }
 
-        {
-            planner_core::PlannerCore core;
-            auto cfg = hoverConfig();
-            cfg.ocp_type = "stc_landing_noaug";
-            cfg.skip_trajectory_validation = true;
-            core.configure(cfg);
-            // Exercise generic relative-frame guards with the active descriptor.
-            planner_core::PlannerCoreTestAccess::setOdomMode(
-                core,OCPDescriptor::DroneOdomMode::TargetFrameRelative);
-            auto input = inputAt(t0);
-            input.active_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
-            input.active_odom_topic = "/mavros/local_position/odom";
-            auto bad = solved(t0, 0.0);
-            for(auto& x:bad.state_trajectory) { const int n=x.size(); x.conservativeResize(20);x.tail(20-n).setZero(); }
-            bad.state_trajectory.back()(2) = -20.0;
-            auto out = core.acceptSolvedResult(input, input.current_state, bad);
-            require(!out.solve_accepted, "divergent relative trajectory should reject");
-            require(out.rejection_reason == "relative_position_diverged" ||
-                        out.rejection_reason == "relative_vertical_diverged",
-                    "divergent relative trajectory rejection reason");
-        }
+
+
+
 
         {
             planner_core::PlannerCore core;
@@ -438,43 +385,28 @@ int main() {
                     "selected x0 should still be the future handoff state");
         }
 
-        {
-            OCPDescriptor desc;
-            desc.drone_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
-            TargetSnapshot target;
-            target.valid = true;
-            target.position = Eigen::Vector3d(1.0, 2.0, 2.0);
-            target.velocity = Eigen::Vector3d(0.3, 0.0, 0.0);
-            target.angular_velocity = Eigen::Vector3d(0.0, 0.0, 1.0);
-            target.orientation = Eigen::Vector4d(1.0, 0.0, 0.0, 0.0);
-            Eigen::VectorXd x = state(0.0);
-            x.segment(0, 3) = Eigen::Vector3d(0.0, 1.0, 0.2);
-            x.segment(3, 3) = Eigen::Vector3d(0.2, 0.0, 0.0);
-            const Eigen::Vector4d hover =
-                planner_core::makeCrazyflieHoverCommand(desc, x, control(9.81), target);
-            require(std::abs(hover(0) + 0.5) < 1e-6,
-                    "TF hover vx must include target velocity and frame-rotation term");
-            require(std::abs(hover(2) - 2.2) < 1e-6,
-                    "TF hover z must reconstruct world z from target-frame position");
-        }
+
+
 
         {
-            OCPDescriptor desc;
-            desc.drone_odom_mode = OCPDescriptor::DroneOdomMode::BodyFrameRelative;
-            TargetSnapshot target;
-            target.valid = true;
-            target.position = Eigen::Vector3d(1.0, 2.0, 3.0);
-            target.velocity = Eigen::Vector3d(0.3, 0.0, 0.0);
-            target.orientation = Eigen::Vector4d(1.0, 0.0, 0.0, 0.0);
-            Eigen::VectorXd x = state(0.0);
-            x.segment(0, 3) = Eigen::Vector3d(0.0, 0.0, 1.0);
-            x.segment(3, 3) = Eigen::Vector3d(0.2, 0.0, 0.0);
-            const Eigen::Vector4d hover =
-                planner_core::makeCrazyflieHoverCommand(desc, x, control(9.81), target);
-            require(std::abs(hover(0) - 0.5) < 1e-6,
-                    "BF hover vx must include target velocity in drone body frame");
-            require(std::abs(hover(2) - 2.0) < 1e-6,
-                    "BF hover z must reconstruct drone world altitude from p_T^B");
+            const auto& desc=OCPRegistry::getDescriptor("stc_landing_noaug");
+            TargetSnapshot target;target.valid=true;target.position<<3,-2,1;target.velocity<<.4,-.1,0;
+            auto world=state(0);world.head(3)<<4,1,2;world.segment(3,3)<<.2,.3,-.1;
+            auto relative=planner_core::prepareOcpState(desc,world,target);
+            require((relative.head(3)-(world.head(3)-target.position)).norm()<1e-12,"target-relative position");
+            require((relative.segment(6,7)-world.segment(6,7)).norm()<1e-12,"target yaw must not rotate attitude/rates");
+            require((planner_core::reconstructWorldState(desc,relative,target)-world).norm()<1e-12,"frame round trip");
+            Eigen::Quaterniond rotation(Eigen::AngleAxisd(M_PI/2,Eigen::Vector3d::UnitZ()));
+            auto aligned=planner_core::alignWorldState(world,rotation,Eigen::Vector3d(2,3,4),false);
+            require((aligned.head(3)-(rotation*world.head(3).eval()+Eigen::Vector3d(2,3,4))).norm()<1e-12,"translated/rotated estimator pose");
+            require((aligned.segment(3,3)-rotation*world.segment<3>(3).eval()).norm()<1e-12,"world velocity rotation");
+            require((aligned.tail(3)-world.tail(3)).norm()<1e-12,"world rotation preserves body rates");
+            auto body=world;body.segment(6,4)<<rotation.w(),rotation.x(),rotation.y(),rotation.z();body.segment(3,3)<<1,0,0;
+            auto converted=planner_core::alignWorldState(body,Eigen::Quaterniond::Identity(),Eigen::Vector3d::Zero(),true);
+            require((converted.segment(3,3)-Eigen::Vector3d(0,1,0)).norm()<1e-12,"body velocity normalization");
+            require(!planner_core::validateFrameContract("mocap","map").ok,"unaligned source must reject");
+            planner_core::PlannerCore core;core.configure(hoverConfig());auto input=inputAt(t0);input.state_frame="mocap";
+            require(core.trySolve(input).rejection_reason=="frame_contract","core must reject wrong input frame");
         }
     } catch (const std::exception& e) {
         std::cerr << "PlannerCore tests failed: " << e.what() << "\n";

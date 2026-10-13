@@ -45,10 +45,10 @@ inline PlannerRuntimeConfig loadPlannerRuntimeConfig(ros::NodeHandle& nh) {
     nh.param<double>("open_loop_abort_max_z_error_m",   cfg.open_loop_abort_max_z_error_m,   cfg.open_loop_abort_max_z_error_m);
     nh.param<double>("open_loop_abort_max_vz_error_mps",cfg.open_loop_abort_max_vz_error_mps,cfg.open_loop_abort_max_vz_error_mps);
 
-    nh.param<std::string>("body_relative_odom_topic",     cfg.body_relative_odom_topic,     cfg.body_relative_odom_topic);
+    nh.param<std::string>("world_frame", cfg.world_frame, "map");
+    nh.param<std::string>("drone_odom_topic", cfg.drone_odom_topic, "/mavros/local_position/odom");
     nh.param<std::string>("target_odom_topic",            cfg.target_odom_topic,            cfg.target_odom_topic);
     nh.param<std::string>("target_accel_topic",           cfg.target_accel_topic,           cfg.target_accel_topic);
-    nh.param<bool>       ("debug_body_relative_trace",    cfg.debug_body_relative_trace,    cfg.debug_body_relative_trace);
 
     nh.param<double>("seed_alpha_pos",              cfg.seed_alpha_pos,              cfg.seed_alpha_pos);
     nh.param<double>("seed_alpha_vel",              cfg.seed_alpha_vel,              cfg.seed_alpha_vel);

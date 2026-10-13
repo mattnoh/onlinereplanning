@@ -51,13 +51,9 @@ struct PlannerConfig {
 
     int n_replay = 0;
 
-    bool drone_state_is_relative = false;
-    std::string drone_odom_topic = "";
-    std::string body_relative_odom_topic = "/drone/body_relative_odom";
 
     std::string target_odom_topic = "/target/odom";
     std::string target_accel_topic = "/target/accel";
-    bool debug_body_relative_trace = false;
 
     bool enable_terminal_freeze = true;
     double terminal_freeze_enter_pos = 0.20;
@@ -246,7 +242,7 @@ namespace planner_core { enum class ExecutionMode { RhReplanning, DirectMpc }; }
 struct OCPDescriptor {
     planner_core::ExecutionMode execution_mode=planner_core::ExecutionMode::RhReplanning;
     enum class CommandMode  { CmdFullState, CmdBodyRate };
-    enum class DroneOdomMode { Absolute, AbsoluteShiftedTarget, BodyFrameRelative, TargetFrameRelative };
+    enum class Coordinates { World, TargetRelative };
     enum class WarmStart    { Shift, Feedback };
 
     std::string name;
@@ -255,7 +251,7 @@ struct OCPDescriptor {
     double default_mass_kg = 0.027;
     WarmStart warm_start = WarmStart::Shift;
     CommandMode command_mode = CommandMode::CmdFullState;
-    DroneOdomMode drone_odom_mode = DroneOdomMode::Absolute;
+    Coordinates coordinates = Coordinates::World;
 
     bool disarm_on_landing_finish = false;
     bool skip_altitude_validation = false;
@@ -274,9 +270,6 @@ struct OCPDescriptor {
         extract_actual_state_row;
 
     std::function<Eigen::VectorXd(const Eigen::VectorXd&)> make_hover_state;
-    std::function<Eigen::VectorXd(
-        const Eigen::VectorXd& x_drone, const TargetSnapshot&)>
-        transform_state;
     std::function<bool(const TargetSnapshot&, double now_sec, double max_age)>
         validate_target;
     std::function<void(SolverResult&, const TargetSnapshot&)>
@@ -290,9 +283,16 @@ struct OCPDescriptor {
                        const std::vector<Eigen::VectorXd>&,
                        int)> merge_prev_augmented;
     std::function<void(Eigen::VectorXd&)> sanitize_warm_control;
-    std::function<Eigen::VectorXd(
-        const Eigen::VectorXd& x_ocp,
-        const TargetSnapshot& target)> reconstruct_world_state;
+
+    struct Flow { Eigen::VectorXd x; Eigen::MatrixXd a, b; };
+    struct MpcModel {
+        int nx = 0, nu = 4, horizon = 0;
+        double dt = 0.1;
+        std::function<Flow(const Eigen::VectorXd&, const Eigen::VectorXd&, double, bool)> flow;
+        std::function<Eigen::VectorXd(Eigen::VectorXd)> bounded;
+        Eigen::VectorXd hover;
+    };
+    std::function<MpcModel(const Eigen::Vector3d&)> make_mpc_model;
 
     std::function<Param()> getSolverParams;
     std::function<std::shared_ptr<OptimalControlProblem<double>>(const OCPCreateArgs&)>
@@ -379,8 +379,7 @@ struct PlannerCoreConfig {
     double terminal_freeze_exit_pos = 0.20;
     Eigen::Vector3d terminal_position_abs = Eigen::Vector3d::Zero();
     Eigen::VectorXd terminal_state;
-    std::string body_relative_odom_topic = "/drone/body_relative_odom";
-    std::string target_frame_odom_topic = "/drone/target_frame_odom";
+    std::string world_frame = "world";
     double solve_lead_guard_sec = 0.05;
     double initial_solve_lead_sec = 0.20;
     // Seeding the replan from the MEASURED state.
@@ -428,8 +427,7 @@ struct PlannerCoreConfig {
 struct PlannerCoreInput {
     Eigen::VectorXd current_state;
     TargetSnapshot target_snapshot;
-    OCPDescriptor::DroneOdomMode active_odom_mode = OCPDescriptor::DroneOdomMode::Absolute;
-    std::string active_odom_topic;
+    std::string state_frame = "world";
     std::chrono::steady_clock::time_point now{};
     double absolute_time_sec = 0.0;
 };

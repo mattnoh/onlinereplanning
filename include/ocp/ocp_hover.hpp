@@ -283,7 +283,7 @@ inline OCPDescriptor descriptor() {
     d.default_mass_kg = DEFAULT_MASS_KG;
     d.warm_start = OCPDescriptor::WarmStart::Shift;
     d.command_mode = OCPDescriptor::CommandMode::CmdFullState;
-    d.drone_odom_mode = OCPDescriptor::DroneOdomMode::Absolute;
+    d.coordinates = OCPDescriptor::Coordinates::World;
     d.state_dim = 13;
     d.control_dim = 4;
     d.log_state_headers = OCPLoggerDefaults::getStateHeaders13D();

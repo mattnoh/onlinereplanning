@@ -11,6 +11,7 @@
 #include "planner_core/types.hpp"
 #include "platform/crazyflie.hpp"
 #include "platform/mavros.hpp"
+#include "platform/frame_normalizer.hpp"
 #include "platform/target_tracker.hpp"
 #include "platform/state_monitor.hpp"
 #include "trajectory_replayer.hpp"
@@ -80,10 +81,10 @@ public:
         open_loop_abort_on_divergence_ = runtime_cfg.open_loop_abort_on_divergence;
         open_loop_abort_max_z_error_m_ = runtime_cfg.open_loop_abort_max_z_error_m;
         open_loop_abort_max_vz_error_mps_ = runtime_cfg.open_loop_abort_max_vz_error_mps;
+        world_frame_ = runtime_cfg.world_frame;
+        drone_odom_topic_ = runtime_cfg.drone_odom_topic;
         target_odom_topic_ = runtime_cfg.target_odom_topic;
         target_accel_topic_ = runtime_cfg.target_accel_topic;
-        debug_body_relative_trace_ = runtime_cfg.debug_body_relative_trace;
-        body_relative_odom_topic_ = runtime_cfg.body_relative_odom_topic;
         enable_terminal_freeze_ = runtime_cfg.enable_terminal_freeze;
         terminal_freeze_enter_pos_ = runtime_cfg.terminal_freeze_enter_pos;
         terminal_freeze_enter_vel_ = runtime_cfg.terminal_freeze_enter_vel;
@@ -105,16 +106,14 @@ public:
                 control_dim_ = desc.control_dim;
                 custom_make_hover_state_ = desc.make_hover_state;
             }
-            applyOcpDroneOdomMode(false);
+            applyOcpCoordinates(false);
             setTerminalTarget(hover_target_);
             logging_initialized_=false;
             rebuildMpcSolver();
             is_configured_ = true;
         } else {
             ocp_dt_ = 0.0;
-            drone_state_is_relative_ = false;
-            drone_odom_mode_ = OCPDescriptor::DroneOdomMode::Absolute;
-            drone_odom_topic_.clear();
+
             is_configured_ = false;
         }
 
@@ -125,6 +124,16 @@ public:
         replay_cb_group_ = this->create_callback_group(
             rclcpp::CallbackGroupType::MutuallyExclusive);
 
+        frames_=std::make_shared<platform::FrameNormalizer>(this,world_frame_);
+        const auto velocity_frame=declare_parameter<std::string>("state_velocity_frame","body");
+        const auto target_velocity_frame=declare_parameter<std::string>("target_velocity_frame","world");
+        if((velocity_frame!="world"&&velocity_frame!="body")||(target_velocity_frame!="world"&&target_velocity_frame!="body"))throw std::runtime_error("velocity frame must be body or world");
+        mavros_handles_.odom_topic=drone_odom_topic_.empty()?"/mavros/local_position/odom":drone_odom_topic_;
+        mavros_handles_.normalize_odom=[this,velocity_frame](const nav_msgs::msg::Odometry& msg){return frames_->odometry(msg,velocity_frame=="body");};
+        const auto command_frame=declare_parameter<std::string>("command_frame","map");
+        mavros_handles_.command_to_local=[this,command_frame](const Eigen::VectorXd& x){return frames_->command(x,command_frame);};
+        cf_handles_.normalize_odom=mavros_handles_.normalize_odom;
+        cf_handles_.normalize_pose=[this](const nav_msgs::msg::Odometry& msg){return frames_->odometry(msg,false);};
         if (platform_ == "crazyflie") {
             platform::crazyflie::setup(
                 this, sensor_cb_group_, drone_name_, drone_odom_topic_,
@@ -144,7 +153,9 @@ public:
         platform::target_tracker::setup(
             this, sensor_cb_group_,
             target_odom_topic_, target_accel_topic_,
-            state_monitor_.targetState(), state_monitor_.targetMutex(), target_handles_);
+            state_monitor_.targetState(), state_monitor_.targetMutex(), target_handles_,
+            [this,target_velocity_frame](const nav_msgs::msg::Odometry& msg){return frames_->odometry(msg,target_velocity_frame=="body");},
+            [this](const geometry_msgs::msg::AccelStamped& msg){return frames_->acceleration(msg);});
 
         traj_pub_ = this->create_publisher<nav_msgs::msg::Path>(
             "/" + drone_name_ + "/planned_trajectory", 10);
@@ -175,7 +186,7 @@ public:
             "To run next OCP from another terminal: set ocp/mode/n_replay/target then increment command_seq.");
         RCLCPP_INFO(this->get_logger(),
             "Input state mode: %s (drone_odom_topic='%s')",
-            droneOdomModeName(drone_odom_mode_),
+            currentFrameLabel(),
             drone_odom_topic_.c_str());
     }
 
@@ -235,19 +246,8 @@ private:
         }
     }
 
-    static const char* droneOdomModeName(OCPDescriptor::DroneOdomMode mode) {
-        switch (mode) {
-            case OCPDescriptor::DroneOdomMode::BodyFrameRelative:
-                return "body-frame-relative";
-            case OCPDescriptor::DroneOdomMode::TargetFrameRelative:
-                return "target-frame-relative";
-            case OCPDescriptor::DroneOdomMode::AbsoluteShiftedTarget:
-                return "absolute-shifted-target";
-            case OCPDescriptor::DroneOdomMode::Absolute:
-            default:
-                return "absolute";
-        }
-    }
+
+
 
     planner_core::Platform corePlatform() const {
         if (platform_ == "mavros") {
@@ -285,16 +285,16 @@ private:
     {
         const auto& desc = OCPRegistry::getDescriptor(ocp_type_);
         Eigen::VectorXd terminal_state = current_state;
-        if (desc.transform_state) {
+        if (desc.coordinates == OCPDescriptor::Coordinates::TargetRelative) {
             if (!target_snapshot.valid) {
                 return false;
             }
-            terminal_state = desc.transform_state(current_state, target_snapshot);
+            terminal_state = planner_core::prepareOcpState(desc,current_state,target_snapshot);
         }
         if (terminal_state.size() < 3) {
             return false;
         }
-        if (desc.transform_state) {
+        if (desc.coordinates == OCPDescriptor::Coordinates::TargetRelative) {
             return terminal_state.segment(0, 3).norm() < terminal_freeze_enter_pos_;
         }
         return (terminal_state.segment(0, 3) - terminal_position_abs_).norm() <
@@ -338,31 +338,16 @@ private:
         return out;
     }
 
-    Eigen::Vector3d commandWorldPosition(const Eigen::VectorXd& state,
-                                         const TargetSnapshot& target) const {
-        if (state.size() < 3) {
-            return Eigen::Vector3d::Zero();
-        }
-        const auto& desc = OCPRegistry::getDescriptor(ocp_type_);
-        if (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative) {
-            const Eigen::Matrix3d R_WN = Quad6DOFVarTime<double>::calcC(target.orientation);
-            return target.position + R_WN * state.segment(0, 3);
-        }
-        if (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative &&
-            state.size() >= 10) {
-            const Eigen::Vector4d q_NB = state.segment(6, 4);
-            const Eigen::Matrix3d R_WN = Quad6DOFVarTime<double>::calcC(target.orientation);
-            const Eigen::Matrix3d R_WB = R_WN * Quad6DOFVarTime<double>::calcC(q_NB);
-            return target.position - R_WB * state.segment(0, 3);
-        }
-        return state.segment(0, 3);
+    Eigen::Vector3d commandWorldPosition(const Eigen::VectorXd& state,const TargetSnapshot& target) const {
+        return planner_core::reconstructWorldState(OCPRegistry::getDescriptor(ocp_type_),state,target).head<3>();
     }
+
 
     visualization_msgs::msg::Marker baseMarker(int id,
                                                const std::string& ns,
                                                int type) const {
         visualization_msgs::msg::Marker marker;
-        marker.header.frame_id = "world";
+        marker.header.frame_id = world_frame_;
         marker.header.stamp = this->now();
         marker.ns = ns;
         marker.id = id;
@@ -373,51 +358,10 @@ private:
         return marker;
     }
 
-    void applyOcpDroneOdomMode(bool rebuild_subscriptions) {
-        if (ocp_type_.empty()) {
-            return;
-        }
-
-        const auto& desc = OCPRegistry::getDescriptor(ocp_type_);
-        const bool needs_relative =
-            (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative) ||
-            (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative);
-
-        std::string desired_odom_topic;
-        if (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative)
-            desired_odom_topic = body_relative_odom_topic_;
-        else if (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative)
-            desired_odom_topic = target_frame_odom_topic_;
-        else
-            desired_odom_topic = "";
-
-        const bool mode_changed = (needs_relative != drone_state_is_relative_);
-        const bool topic_changed = (desired_odom_topic != drone_odom_topic_);
-
-        drone_odom_mode_ = desc.drone_odom_mode;
-        drone_state_is_relative_ = needs_relative;
-        drone_odom_topic_ = desired_odom_topic;
-
-        if (!rebuild_subscriptions || platform_ != "crazyflie" || (!mode_changed && !topic_changed)) {
-            return;
-        }
-
-        cf_handles_.reset();
-        state_monitor_.crazyflieState().reset();
-        platform::crazyflie::setup(
-            this,
-            sensor_cb_group_,
-            drone_name_,
-            drone_odom_topic_,
-            state_monitor_.crazyflieState(),
-            state_monitor_.stateMutex(),
-            cf_handles_);
-
-        RCLCPP_INFO(this->get_logger(),
-            "[OCP switch] drone odom mode=%s topic='%s'",
-            droneOdomModeName(desc.drone_odom_mode),
-            drone_odom_topic_.c_str());
+    void applyOcpCoordinates(bool) {
+        // OCP selection changes solver coordinates, never the estimator subscription.
     }
+
 
     void transitionOpenLoopToHold(const std::string& reason) {
         stopReplayTimer();
@@ -489,7 +433,7 @@ private:
         }
         auto state = state_monitor_.getCurrentState(platform_);
         // Native cflib odometry contains Kalman body-frame velocity; pose is ENU.
-        // Explicit odometry overrides already carry the selected OCP frame.
+        // Configured external odometry is normalized in the transport callback.
         if (platform_ == "crazyflie" && drone_odom_topic_.empty() &&
             state.size() >= 13 && state.allFinite() && state.segment<4>(6).norm() > 1e-8)
             return planner_core::bodyOdometryToWorld(std::move(state));
@@ -500,22 +444,11 @@ private:
     // Stateswitch receives world-frame drone state and shifts it only inside the OCP
     // transform_state callback, so adding the live target here would create a bogus
     // hover/full-state command after terminal freeze.
-    Eigen::VectorXd convertStateToAbsoluteFrame(const Eigen::VectorXd& state) const {
-        if (drone_state_is_relative_ || state.size() < state_dim_ ||
-            drone_odom_mode_ != OCPDescriptor::DroneOdomMode::AbsoluteShiftedTarget) {
-            return state;
-        }
+    Eigen::VectorXd convertStateToAbsoluteFrame(const Eigen::VectorXd& state) const {return state;}
 
-        Eigen::VectorXd x_abs = state;
-        const auto [tgt_pos, tgt_vel] = state_monitor_.getTargetPositionVelocity();
-        x_abs.segment(0, 3) += tgt_pos;
-        x_abs.segment(3, 3) += tgt_vel;
-        return x_abs;
-    }
 
-    const char* currentFrameLabel() const {
-        return planner_core::frameLabel(drone_odom_mode_);
-    }
+    const char* currentFrameLabel() const {return ocp_type_.empty()?"absolute":planner_core::frameLabel(OCPRegistry::getDescriptor(ocp_type_).coordinates);}
+
 
     void setTerminalTarget(const Eigen::Vector3d& xyz) {
         hover_target_ = xyz;
@@ -540,6 +473,7 @@ private:
             return;
         }
         planner_core::PlannerCoreConfig core_cfg;
+        core_cfg.world_frame=world_frame_;
         core_cfg.ocp_type = ocp_type_;
         core_cfg.platform = corePlatform();
         core_cfg.solver_type = solver_type_;
@@ -554,8 +488,6 @@ private:
         core_cfg.terminal_freeze_exit_pos = terminal_freeze_exit_pos_;
         core_cfg.terminal_position_abs = terminal_position_abs_;
         core_cfg.terminal_state = terminal_state_;
-        core_cfg.body_relative_odom_topic = body_relative_odom_topic_;
-        core_cfg.target_frame_odom_topic = target_frame_odom_topic_;
         core_cfg.max_first_solve_age_sec = max_first_solve_age_sec_;
         core_cfg.max_relative_position_norm = max_relative_position_norm_;
         core_cfg.max_relative_vertical_abs = max_relative_vertical_abs_;
@@ -625,9 +557,7 @@ private:
         }
         if (command_mode_ == OCPDescriptor::CommandMode::CmdBodyRate && !planner_core_.isDirect()) {
             if (platform_ == "crazyflie") {
-                if (drone_state_is_relative_) {
-                    return; // Let goto hold the drone, we cannot give an absolute z before the first solve
-                }
+
                 // Hold altitude using cmd_hover with zero velocity
                 const Eigen::VectorXd x_abs = convertStateToAbsoluteFrame(getCurrentState());
                 const float z_hold = (x_abs.size() >= 3) ? float(x_abs(2)) : 0.3f;
@@ -638,9 +568,7 @@ private:
             }
             return;
         }
-        if (drone_state_is_relative_) {
-            return;
-        }
+
 
         const Eigen::VectorXd x_now_abs = convertStateToAbsoluteFrame(getCurrentState());
         hover_controller::doHoverHoldTick(
@@ -665,17 +593,7 @@ private:
     }
 
     void holdHoverAndPause(const std::string& reason) {
-        if (drone_state_is_relative_) {
-            // BodyRelative mode: hover_controller needs world-frame state which the
-            // planner does not have.  Just pause and let publishPausedHoverHoldTick
-            // send safe zero-velocity cmd_hover at the configured altitude.
-            RCLCPP_WARN(this->get_logger(),
-                "holdHoverAndPause(%s) in body-relative mode — pausing without world-frame hold.",
-                reason.c_str());
-            command_paused_.store(true);
-            maintain_hover_hold_ = false;
-            return;
-        }
+
 
         hover_controller::enterHoverHold(
             reason,
@@ -863,10 +781,9 @@ private:
     planner_core::PlannerCoreInput makeCoreInput(const Eigen::VectorXd& state,
                                                  const TargetSnapshot& target_snapshot) {
         planner_core::PlannerCoreInput input;
+        input.state_frame=world_frame_;
         input.current_state = state;
         input.target_snapshot = target_snapshot;
-        input.active_odom_mode = drone_odom_mode_;
-        input.active_odom_topic = drone_odom_topic_;
         input.now = Clock::now();
         input.absolute_time_sec = this->now().seconds();
         return input;
@@ -1104,7 +1021,7 @@ private:
                 state_dim_ = desc.state_dim;
                 control_dim_ = desc.control_dim;
                 custom_make_hover_state_ = desc.make_hover_state;
-                applyOcpDroneOdomMode(true);
+                applyOcpCoordinates(true);
                 if (n_replay_ == 0) {
                     n_replay_ = desc.default_n_replay;
                 }
@@ -1182,7 +1099,7 @@ private:
                 dbg.has_state ? "true" : "false",
                 dbg.cf_pose_received ? "true" : "false",
                 dbg.cf_odom_received ? "true" : "false",
-                drone_state_is_relative_ ? "true" : "false",
+                "false",
                 drone_odom_topic_.c_str());
             return;
         }
@@ -1196,16 +1113,7 @@ private:
         Eigen::VectorXd x0_abs = getCurrentState();
         TargetSnapshot target_snapshot = getTargetSnapshot();
 
-        if (debug_body_relative_trace_ && drone_state_is_relative_ && x0_abs.size() >= state_dim_ && state_dim_ >= 13) {
-            const Eigen::Vector4d q = x0_abs.segment<4>(6);
-            const double qn = q.norm();
-            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                "[BodyRelTrace][solver] x0 pT=(%.3f,%.3f,%.3f) vd=(%.3f,%.3f,%.3f) q=(%.4f,%.4f,%.4f,%.4f)|norm=%.4f w=(%.4f,%.4f,%.4f)",
-                x0_abs(0), x0_abs(1), x0_abs(2),
-                x0_abs(3), x0_abs(4), x0_abs(5),
-                q(0), q(1), q(2), q(3), qn,
-                x0_abs(10), x0_abs(11), x0_abs(12));
-        }
+
 
         auto desc = OCPRegistry::getDescriptor(ocp_type_);
 
@@ -1356,13 +1264,13 @@ private:
     void publishTrajectory(const std::vector<Eigen::VectorXd>& traj) {
         nav_msgs::msg::Path path;
         path.header.stamp = this->now();
-        path.header.frame_id = "world";
+        path.header.frame_id = world_frame_;
         for (const auto& s : traj) {
             if (s.size() < 10) {
                 continue;
             }
             geometry_msgs::msg::PoseStamped p;
-            p.header.frame_id = "world";
+            p.header.frame_id = world_frame_;
             p.pose.position.x = s(0);
             p.pose.position.y = s(1);
             p.pose.position.z = s(2);
@@ -1391,7 +1299,7 @@ private:
                 dbg.has_state ? "true" : "false",
                 dbg.cf_pose_received ? "true" : "false",
                 dbg.cf_odom_received ? "true" : "false",
-                drone_state_is_relative_ ? "true" : "false",
+                "false",
                 drone_odom_topic_.c_str());
             return;
         }
@@ -1471,7 +1379,7 @@ private:
 
         // Divergence check compares world-frame z — meaningless in body-relative mode
         // (x(2) is p_T_body[2], not drone altitude).  Skip the check entirely.
-        if (!drone_state_is_relative_ && open_loop_abort_on_divergence_ &&
+        if (open_loop_abort_on_divergence_ &&
             x_cmd.size() >= 6 && hasState()) {
             const Eigen::VectorXd x_act = convertStateToAbsoluteFrame(getCurrentState());
             if (x_act.size() >= 6) {
@@ -1504,14 +1412,11 @@ private:
     }
 
     std::string ocp_type_, platform_, solver_type_, mode_, drone_name_;
-    bool drone_state_is_relative_ = false;
-    OCPDescriptor::DroneOdomMode drone_odom_mode_ = OCPDescriptor::DroneOdomMode::Absolute;
+    std::shared_ptr<platform::FrameNormalizer> frames_;
+    std::string world_frame_="world";
     std::string drone_odom_topic_;
-    std::string body_relative_odom_topic_ = "/drone/body_relative_odom";
-    std::string target_frame_odom_topic_ = "/drone/target_frame_odom";
     std::string target_odom_topic_ = "/target/odom";
     std::string target_accel_topic_ = "/target/accel";
-    bool debug_body_relative_trace_ = false;
 
     bool enable_terminal_freeze_ = true;
     double terminal_freeze_enter_pos_ = 0.20;

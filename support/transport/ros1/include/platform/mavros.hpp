@@ -49,6 +49,8 @@ enum class ArmState { Idle, WarmingUp, ReadyToArm, Armed };
 struct Handles {
     Eigen::VectorXd current = Eigen::VectorXd::Zero(13);
     bool odom_received = false;
+    std::function<std::optional<nav_msgs::Odometry>(const nav_msgs::Odometry&)> normalize_odom;
+    std::function<Eigen::VectorXd(const Eigen::VectorXd&)> command_to_local;
     std::mutex* state_mutex=nullptr;
     std::string odom_topic="/mavros/local_position/odom";
     std::chrono::steady_clock::time_point last_odom{};
@@ -117,7 +119,8 @@ inline void publishAttitudeTargetMsg(Handles& h, const Eigen::VectorXd& u) {
     h.att_pub.publish(msg);
 }
 
-inline void publishPositionTargetMsg(Handles& h, const Eigen::VectorXd& s) {
+inline void publishPositionTargetMsg(Handles& h, const Eigen::VectorXd& state) {
+    Eigen::VectorXd s;try{s=h.command_to_local?h.command_to_local(state):state;}catch(const std::exception& e){ROS_WARN_THROTTLE(2,"Missing command transform: %s",e.what());return;}
     if (h.land_engaged) return;  // control handed to PX4 for touchdown/stop
     mavros_msgs::PositionTarget msg;
     msg.header.stamp = ros::Time::now();
@@ -328,11 +331,13 @@ inline void subscribeOdometry(ros::NodeHandle& nh,Eigen::VectorXd& state_out,std
     h.odom_sub = nh.subscribe<nav_msgs::Odometry>(
         h.odom_topic, 10,
         [&state_out, &state_mutex, &h](const nav_msgs::Odometry::ConstPtr& msg) {
+            auto converted=h.normalize_odom?h.normalize_odom(*msg):std::optional<nav_msgs::Odometry>(*msg);
+            if(!converted)return;const auto& sample=*converted;
             std::lock_guard<std::mutex> lk(state_mutex);
-            const auto& p = msg->pose.pose.position;
-            const auto& q = msg->pose.pose.orientation;
-            const auto& v = msg->twist.twist.linear;
-            const auto& w = msg->twist.twist.angular;
+            const auto& p = sample.pose.pose.position;
+            const auto& q = sample.pose.pose.orientation;
+            const auto& v = sample.twist.twist.linear;
+            const auto& w = sample.twist.twist.angular;
             const Eigen::Vector4d attitude(q.w,q.x,q.y,q.z);
             const Eigen::VectorXd values=(Eigen::VectorXd(12)<<p.x,p.y,p.z,v.x,v.y,v.z,w.x,w.y,w.z,q.w,q.x,q.y).finished();
             if (!values.allFinite() || !attitude.allFinite() || attitude.norm()<1e-8) return;
@@ -341,7 +346,7 @@ inline void subscribeOdometry(ros::NodeHandle& nh,Eigen::VectorXd& state_out,std
             state_out(6)=q.w; state_out(7)=q.x;
             state_out(8)=q.y; state_out(9)=q.z;
             state_out(10)=w.x; state_out(11)=w.y; state_out(12)=w.z;
-            if(h.odom_topic=="/mavros/local_position/odom") state_out=planner_core::bodyOdometryToWorld(state_out);
+
             h.current = state_out;
             h.odom_received = true;
             h.last_odom = std::chrono::steady_clock::now();

@@ -32,9 +32,12 @@
   <arg name="max_relative_velocity_norm"        default="8.0"/>
 
   <!-- Drone state topics (MAVROS) -->
+  <arg name="world_frame" default="map"/>
+  <arg name="state_velocity_frame" default="body"/>
+  <arg name="target_velocity_frame" default="world"/>
+  <arg name="command_frame" default="map"/>
   <arg name="drone_odom_topic"                  default="/mavros/local_position/odom"/>
   <arg name="drone_pose_topic"                  default="/mavros/local_position/pose"/>
-  <arg name="body_relative_odom_topic"          default="/drone/body_relative_odom"/>
 
   <!-- Target topics -->
   <arg name="target_odom_topic"                 default="/target/odom"/>
@@ -108,9 +111,12 @@
     <param name="max_relative_vertical_abs"         type="double" value="$(arg max_relative_vertical_abs)"/>
     <param name="max_relative_velocity_norm"        type="double" value="$(arg max_relative_velocity_norm)"/>
 
+    <param name="world_frame" value="$(arg world_frame)"/>
+    <param name="state_velocity_frame" value="$(arg state_velocity_frame)"/>
+    <param name="target_velocity_frame" value="$(arg target_velocity_frame)"/>
+    <param name="command_frame" value="$(arg command_frame)"/>
     <param name="drone_odom_topic"                  value="$(arg drone_odom_topic)"/>
     <param name="drone_pose_topic"                  value="$(arg drone_pose_topic)"/>
-    <param name="body_relative_odom_topic"          value="$(arg body_relative_odom_topic)"/>
 
     <param name="target_odom_topic"                 value="$(arg target_odom_topic)"/>
     <param name="target_accel_topic"                value="$(arg target_accel_topic)"/>

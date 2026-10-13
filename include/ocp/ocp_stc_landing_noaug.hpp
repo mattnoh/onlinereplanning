@@ -1186,7 +1186,7 @@ inline OCPDescriptor descriptor() {
     d.default_mass_kg = MASS;
     d.warm_start = OCPDescriptor::WarmStart::Feedback;
     d.command_mode = OCPDescriptor::CommandMode::CmdFullState;
-    d.drone_odom_mode = OCPDescriptor::DroneOdomMode::Absolute;
+    d.coordinates = OCPDescriptor::Coordinates::TargetRelative;
     d.variable_dt = true;
     d.state_dim = 13;
     d.control_dim = 4;
@@ -1197,15 +1197,7 @@ inline OCPDescriptor descriptor() {
     d.control_names = OCPLoggerDefaults::getControlNames4D();
     d.extract_actual_state_row = OCPLoggerDefaults::getActualStateRow13D;
     d.make_hover_state = OCPLoggerDefaults::makeHoverState13D;
-    d.transform_state = [](const Eigen::VectorXd& x, const TargetSnapshot& t) {
-        if (t.valid) {
-            Eigen::VectorXd xr = x;
-            xr.segment(0, 3) -= t.position;
-            xr.segment(3, 3) -= t.velocity;
-            return xr;
-        }
-        return x;
-    };
+
     d.post_process_result = [](SolverResult& r, const TargetSnapshot& t) {
         r.is_relative_plan = t.valid;
         if (t.valid) {
@@ -1234,14 +1226,7 @@ inline OCPDescriptor descriptor() {
                                tgt_snapshot.acceleration);
         return std::any(ex);
     };
-    d.reconstruct_world_state = [](const Eigen::VectorXd& x, const TargetSnapshot& t) {
-        Eigen::VectorXd xw = x;
-        if (t.valid && xw.size() >= 6) {
-            xw.segment(0, 3) += t.position;
-            xw.segment(3, 3) += t.velocity;
-        }
-        return xw;
-    };
+
     d.sanitize_warm_control = [](Eigen::VectorXd& u) { clampWarmControl(u); };
     d.getSolverParams = getSolverParams;
     d.create = [](const OCPCreateArgs& a) {

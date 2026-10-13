@@ -3,7 +3,7 @@
 // internals; ROS adapters use the public Controller interface.
 #include "alipddp/alipddp.h"
 #include "dynamics/quad_6dof_target_frame.h"
-#include "ocp/ocp_stc_landing_mpc.hpp"
+#include "parameters.hpp"
 #include "optimal_control_problem.h"
 #include "planner_core/adapters.hpp"
 #include "planner_core/controller.hpp"
@@ -215,9 +215,7 @@ public:
             reject(out, "solver_unavailable", "ALIPDDP solver is unavailable");
             return out;
         }
-        const auto frame_check = validateFrameContract(
-            desc_, input.active_odom_mode, input.active_odom_topic,
-            config_.body_relative_odom_topic, config_.target_frame_odom_topic);
+        const auto frame_check = validateFrameContract(input.state_frame, config_.world_frame);
         if (!frame_check.ok) {
             reject(out, "frame_contract", frame_check.reason);
             return out;
@@ -235,7 +233,7 @@ public:
             mpc_->setNextWarmStartShift(handoff.warm_start_shift);
         }
 
-        const bool apply_registry_transform = (desc_.transform_state != nullptr);
+        const bool apply_registry_transform = (desc_.coordinates == OCPDescriptor::Coordinates::TargetRelative);
         const double pos_err = apply_registry_transform && x0.size() >= 3
             ? x0.segment(0, 3).norm()
             : absolutePositionError(input.current_state);
@@ -256,7 +254,7 @@ public:
         }
 
         const bool require_freeze_velocity =
-            config_.terminal_freeze_require_vel || (desc_.transform_state != nullptr);
+            config_.terminal_freeze_require_vel || (desc_.coordinates == OCPDescriptor::Coordinates::TargetRelative);
         const bool freeze_condition = (pos_err < config_.terminal_freeze_enter_pos) &&
             (!require_freeze_velocity || vel_err < config_.terminal_freeze_enter_vel);
         if (config_.enable_terminal_freeze && primed_ && freeze_condition) {
@@ -454,9 +452,7 @@ public:
             reject(out, "solver_unavailable", "ALIPDDP solver is unavailable");
             return out;
         }
-        const auto frame_check = validateFrameContract(
-            desc_, input.active_odom_mode, input.active_odom_topic,
-            config_.body_relative_odom_topic, config_.target_frame_odom_topic);
+        const auto frame_check = validateFrameContract(input.state_frame, config_.world_frame);
         if (!frame_check.ok) {
             reject(out, "frame_contract", frame_check.reason);
             return out;
@@ -765,25 +761,10 @@ private:
         return out;
     }
 
-    Eigen::VectorXd preparePredictedHandoffState(const Eigen::VectorXd& predicted_sample,
-                                                 const TargetSnapshot& target,
-                                                 int live_size) const {
-        const int out_size = std::min(live_size, static_cast<int>(predicted_sample.size()));
-        Eigen::VectorXd predicted_x0 = predicted_sample.head(out_size);
-        if ((desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative ||
-             desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative) &&
-            desc_.transform_state && predicted_sample.size() >= 10) {
-            Eigen::VectorXd base = predicted_sample.head(10);
-            Eigen::VectorXd refreshed = desc_.transform_state(base, target);
-            if (refreshed.size() >= live_size) {
-                predicted_x0 = refreshed.head(live_size);
-            } else if (refreshed.size() > 0) {
-                predicted_x0.head(std::min<int>(predicted_x0.size(), refreshed.size())) =
-                    refreshed.head(std::min<int>(predicted_x0.size(), refreshed.size()));
-            }
-        }
-        return predicted_x0;
+    Eigen::VectorXd preparePredictedHandoffState(const Eigen::VectorXd& predicted_sample,const TargetSnapshot&,int live_size) const {
+        return predicted_sample.head(std::min(live_size,static_cast<int>(predicted_sample.size())));
     }
+
 
     static TargetSnapshot predictTargetSnapshot(const TargetSnapshot& target, double dt) {
         TargetSnapshot predicted = target;
@@ -874,23 +855,12 @@ private:
     bool isSolveAcceptable(const SolverResult& result,
                            std::string& reason,
                            bool first_plan) const {
-        const bool relative_mode =
-            desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative ||
-            desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative;
-        if (first_plan && relative_mode &&
-            result.solve_time_ms * 0.001 > config_.max_first_solve_age_sec) {
-            reason = "first_solve_stale";
-            return false;
-        }
         if (!result.success || !validStructure(result)) {
             reason = "solve_failed";
             return false;
         }
         if (!std::isfinite(result.constraint_error) || result.constraint_error > config_.max_constraint_error) {
             reason = "constraint_error";
-            return false;
-        }
-        if (!validateRelativeTrajectorySanity(result.state_trajectory, reason)) {
             return false;
         }
         if (config_.skip_trajectory_validation || desc_.skip_trajectory_validation) {
@@ -905,52 +875,10 @@ private:
         return true;
     }
 
-    bool shouldKeepRejectedControlsSeed(const SolverResult& result) const {
-        const bool relative_mode =
-            desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative ||
-            desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative;
-        if (primed_ || !relative_mode || !result.success ||
-            result.solve_time_ms * 0.001 <= config_.max_first_solve_age_sec ||
-            result.constraint_error > config_.max_constraint_error) {
-            return false;
-        }
-        std::string sanity_reason;
-        return validateRelativeTrajectorySanity(result.state_trajectory, sanity_reason);
-    }
+    bool shouldKeepRejectedControlsSeed(const SolverResult&) const {return false;}
 
-    bool validateRelativeTrajectorySanity(const std::vector<Eigen::VectorXd>& X,
-                                          std::string& reason) const {
-        const bool relative_mode =
-            desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative ||
-            desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative;
-        if (!relative_mode) {
-            return true;
-        }
-        for (const auto& x : X) {
-            if (x.size() < 6) {
-                continue;
-            }
-            for (int i = 0; i < std::min<int>(x.size(), desc_.state_dim); ++i) {
-                if (!std::isfinite(x(i))) {
-                    reason = "relative_state_nonfinite";
-                    return false;
-                }
-            }
-            if (x.segment(0, 3).norm() > config_.max_relative_position_norm) {
-                reason = "relative_position_diverged";
-                return false;
-            }
-            if (std::abs(x(2)) > config_.max_relative_vertical_abs) {
-                reason = "relative_vertical_diverged";
-                return false;
-            }
-            if (x.segment(3, 3).norm() > config_.max_relative_velocity_norm) {
-                reason = "relative_velocity_diverged";
-                return false;
-            }
-        }
-        return true;
-    }
+
+
 
     RelativeTrajectoryStats relativeTrajectoryStats(const std::vector<Eigen::VectorXd>& X) const {
         RelativeTrajectoryStats stats;
@@ -1013,73 +941,18 @@ private:
     }
 
     std::vector<Eigen::VectorXd> makeTrajectoryForPublishing(const SolverResult& result) const {
-        if (desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative) {
-            if (!result.is_relative_plan ||
-                result.target_world_pos_trajectory.size() != result.state_trajectory.size() ||
-                result.target_world_vel_trajectory.size() != result.state_trajectory.size()) {
-                return result.state_trajectory;
-            }
-            std::vector<Eigen::VectorXd> traj_abs = result.state_trajectory;
-            for (int i = 0; i < static_cast<int>(traj_abs.size()); ++i) {
-                auto& s = traj_abs[i];
-                if (s.size() < desc_.state_dim) continue;
-                const double t_node = stateNodeTime(s, i);
-                const Eigen::AngleAxisd yaw_step(
-                    result.target_snapshot_omega.z() * t_node, Eigen::Vector3d::UnitZ());
-                const Eigen::Matrix3d R_WN =
-                    Quad6DOFVarTime<double>::calcC(result.target_snapshot_quat) *
-                    yaw_step.toRotationMatrix();
-                const Eigen::Matrix3d R_WB =
-                    R_WN * Quad6DOFVarTime<double>::calcC(s.segment(6, 4));
-                s.segment(0, 3) = result.target_world_pos_trajectory[i] - R_WB * s.segment(0, 3);
-                s.segment(3, 3) = result.target_world_vel_trajectory[i] + R_WB * s.segment(3, 3);
-            }
-            return traj_abs;
+        auto states=result.state_trajectory;
+        if(!result.is_relative_plan) return states;
+        for(int i=0;i<static_cast<int>(states.size());++i) {
+            const double time=stateNodeTime(states[i],i);
+            TargetSnapshot target;target.valid=true;
+            target.position=result.target_snapshot_pos+result.target_snapshot_vel*time+0.5*result.target_snapshot_acc*time*time;
+            target.velocity=result.target_snapshot_vel+result.target_snapshot_acc*time;
+            states[i]=reconstructWorldState(desc_,states[i],target);
         }
-        if (!result.is_relative_plan) {
-            return result.state_trajectory;
-        }
-        if (result.target_world_pos_trajectory.size() == result.state_trajectory.size() &&
-            result.target_world_vel_trajectory.size() == result.state_trajectory.size()) {
-            std::vector<Eigen::VectorXd> traj_abs = result.state_trajectory;
-            for (int i = 0; i < static_cast<int>(traj_abs.size()); ++i) {
-                auto& s = traj_abs[i];
-                if (s.size() < desc_.state_dim) continue;
-                if (desc_.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative &&
-                    result.target_snapshot_quat.size() == 4) {
-                    const double t_node = stateNodeTime(s, i);
-                    const Eigen::Vector4d q_wxyz = result.target_snapshot_quat;
-                    const Eigen::AngleAxisd yaw_step(
-                        result.target_snapshot_omega.z() * t_node, Eigen::Vector3d::UnitZ());
-                    const Eigen::Matrix3d R_WN =
-                        Quad6DOFVarTime<double>::calcC(q_wxyz) * yaw_step.toRotationMatrix();
-                    const Eigen::Vector3d p_N = s.segment(0, 3);
-                    const Eigen::Vector3d v_N = s.segment(3, 3);
-                    s.segment(0, 3) = result.target_world_pos_trajectory[i] + R_WN * p_N;
-                    s.segment(3, 3) = result.target_world_vel_trajectory[i] +
-                                      R_WN * (v_N + result.target_snapshot_omega.cross(p_N));
-                } else {
-                    s.segment(0, 3) += result.target_world_pos_trajectory[i];
-                    s.segment(3, 3) += result.target_world_vel_trajectory[i];
-                }
-            }
-            return traj_abs;
-        }
-        std::vector<Eigen::VectorXd> traj_abs = result.state_trajectory;
-        for (int i = 0; i < static_cast<int>(traj_abs.size()); ++i) {
-            auto& s = traj_abs[i];
-            if (s.size() < desc_.state_dim) continue;
-            const double t_node = stateNodeTime(s, i);
-            const Eigen::Vector3d tgt_p = result.target_snapshot_pos +
-                result.target_snapshot_vel * t_node +
-                0.5 * result.target_snapshot_acc * t_node * t_node;
-            const Eigen::Vector3d tgt_v = result.target_snapshot_vel +
-                result.target_snapshot_acc * t_node;
-            s.segment(0, 3) += tgt_p;
-            s.segment(3, 3) += tgt_v;
-        }
-        return traj_abs;
+        return states;
     }
+
 
     PlannerSolveLogData makeSolveLogData(const SolverResult& result, int solve_num) const {
         PlannerSolveLogData meta;
@@ -1096,9 +969,9 @@ private:
         meta.target_snapshot_beta = result.target_snapshot_beta;
         meta.target_world_pos_trajectory = result.target_world_pos_trajectory;
         meta.target_world_vel_trajectory = result.target_world_vel_trajectory;
-        meta.coord_mode = frameLabel(desc_.drone_odom_mode);
+        meta.coord_mode = frameLabel(desc_.coordinates);
         if (result.is_relative_plan) {
-            meta.coord_mode = "absolute_shifted";
+            meta.coord_mode = "relative";
         }
         return meta;
     }
@@ -1155,32 +1028,32 @@ class DirectMpcController {
     std::optional<PlannerCoreStepResult> completed_;
     std::optional<Policy> policy_,pending_;
     PlannerCoreConfig config_;
+    OCPDescriptor desc_;
     Clock::time_point last_request_{},last_apply_{};
-    Eigen::VectorXd last_u_=StcLandingMpcOCP::hover();
-    Eigen::VectorXd feedback_memory_=StcLandingMpcOCP::hover();
+    Eigen::VectorXd last_u_=(Eigen::Vector4d()<<9.81,0,0,0).finished();
+    Eigen::VectorXd feedback_memory_=(Eigen::Vector4d()<<9.81,0,0,0).finished();
     int memory_policy_=-1,memory_node_=-1;
     double lead_=0.35;
     int count_=0;
     AsyncCsvWriter controls_;
     static double seconds(Clock::time_point a,Clock::time_point b){return std::chrono::duration<double>(a-b).count();}
-    static Eigen::VectorXd relative(const Eigen::VectorXd& x,const TargetSnapshot& t){
-        Eigen::VectorXd r=x.head(13);r.head(3)-=t.position;r.segment<3>(3)-=t.velocity;return r;
-    }
+    Eigen::VectorXd relative(const Eigen::VectorXd& x,const TargetSnapshot& t) const {return prepareOcpState(desc_,x.head(13),t);}
+
     // Recompute the local quadratic DDP tracking backward pass at the
     // actual 50 Hz command interval. The optimizer's 10 Hz IPM gains carry
     // barrier curvature and previous-control memory; they are not a 50 Hz
     // physical feedback controller.
     static std::vector<Eigen::MatrixXd> commandGains(const OcpSolver::Result& r,
-                                                     StcLandingMpcOCP::Dynamics& dyn) {
-        constexpr int count=StcLandingMpcOCP::N*5;
-        Eigen::MatrixXd q=Eigen::MatrixXd::Zero(StcLandingMpcOCP::NX,StcLandingMpcOCP::NX);
+                                                     OCPDescriptor::MpcModel& dyn) {
+        const int count=dyn.horizon*5;
+        Eigen::MatrixXd q=Eigen::MatrixXd::Zero(dyn.nx,dyn.nx);
         q.diagonal().head(3)<<5,5,10;q.diagonal().segment(3,3)<<8,8,8;
         q.diagonal().segment(6,4).setConstant(50);q.diagonal().segment(10,3).setConstant(.5);
         Eigen::Matrix4d cost=Eigen::Matrix4d::Zero();cost.diagonal()<<.3,1.5,1.5,1.5;
         Eigen::MatrixXd p=10*q;std::vector<Eigen::MatrixXd> gains(count);
         for(int j=count-1;j>=0;--j){const int i=j/5;const double t=(j%5)*.02;
             auto x=dyn.flow(r.state_trajectory[i],r.control_trajectory[i],t,false).x;
-            auto linear=dyn.flow(x,r.control_trajectory[i],.02);
+            auto linear=dyn.flow(x,r.control_trajectory[i],.02,true);
             Eigen::MatrixXd s=.02*cost+linear.b.transpose()*p*linear.b;
             s.diagonal().array()+=1e-6;
             gains[j]=-s.ldlt().solve(linear.b.transpose()*p*linear.a);
@@ -1190,7 +1063,7 @@ class DirectMpcController {
         return gains;
     }
     void run() {
-        OcpSolver::Config cfg;cfg.ocp_type="stc_landing_mpc";cfg.n_shift=0;OcpSolver solver(cfg);
+        OcpSolver::Config cfg;cfg.ocp_type=config_.ocp_type;cfg.n_shift=0;OcpSolver solver(cfg);
         for(;;) {
             PlannerCoreInput input;Eigen::VectorXd applied,feedback_memory;double lead;int number,prior_node;std::optional<Policy> prior;
             {
@@ -1199,9 +1072,9 @@ class DirectMpcController {
             }
             try {
             const auto origin=input.now+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(lead));
-            Eigen::VectorXd x=Eigen::VectorXd::Zero(StcLandingMpcOCP::NX);x.head(13)=relative(input.current_state,input.target_snapshot);x.tail(4)=applied;
-            auto pred=std::make_shared<target_models::ConstantAccelPredictor>();pred->a=input.target_snapshot.acceleration;
-            StcLandingMpcOCP::Dynamics dyn(pred);
+            auto dyn=desc_.make_mpc_model(input.target_snapshot.acceleration);
+            Eigen::VectorXd x=Eigen::VectorXd::Zero(dyn.nx);x.head(13)=relative(input.current_state,input.target_snapshot);x.tail(4)=applied;
+
             // Project through the currently applied command over the measured
             // solve lead. High-rate feedback corrects prediction error.
             if(lead>0 && prior) {
@@ -1209,20 +1082,19 @@ class DirectMpcController {
                 int previous_node=prior_node;
                 for(double t=0;t<lead-1e-9;) {
                     const double h=std::min(0.02,lead-t);
-                    const double age=std::clamp(seconds(input.now,prior->origin)+t,0.0,StcLandingMpcOCP::N*StcLandingMpcOCP::DT-1e-6);
-                    const int i=static_cast<int>(age/StcLandingMpcOCP::DT);
-                    auto old_pred=std::make_shared<target_models::ConstantAccelPredictor>();old_pred->a=prior->acceleration;
-                    StcLandingMpcOCP::Dynamics old_dyn(old_pred);
-                    auto reference=old_dyn.flow(prior->result.state_trajectory[i],prior->result.control_trajectory[i],age-i*StcLandingMpcOCP::DT,false).x;
+                    const double age=std::clamp(seconds(input.now,prior->origin)+t,0.0,dyn.horizon*dyn.dt-1e-6);
+                    const int i=static_cast<int>(age/dyn.dt);
+                    auto old_dyn=desc_.make_mpc_model(prior->acceleration);
+                    auto reference=old_dyn.flow(prior->result.state_trajectory[i],prior->result.control_trajectory[i],age-i*dyn.dt,false).x;
                     reference.tail(4)=prior->result.state_trajectory[i].tail(4);
                     if(i!=previous_node){memory=predicted_control;previous_node=i;}
                     x.tail(4)=memory;
                     Eigen::VectorXd error=x-reference;error(13)=0;
                     if(x.segment<4>(6).dot(reference.segment<4>(6))<0)error.segment<4>(6)=-x.segment<4>(6)-reference.segment<4>(6);
-                    Eigen::VectorXd correction=prior->command_gains[std::min(static_cast<int>(age/.02),StcLandingMpcOCP::N*5-1)]*error;
+                    Eigen::VectorXd correction=prior->command_gains[std::min(static_cast<int>(age/.02),dyn.horizon*5-1)]*error;
                     correction(0)=std::clamp(correction(0),-3.0,3.0);
                     for(int j=1;j<4;++j)correction(j)=std::clamp(correction(j),-0.35,0.35);
-                    auto u=StcLandingMpcOCP::bounded(prior->result.control_trajectory[i]+correction);
+                    auto u=dyn.bounded(prior->result.control_trajectory[i]+correction);
                     for(int j=0;j<4;++j){const double limit=j==0?20:5;u(j)=std::clamp(u(j),predicted_control(j)-limit*h,predicted_control(j)+limit*h);}
                     x=dyn.flow(x,u,h,false).x;predicted_control=u;t+=h;
                 }
@@ -1233,9 +1105,9 @@ class DirectMpcController {
                 OcpSolver::WarmStartSnapshot warm;
                 const auto& old=prior->result;
                 const double age=std::max(0.0,seconds(origin,prior->origin));
-                for(int k=0;k<StcLandingMpcOCP::N;++k){
-                    double s=age/StcLandingMpcOCP::DT+k;int i=std::min(static_cast<int>(s),StcLandingMpcOCP::N-1);
-                    int j=std::min(i+1,StcLandingMpcOCP::N-1);double a=std::min(1.0,s-i);
+                for(int k=0;k<dyn.horizon;++k){
+                    double s=age/dyn.dt+k;int i=std::min(static_cast<int>(s),dyn.horizon-1);
+                    int j=std::min(i+1,dyn.horizon-1);double a=std::min(1.0,s-i);
                     warm.prev_U.push_back((1-a)*old.control_trajectory[i]+a*old.control_trajectory[j]);
                 }
                 // Factory rolls out these resampled controls from the live x0.
@@ -1251,17 +1123,17 @@ class DirectMpcController {
             out.solve_result.is_relative_plan=true;out.solve_result.target_snapshot_pos=input.target_snapshot.position;
             out.solve_result.target_snapshot_vel=input.target_snapshot.velocity;out.solve_result.target_snapshot_acc=input.target_snapshot.acceleration;
             bool valid=raw.success&&std::isfinite(raw.constraint_error)&&raw.constraint_error<=config_.max_constraint_error&&
-                raw.state_trajectory.size()==StcLandingMpcOCP::N+1&&raw.control_trajectory.size()==StcLandingMpcOCP::N&&raw.feedback_gains.size()==StcLandingMpcOCP::N;
-            for(const auto& v:raw.state_trajectory)valid=valid&&v.size()==StcLandingMpcOCP::NX&&v.allFinite()&&v.head(3).norm()<100&&v.segment(3,3).norm()<20;
+                raw.state_trajectory.size()==dyn.horizon+1&&raw.control_trajectory.size()==dyn.horizon&&raw.feedback_gains.size()==dyn.horizon;
+            for(const auto& v:raw.state_trajectory)valid=valid&&v.size()==dyn.nx&&v.allFinite()&&v.head(3).norm()<100&&v.segment(3,3).norm()<20;
             for(const auto& v:raw.control_trajectory)valid=valid&&v.size()==4&&v.allFinite();
-            for(const auto& k:raw.feedback_gains)valid=valid&&k.rows()==4&&k.cols()==StcLandingMpcOCP::NX&&k.allFinite();
+            for(const auto& k:raw.feedback_gains)valid=valid&&k.rows()==4&&k.cols()==dyn.nx&&k.allFinite();
             valid=valid&&seconds(Clock::now(),origin)<0.5;
             out.solve_accepted=valid;out.rejection_reason=valid ? "" : "direct_mpc_invalid_or_stale";
-            out.solve_log.ocp_dt=StcLandingMpcOCP::DT;out.solve_log.coord_mode="relative";
+            out.solve_log.ocp_dt=dyn.dt;out.solve_log.coord_mode="relative";
             out.solve_log.solve_num=number;out.solve_log.is_relative_plan=true;
             out.solve_log.target_snapshot_pos=input.target_snapshot.position;out.solve_log.target_snapshot_vel=input.target_snapshot.velocity;out.solve_log.target_snapshot_acc=input.target_snapshot.acceleration;
-            for(int i=0;i<static_cast<int>(raw.state_trajectory.size());++i){auto world=raw.state_trajectory[i];double t=lead+i*StcLandingMpcOCP::DT;
-                world.head(3)+=input.target_snapshot.position+input.target_snapshot.velocity*t+0.5*input.target_snapshot.acceleration*t*t;
+            for(int i=0;i<static_cast<int>(raw.state_trajectory.size());++i){auto world=raw.state_trajectory[i];double t=lead+i*dyn.dt;
+                TargetSnapshot target=input.target_snapshot;target.position+=target.velocity*t+0.5*target.acceleration*t*t;target.velocity+=target.acceleration*t;world=reconstructWorldState(desc_,world,target);
                 out.path.states.push_back(world.head(13));}
             std::vector<Eigen::MatrixXd> gains;
             if(valid) {gains=commandGains(raw,dyn);for(const auto& k:gains)valid=valid&&k.allFinite();}
@@ -1283,14 +1155,15 @@ class DirectMpcController {
 public:
     ~DirectMpcController(){stop();}
     void stop(){ {std::lock_guard<std::mutex> lock(mutex_);stop_=true;ready_.notify_all();} if(worker_.joinable())worker_.join(); }
-    void configure(const PlannerCoreConfig& c){stop();std::lock_guard<std::mutex> lock(mutex_);config_=c;stop_=false;busy_=false;
-        request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0.35;count_=0;last_u_=StcLandingMpcOCP::hover();feedback_memory_=last_u_;memory_policy_=-1;memory_node_=-1;
+    void configure(const PlannerCoreConfig& c){stop();std::lock_guard<std::mutex> lock(mutex_);config_=c;desc_=OCPRegistry::getDescriptor(c.ocp_type);if(!desc_.make_mpc_model)throw std::runtime_error("OCP lacks MPC model");stop_=false;busy_=false;
+        request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0.35;count_=0;last_u_=desc_.make_mpc_model(Eigen::Vector3d::Zero()).hover;feedback_memory_=last_u_;memory_policy_=-1;memory_node_=-1;
         worker_=std::thread([this]{run();});}
     void reset(){PlannerCoreConfig c; {std::lock_guard<std::mutex> lock(mutex_);c=config_;} configure(c);}
     void openControlLog(const std::string& path){controls_.open(path,"time,policy,age,nom_thrust,nom_roll,nom_pitch,nom_yaw,fb_thrust,fb_roll,fb_pitch,fb_yaw,thrust,roll,pitch,yaw,saturation,jump,feedback_limited,slew_limited,pos_error,vel_error\n");}
     PlannerCoreStepResult trySolve(const PlannerCoreInput& input){
         std::lock_guard<std::mutex> lock(mutex_);PlannerCoreStepResult out;
         if(completed_){out=std::move(*completed_);completed_.reset();}
+        if(!validateFrameContract(input.state_frame,config_.world_frame).ok){out.rejection_reason="frame_contract";return out;}
         if(input.current_state.size()<13||!input.current_state.allFinite()||!input.target_snapshot.valid||!input.target_snapshot.position.allFinite()||!input.target_snapshot.velocity.allFinite()||!input.target_snapshot.acceleration.allFinite()){out.rejection_reason="direct_mpc_invalid_state";return out;}
         auto rel=relative(input.current_state,input.target_snapshot);
         if(policy_&&config_.enable_terminal_freeze&&rel.head(3).norm()<config_.terminal_freeze_enter_pos&&rel.segment(3,3).norm()<config_.terminal_freeze_enter_vel){out.terminal_freeze_engaged=true;out.solve_accepted=false;out.rejection_reason="terminal_freeze_engaged";return out;}
@@ -1302,14 +1175,13 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);PlannerCoreStepResult out;
         if(pending_&&now>=pending_->origin){policy_=std::move(pending_);pending_.reset();}
         if(!policy_)return out;out.has_replay_sample=true;out.solve_num=policy_->number;
+        auto dyn=desc_.make_mpc_model(policy_->acceleration);
         const double age=seconds(now,policy_->origin);
-        if(age<0||age>=std::min(StcLandingMpcOCP::N*StcLandingMpcOCP::DT,comando_parameters::defaults.mpc.max_policy_age)||measured.size()<13||!measured.allFinite()||!target.valid||!target.position.allFinite()||!target.velocity.allFinite()){out.stale=true;return out;}
-        int i=std::min(static_cast<int>(age/StcLandingMpcOCP::DT),StcLandingMpcOCP::N-1);
+        if(age<0||age>=std::min(dyn.horizon*dyn.dt,comando_parameters::defaults.mpc.max_policy_age)||measured.size()<13||!measured.allFinite()||!target.valid||!target.position.allFinite()||!target.velocity.allFinite()){out.stale=true;return out;}
+        int i=std::min(static_cast<int>(age/dyn.dt),dyn.horizon-1);
         const auto& r=policy_->result;Eigen::VectorXd nominal=r.control_trajectory[i];
-        auto pred=std::make_shared<target_models::ConstantAccelPredictor>();
-        pred->a=policy_->acceleration;
-        StcLandingMpcOCP::Dynamics dyn(pred);
-        Eigen::VectorXd reference=dyn.flow(r.state_trajectory[i],nominal,age-i*StcLandingMpcOCP::DT,false).x;
+
+        Eigen::VectorXd reference=dyn.flow(r.state_trajectory[i],nominal,age-i*dyn.dt,false).x;
         reference.tail(4)=r.state_trajectory[i].tail(4);
         // The previous-control state belongs to the 0.1 s optimization
         // grid. Updating it every 0.02 s would apply its discrete DDP gain
@@ -1318,7 +1190,7 @@ public:
         Eigen::VectorXd live=reference;live.head(13)=relative(measured,target);live.tail(4)=feedback_memory_;
         if(live.segment<4>(6).dot(reference.segment<4>(6))<0)live.segment<4>(6)*=-1;
         Eigen::VectorXd delta=live-reference;delta(13)=0;
-        Eigen::VectorXd feedback=policy_->command_gains[std::min(static_cast<int>(age/.02),StcLandingMpcOCP::N*5-1)]*delta;
+        Eigen::VectorXd feedback=policy_->command_gains[std::min(static_cast<int>(age/.02),dyn.horizon*5-1)]*delta;
         // Bound the local-policy correction: DDP gains are only valid near
         // the nominal trajectory, particularly after rejected solves.
         if(!feedback.allFinite()){out.stale=true;return out;}
@@ -1327,7 +1199,7 @@ public:
         for(int j=1;j<4;++j)feedback(j)=std::clamp(feedback(j),-0.35,0.35);
         Eigen::VectorXd raw=nominal+feedback;
         if(!raw.allFinite()){out.stale=true;return out;}
-        Eigen::VectorXd u=StcLandingMpcOCP::bounded(raw);
+        Eigen::VectorXd u=dyn.bounded(raw);
         const bool saturated=(u-raw).norm()>1e-9;
         const Eigen::VectorXd before_slew=u;
         const double h=last_apply_==Clock::time_point{}?0.02:std::clamp(seconds(now,last_apply_),0.0,0.05);

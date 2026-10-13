@@ -28,7 +28,6 @@ def generate_launch_description():
         DeclareLaunchArgument('max_relative_vertical_abs', default_value='5.0'),
         DeclareLaunchArgument('max_relative_velocity_norm', default_value='8.0'),
 
-        DeclareLaunchArgument('body_relative_odom_topic', default_value='/drone/body_relative_odom'),
 
         DeclareLaunchArgument('target_odom_topic', default_value='/target/odom'),
         DeclareLaunchArgument('target_accel_topic', default_value='/target/accel'),
@@ -87,7 +86,6 @@ def generate_launch_description():
             'max_relative_vertical_abs': LaunchConfiguration('max_relative_vertical_abs'),
             'max_relative_velocity_norm': LaunchConfiguration('max_relative_velocity_norm'),
 
-            'body_relative_odom_topic': LaunchConfiguration('body_relative_odom_topic'),
 
             'target_odom_topic': LaunchConfiguration('target_odom_topic'),
             'target_accel_topic': LaunchConfiguration('target_accel_topic'),

@@ -10,6 +10,7 @@
 #include "planner_core/adapters.hpp"
 #include "planner_core/types.hpp"
 #include "platform/mavros.hpp"
+#include "platform/frame_normalizer.hpp"
 #include "platform/target_tracker.hpp"
 #include "platform/state_monitor.hpp"
 #include "trajectory_replayer.hpp"
@@ -64,10 +65,10 @@ public:
         open_loop_abort_on_divergence_    = runtime_cfg.open_loop_abort_on_divergence;
         open_loop_abort_max_z_error_m_    = runtime_cfg.open_loop_abort_max_z_error_m;
         open_loop_abort_max_vz_error_mps_ = runtime_cfg.open_loop_abort_max_vz_error_mps;
+        world_frame_ = runtime_cfg.world_frame;
+        drone_odom_topic_ = runtime_cfg.drone_odom_topic;
         target_odom_topic_               = runtime_cfg.target_odom_topic;
         target_accel_topic_              = runtime_cfg.target_accel_topic;
-        debug_body_relative_trace_       = runtime_cfg.debug_body_relative_trace;
-        body_relative_odom_topic_        = runtime_cfg.body_relative_odom_topic;
         seed_alpha_pos_                  = runtime_cfg.seed_alpha_pos;
         seed_alpha_vel_                  = runtime_cfg.seed_alpha_vel;
         seed_clamp_pos_cap_m_            = runtime_cfg.seed_clamp_pos_cap_m;
@@ -93,18 +94,25 @@ public:
             state_dim_               = desc.state_dim;
             control_dim_             = desc.control_dim;
             custom_make_hover_state_ = desc.make_hover_state;
-            applyOcpDroneOdomMode(false);
+            applyOcpCoordinates(false);
             setTerminalTarget(hover_target_);
             rebuildMpcSolver();
             is_configured_ = true;
         } else {
             ocp_dt_                  = 0.0;
-            drone_state_is_relative_ = false;
-            drone_odom_mode_         = OCPDescriptor::DroneOdomMode::Absolute;
-            drone_odom_topic_.clear();
+
             is_configured_           = false;
         }
 
+        frames_=std::make_shared<platform::FrameNormalizer>(world_frame_);
+        std::string velocity_frame,target_velocity_frame,command_frame;
+        nh_.param<std::string>("state_velocity_frame",velocity_frame,"body");
+        nh_.param<std::string>("target_velocity_frame",target_velocity_frame,"world");
+        nh_.param<std::string>("command_frame",command_frame,"map");
+        if((velocity_frame!="body"&&velocity_frame!="world")||(target_velocity_frame!="body"&&target_velocity_frame!="world"))throw std::runtime_error("velocity frame must be body or world");
+        mavros_handles_.odom_topic=drone_odom_topic_;
+        mavros_handles_.normalize_odom=[this,velocity_frame](const nav_msgs::Odometry& msg){return frames_->odometry(msg,velocity_frame=="body");};
+        mavros_handles_.command_to_local=[this,command_frame](const Eigen::VectorXd& x){return frames_->command(x,command_frame);};
         if (platform_ == "mavros") {
             platform::mavros::setup(
                 nh_, hover_thrust_param_,
@@ -119,7 +127,9 @@ public:
         platform::target_tracker::setup(
             nh_,
             target_odom_topic_, target_accel_topic_,
-            state_monitor_.targetState(), state_monitor_.targetMutex(), target_handles_);
+            state_monitor_.targetState(), state_monitor_.targetMutex(), target_handles_,
+            [this,target_velocity_frame](const nav_msgs::Odometry& msg){return frames_->odometry(msg,target_velocity_frame=="body");},
+            [this](const geometry_msgs::AccelStamped& msg){return frames_->acceleration(msg);});
 
         traj_pub_ = nh_.advertise<nav_msgs::Path>("/" + drone_name_ + "/planned_trajectory", 10);
 
@@ -140,7 +150,7 @@ public:
             ROS_WARN("Planner started UNCONFIGURED. Set ocp_type and mode params to start.");
         }
         ROS_INFO("Input state mode: %s (drone_odom_topic='%s')",
-            droneOdomModeName(drone_odom_mode_), drone_odom_topic_.c_str());
+            currentFrameLabel(), drone_odom_topic_.c_str());
     }
 
 private:
@@ -221,7 +231,7 @@ private:
                 state_dim_    = desc.state_dim;
                 control_dim_  = desc.control_dim;
                 custom_make_hover_state_ = desc.make_hover_state;
-                applyOcpDroneOdomMode(true);
+                applyOcpCoordinates(true);
                 if (n_replay_ == 0) n_replay_ = desc.default_n_replay;
             }
 
@@ -258,7 +268,7 @@ private:
             // without one silently lands on garbage. Hold the command (seq not
             // consumed) until /target/odom is fresh — it auto-starts once the
             // target publisher is up.
-            if (drone_odom_mode_ != OCPDescriptor::DroneOdomMode::Absolute) {
+            if (OCPRegistry::getDescriptor(ocp_type_).coordinates == OCPDescriptor::Coordinates::TargetRelative) {
                 bool target_fresh;
                 {
                     std::lock_guard<std::mutex> tlk(state_monitor_.targetMutex());
@@ -326,14 +336,8 @@ private:
     static const char* commandModeName(OCPDescriptor::CommandMode m) {
         return m == OCPDescriptor::CommandMode::CmdBodyRate ? "cmd_bodyrate" : "cmd_full_state";
     }
-    static const char* droneOdomModeName(OCPDescriptor::DroneOdomMode m) {
-        switch (m) {
-            case OCPDescriptor::DroneOdomMode::BodyFrameRelative:   return "body-frame-relative";
-            case OCPDescriptor::DroneOdomMode::TargetFrameRelative: return "target-frame-relative";
-            case OCPDescriptor::DroneOdomMode::AbsoluteShiftedTarget: return "absolute-shifted-target";
-            default: return "absolute";
-        }
-    }
+
+
 
     planner_core::Platform corePlatform() const { return planner_core::Platform::Mavros; }
 
@@ -350,25 +354,10 @@ private:
     }
 
     // ── OCP drone odom mode ───────────────────────────────────────────────────
-    void applyOcpDroneOdomMode(bool rebuild_subscriptions) {
-        if (ocp_type_.empty()) return;
-        const auto& desc = OCPRegistry::getDescriptor(ocp_type_);
-        const bool needs_relative =
-            (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative) ||
-            (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative);
-
-        std::string desired_topic;
-        if (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::BodyFrameRelative)
-            desired_topic = body_relative_odom_topic_;
-        else if (desc.drone_odom_mode == OCPDescriptor::DroneOdomMode::TargetFrameRelative)
-            desired_topic = target_frame_odom_topic_;
-
-        drone_odom_mode_         = desc.drone_odom_mode;
-        drone_state_is_relative_ = needs_relative;
-        drone_odom_topic_        = desired_topic;
-        mavros_handles_.odom_topic=desired_topic.empty()?"/mavros/local_position/odom":desired_topic;
-        if(rebuild_subscriptions && mavros_handles_.odom_sub) platform::mavros::subscribeOdometry(nh_,state_monitor_.droneState(),state_monitor_.stateMutex(),mavros_handles_);
+    void applyOcpCoordinates(bool) {
+        // OCP selection changes solver coordinates, never the estimator subscription.
     }
+
 
     // ── State / target access ─────────────────────────────────────────────────
     bool hasState() const {
@@ -403,18 +392,11 @@ private:
         return mavros_handles_.current;
     }
 
-    Eigen::VectorXd convertStateToAbsoluteFrame(const Eigen::VectorXd& state) const {
-        if (drone_state_is_relative_ || state.size() < state_dim_ ||
-            drone_odom_mode_ != OCPDescriptor::DroneOdomMode::AbsoluteShiftedTarget)
-            return state;
-        Eigen::VectorXd x_abs = state;
-        const auto [tgt_pos, tgt_vel] = state_monitor_.getTargetPositionVelocity();
-        x_abs.segment(0,3) += tgt_pos;
-        x_abs.segment(3,3) += tgt_vel;
-        return x_abs;
-    }
+    Eigen::VectorXd convertStateToAbsoluteFrame(const Eigen::VectorXd& state) const {return state;}
 
-    const char* currentFrameLabel() const { return planner_core::frameLabel(drone_odom_mode_); }
+
+    const char* currentFrameLabel() const {return ocp_type_.empty()?"absolute":planner_core::frameLabel(OCPRegistry::getDescriptor(ocp_type_).coordinates);}
+
 
     // ── Solver / MPC ──────────────────────────────────────────────────────────
     void setTerminalTarget(const Eigen::Vector3d& xyz) {
@@ -429,6 +411,7 @@ private:
     void rebuildMpcSolver() {
         if (solver_type_ != "alipddp") return;
         planner_core::PlannerCoreConfig core_cfg;
+        core_cfg.world_frame=world_frame_;
         core_cfg.ocp_type                = ocp_type_;
         core_cfg.platform                = corePlatform();
         core_cfg.solver_type             = solver_type_;
@@ -449,8 +432,6 @@ private:
         core_cfg.terminal_freeze_exit_pos  = terminal_freeze_exit_pos_;
         core_cfg.terminal_position_abs   = terminal_position_abs_;
         core_cfg.terminal_state          = terminal_state_;
-        core_cfg.body_relative_odom_topic  = body_relative_odom_topic_;
-        core_cfg.target_frame_odom_topic   = target_frame_odom_topic_;
         core_cfg.max_first_solve_age_sec   = max_first_solve_age_sec_;
         core_cfg.max_relative_position_norm = max_relative_position_norm_;
         core_cfg.max_relative_vertical_abs  = max_relative_vertical_abs_;
@@ -509,7 +490,7 @@ private:
             // MAVROS keepalive handled by heartbeat_timer in mavros.hpp
             return;
         }
-        if (drone_state_is_relative_) return;
+
 
         const Eigen::VectorXd x_now_abs = convertStateToAbsoluteFrame(getCurrentState());
         hover_controller::doHoverHoldTick(
@@ -524,12 +505,7 @@ private:
     }
 
     void holdHoverAndPause(const std::string& reason) {
-        if (drone_state_is_relative_) {
-            ROS_WARN("holdHoverAndPause(%s) in body-relative mode — pausing without world-frame hold.", reason.c_str());
-            command_paused_.store(true);
-            maintain_hover_hold_ = false;
-            return;
-        }
+
         hover_controller::enterHoverHold(
             reason, is_configured_, mass_kg_, state_dim_, custom_make_hover_state_,
             hasState(), convertStateToAbsoluteFrame(getCurrentState()),
@@ -575,11 +551,11 @@ private:
     void publishTrajectory(const std::vector<Eigen::VectorXd>& traj) {
         nav_msgs::Path path;
         path.header.stamp    = ros::Time::now();
-        path.header.frame_id = "world";
+        path.header.frame_id = world_frame_;
         for (const auto& s : traj) {
             if (s.size() < 10) continue;
             geometry_msgs::PoseStamped p;
-            p.header.frame_id = "world";
+            p.header.frame_id = world_frame_;
             p.pose.position.x = s(0); p.pose.position.y = s(1); p.pose.position.z = s(2);
             p.pose.orientation.w = s(6); p.pose.orientation.x = s(7);
             p.pose.orientation.y = s(8); p.pose.orientation.z = s(9);
@@ -706,10 +682,9 @@ private:
     planner_core::PlannerCoreInput makeCoreInput(const Eigen::VectorXd& state,
                                                  const TargetSnapshot& target_snapshot) {
         planner_core::PlannerCoreInput input;
+        input.state_frame=world_frame_;
         input.current_state       = state;
         input.target_snapshot     = target_snapshot;
-        input.active_odom_mode    = drone_odom_mode_;
-        input.active_odom_topic   = drone_odom_topic_;
         input.now                 = Clock::now();
         input.absolute_time_sec        = ros::Time::now().toSec();
         return input;
@@ -721,7 +696,7 @@ private:
         if (mode_ != "mpc" || command_paused_.load()) return;
         if (!hasState()) {
             ROS_WARN_THROTTLE(2.0, "Waiting for state... platform=%s relative_mode=%s odom_topic='%s'",
-                platform_.c_str(), drone_state_is_relative_ ? "true" : "false", drone_odom_topic_.c_str());
+                platform_.c_str(), "false", drone_odom_topic_.c_str());
             return;
         }
         if (!hasFreshTargetState()) {
@@ -909,7 +884,7 @@ private:
         const Eigen::VectorXd u_cmd = (step < static_cast<int>(ol_ref_U_.size()))
             ? ol_ref_U_[step] : Eigen::VectorXd::Zero(4);
 
-        if (!drone_state_is_relative_ && open_loop_abort_on_divergence_ && x_cmd.size() >= 6 && hasState()) {
+        if (open_loop_abort_on_divergence_ && x_cmd.size() >= 6 && hasState()) {
             const Eigen::VectorXd x_act = convertStateToAbsoluteFrame(getCurrentState());
             if (x_act.size() >= 6) {
                 const double ze  = std::abs(x_act(2) - x_cmd(2));
@@ -938,14 +913,11 @@ private:
 
     std::string ocp_type_, platform_, solver_type_, mode_, drone_name_;
     std::string land_action_ = "none";  // none | auto_land | disarm (per-profile rosparam)
-    bool drone_state_is_relative_ = false;
-    OCPDescriptor::DroneOdomMode drone_odom_mode_ = OCPDescriptor::DroneOdomMode::Absolute;
+    std::shared_ptr<platform::FrameNormalizer> frames_;
+    std::string world_frame_="world";
     std::string drone_odom_topic_;
-    std::string body_relative_odom_topic_  = "/drone/body_relative_odom";
-    std::string target_frame_odom_topic_   = "/drone/target_frame_odom";
     std::string target_odom_topic_         = "/target/odom";
     std::string target_accel_topic_        = "/target/accel";
-    bool debug_body_relative_trace_ = false;
 
     double seed_alpha_pos_            = 0.70;
     double seed_alpha_vel_            = 0.0;

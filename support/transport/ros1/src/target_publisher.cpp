@@ -7,12 +7,7 @@
 ///   /target/odom   (nav_msgs/Odometry)
 ///   /target/accel  (geometry_msgs/AccelStamped)
 ///
-/// Optional relative odometry outputs (controlled by planning_frame param):
-///   "shifted"      → /drone/relative_odometry
-///   "body_frame"   → /drone/body_relative_odom
-///   "target_frame" → /drone/target_frame_odom
-///
-/// Simulated relative sensing (orthogonal to planning_frame), two stages that
+/// Optional simulated sensing and target estimation
 /// talk only over a ROS topic so a real estimator can replace stage 1:
 ///   sim_relative_estimate=true  → stage 1 publishes the body-frame relative
 ///       target measurement on relative_estimate_topic
@@ -37,27 +32,19 @@
 namespace {
 constexpr double DEG2RAD = M_PI / 180.0;
 
-std::string normalizePlanningFrame(const std::string& raw) {
-    if (raw.empty() || raw == "none" || raw == "world") return "world";
-    if (raw == "shifted_world") return "shifted";
-    return raw;
-}
+
 }
 
 class TargetPublisherNode {
 public:
     explicit TargetPublisherNode(ros::NodeHandle& nh) : nh_(nh) {
-        std::string traj, frame_raw, drone_odom_mode_legacy;
+        std::string traj;
         nh_.param<std::string>("target_trajectory", traj, "circle");
         nh_.param<double>     ("target_yaw_rate",   target_yaw_rate_, 0.3);
         nh_.param<double>     ("publish_hz",         publish_hz_,      100.0);
-        nh_.param<std::string>("frame_id",           frame_id_,        "world");
+        nh_.param<std::string>("frame_id",           frame_id_,        "map");
         nh_.param<std::string>("drone_odom_topic",   drone_odom_topic_, "/drone/odom");
         nh_.param<std::string>("drone_pose_topic",   drone_pose_topic_, "/drone/pose");
-        nh_.param<std::string>("planning_frame",     frame_raw,        "world");
-        nh_.param<std::string>("drone_odom_mode",    drone_odom_mode_legacy, "");
-        nh_.param<bool>       ("debug_body_relative_trace", debug_body_relative_trace_, false);
-        nh_.param<std::string>("body_relative_input_angular_unit", body_relative_angular_unit_, "deg_s");
         nh_.param<std::string>("target_source",           target_source_,           "ground_truth");
         nh_.param<bool>       ("sim_relative_estimate",   sim_relative_estimate_,   false);
         nh_.param<bool>       ("sim_visibility_gate",     sim_visibility_gate_,     true);
@@ -80,13 +67,6 @@ public:
             drone_odom_twist_frame_ = "body";
         }
         synthesize_from_estimate_ = (target_source_ == "relative_estimate");
-
-        if (!frame_raw.empty())
-            drone_odom_mode_ = normalizePlanningFrame(frame_raw);
-        else if (!drone_odom_mode_legacy.empty())
-            drone_odom_mode_ = normalizePlanningFrame(drone_odom_mode_legacy);
-        else
-            drone_odom_mode_ = "world";
 
         target_trajectory_ = traj;
 
@@ -224,15 +204,9 @@ public:
             rel_estimate_pub_ = nh_.advertise<nav_msgs::Odometry>(relative_estimate_topic_, 10);
         }
 
-        if (drone_odom_mode_ == "shifted") {
-            abs_rel_odom_pub_ = nh_.advertise<nav_msgs::Odometry>("/drone/relative_odometry", 10);
-        } else if (drone_odom_mode_ == "body_frame") {
-            body_rel_odom_pub_ = nh_.advertise<nav_msgs::Odometry>("/drone/body_relative_odom", 10);
-        } else if (drone_odom_mode_ == "target_frame") {
-            target_frame_odom_pub_ = nh_.advertise<nav_msgs::Odometry>("/drone/target_frame_odom", 10);
-        }
 
-        if (drone_odom_mode_ != "world" || sim_relative_estimate_ || synthesize_from_estimate_) {
+
+        if (sim_relative_estimate_ || synthesize_from_estimate_) {
             drone_odom_sub_ = nh_.subscribe<nav_msgs::Odometry>(
                 drone_odom_topic_, 10,
                 [this](const nav_msgs::Odometry::ConstPtr& msg) {
@@ -240,7 +214,7 @@ public:
                     last_drone_odom_ = *msg; has_drone_odom_ = true;
                 });
         }
-        if (drone_odom_mode_ == "body_frame" || drone_odom_mode_ == "target_frame") {
+        if (sim_relative_estimate_ || synthesize_from_estimate_) {
             drone_pose_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>(
                 drone_pose_topic_, 10,
                 [this](const geometry_msgs::PoseStamped::ConstPtr& msg) {
@@ -254,8 +228,6 @@ public:
                                               &TargetPublisherNode::relativeEstimateCallback, this);
         }
 
-        ROS_INFO("[TargetPublisher] trajectory=%s  planning_frame=%s  %.0f Hz",
-            target_trajectory_.c_str(), drone_odom_mode_.c_str(), publish_hz_);
         ROS_INFO("[TargetPublisher] target_source=%s  sim_relative_estimate=%s  pad_z=%.3f"
                  "  rel_topic=%s  twist_frame=%s",
             target_source_.c_str(), sim_relative_estimate_ ? "true" : "false", pad_z_,
@@ -357,69 +329,11 @@ private:
             }
         }
 
-        if (drone_odom_mode_ == "shifted" && have_odom) {
-            nav_msgs::Odometry rel = drone_odom_copy;
-            rel.header.stamp = stamp; rel.header.frame_id = frame_id_; rel.child_frame_id = "drone_absolute_relative";
-            rel.pose.pose.position.x -= p.x(); rel.pose.pose.position.y -= p.y(); rel.pose.pose.position.z -= p.z();
-            rel.twist.twist.linear.x -= v.x(); rel.twist.twist.linear.y -= v.y(); rel.twist.twist.linear.z -= v.z();
-            abs_rel_odom_pub_.publish(rel);
-        }
 
-        if (drone_odom_mode_ == "body_frame" && have_odom && have_pose) {
-            const Eigen::Vector3d tgt_w(p.x(), p.y(), p.z());
-            const Eigen::Vector3d drn_w(drone_pose_copy.pose.position.x, drone_pose_copy.pose.position.y, drone_pose_copy.pose.position.z);
-            const Eigen::Vector3d drn_v(drone_odom_copy.twist.twist.linear.x, drone_odom_copy.twist.twist.linear.y, drone_odom_copy.twist.twist.linear.z);
-            Eigen::Quaterniond q(drone_pose_copy.pose.orientation.w, drone_pose_copy.pose.orientation.x,
-                                 drone_pose_copy.pose.orientation.y, drone_pose_copy.pose.orientation.z);
-            q.normalize();
-            const Eigen::Matrix3d R = q.toRotationMatrix();
-            const Eigen::Vector3d p_t_body = R.transpose() * (tgt_w - drn_w);
-            const Eigen::Vector3d v_d_body = R.transpose() * (drn_v - v);
-            const Eigen::Quaterniond q_NB = last_target_quat_.conjugate() * q;
 
-            nav_msgs::Odometry body_rel;
-            body_rel.header.stamp = stamp; body_rel.header.frame_id = "drone_body"; body_rel.child_frame_id = "body_relative";
-            body_rel.pose.pose.position.x = p_t_body.x(); body_rel.pose.pose.position.y = p_t_body.y(); body_rel.pose.pose.position.z = p_t_body.z();
-            body_rel.pose.pose.orientation.w = q_NB.w(); body_rel.pose.pose.orientation.x = q_NB.x();
-            body_rel.pose.pose.orientation.y = q_NB.y(); body_rel.pose.pose.orientation.z = q_NB.z();
-            body_rel.twist.twist.linear.x = v_d_body.x(); body_rel.twist.twist.linear.y = v_d_body.y(); body_rel.twist.twist.linear.z = v_d_body.z();
-            const double ang_scale = (body_relative_angular_unit_ == "rad_s") ? 1.0 : DEG2RAD;
-            body_rel.twist.twist.angular.x = drone_odom_copy.twist.twist.angular.x * ang_scale;
-            body_rel.twist.twist.angular.y = drone_odom_copy.twist.twist.angular.y * ang_scale;
-            body_rel.twist.twist.angular.z = drone_odom_copy.twist.twist.angular.z * ang_scale;
-            body_rel_odom_pub_.publish(body_rel);
 
-            if (debug_body_relative_trace_) {
-                ROS_INFO_THROTTLE(1.0, "[BodyRelTrace] pT=(%.3f,%.3f,%.3f) vdb=(%.3f,%.3f,%.3f)",
-                    p_t_body.x(), p_t_body.y(), p_t_body.z(),
-                    v_d_body.x(), v_d_body.y(), v_d_body.z());
-            }
-        }
 
-        if (drone_odom_mode_ == "target_frame" && have_odom && have_pose) {
-            const Eigen::Matrix3d R_NW = last_target_quat_.conjugate().toRotationMatrix();
-            const Eigen::Vector3d Om_N = R_NW * Eigen::Vector3d(0, 0, target_yaw_rate_);
-            const Eigen::Vector3d p_drone(drone_pose_copy.pose.position.x, drone_pose_copy.pose.position.y, drone_pose_copy.pose.position.z);
-            const Eigen::Vector3d v_drone(drone_odom_copy.twist.twist.linear.x, drone_odom_copy.twist.twist.linear.y, drone_odom_copy.twist.twist.linear.z);
-            const Eigen::Vector3d p_BN = R_NW * (p_drone - p);
-            const Eigen::Vector3d v_BN = R_NW * (v_drone - v) - Om_N.cross(p_BN);
-            Eigen::Quaterniond q_drn(drone_pose_copy.pose.orientation.w, drone_pose_copy.pose.orientation.x,
-                                     drone_pose_copy.pose.orientation.y, drone_pose_copy.pose.orientation.z);
-            q_drn.normalize();
-            const Eigen::Quaterniond q_NB = last_target_quat_.conjugate() * q_drn;
 
-            nav_msgs::Odometry tf_odom;
-            tf_odom.header.stamp = stamp; tf_odom.header.frame_id = "target_frame"; tf_odom.child_frame_id = "drone_in_target_frame";
-            tf_odom.pose.pose.position.x = p_BN.x(); tf_odom.pose.pose.position.y = p_BN.y(); tf_odom.pose.pose.position.z = p_BN.z();
-            tf_odom.pose.pose.orientation.w = q_NB.w(); tf_odom.pose.pose.orientation.x = q_NB.x();
-            tf_odom.pose.pose.orientation.y = q_NB.y(); tf_odom.pose.pose.orientation.z = q_NB.z();
-            tf_odom.twist.twist.linear.x = v_BN.x(); tf_odom.twist.twist.linear.y = v_BN.y(); tf_odom.twist.twist.linear.z = v_BN.z();
-            const double ang_scale = (body_relative_angular_unit_ == "rad_s") ? 1.0 : DEG2RAD;
-            tf_odom.twist.twist.angular.x = drone_odom_copy.twist.twist.angular.x * ang_scale;
-            tf_odom.twist.twist.angular.y = drone_odom_copy.twist.twist.angular.y * ang_scale;
-            tf_odom.twist.twist.angular.z = drone_odom_copy.twist.twist.angular.z * ang_scale;
-            target_frame_odom_pub_.publish(tf_odom);
-        }
     }
 
     void publishGroundTruth(const ros::Time& stamp,
@@ -560,9 +474,6 @@ private:
     std::string frame_id_ = "world";
     std::string drone_odom_topic_;
     std::string drone_pose_topic_;
-    std::string drone_odom_mode_ = "world";
-    bool debug_body_relative_trace_ = false;
-    std::string body_relative_angular_unit_ = "deg_s";
     std::string target_source_ = "ground_truth";
     bool        synthesize_from_estimate_ = false;
     bool        sim_relative_estimate_ = false;
@@ -598,7 +509,6 @@ private:
     }
 
     ros::Publisher  odom_pub_, accel_pub_;
-    ros::Publisher  abs_rel_odom_pub_, body_rel_odom_pub_, target_frame_odom_pub_;
     ros::Publisher  gt_odom_pub_, gt_accel_pub_, rel_estimate_pub_;
     ros::Subscriber drone_odom_sub_, drone_pose_sub_, rel_estimate_sub_;
     ros::Timer      timer_;

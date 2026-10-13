@@ -26,7 +26,7 @@ inline PlannerRuntimeConfig loadPlannerRuntimeConfig(rclcpp::Node* node) {
     node->declare_parameter("platform", cfg.platform);
     node->declare_parameter("solver", cfg.solver);
     node->declare_parameter("mode", cfg.mode);
-    
+
     // Used for Hover OCP
     node->declare_parameter("hover_target_x", cfg.hover_target_x);
     node->declare_parameter("hover_target_y", cfg.hover_target_y);
@@ -46,12 +46,13 @@ inline PlannerRuntimeConfig loadPlannerRuntimeConfig(rclcpp::Node* node) {
     node->declare_parameter("open_loop_abort_max_z_error_m", cfg.open_loop_abort_max_z_error_m);
     node->declare_parameter("open_loop_abort_max_vz_error_mps", cfg.open_loop_abort_max_vz_error_mps);
 
-    node->declare_parameter("body_relative_odom_topic", cfg.body_relative_odom_topic);
 
     // Topics for external target tracking.
+    if(cfg.platform=="mavros"){cfg.world_frame="map";cfg.drone_odom_topic="/mavros/local_position/odom";}
+    node->declare_parameter("world_frame",cfg.world_frame);
+    node->declare_parameter("drone_odom_topic",cfg.drone_odom_topic);
     node->declare_parameter("target_odom_topic", cfg.target_odom_topic);
     node->declare_parameter("target_accel_topic", cfg.target_accel_topic);
-    node->declare_parameter("debug_body_relative_trace", cfg.debug_body_relative_trace);
 
     node->declare_parameter("enable_terminal_freeze", cfg.enable_terminal_freeze);
     node->declare_parameter("terminal_freeze_enter_pos", cfg.terminal_freeze_enter_pos);
@@ -84,11 +85,11 @@ inline PlannerRuntimeConfig loadPlannerRuntimeConfig(rclcpp::Node* node) {
     cfg.open_loop_abort_max_z_error_m = node->get_parameter("open_loop_abort_max_z_error_m").as_double();
     cfg.open_loop_abort_max_vz_error_mps = node->get_parameter("open_loop_abort_max_vz_error_mps").as_double();
 
-    cfg.body_relative_odom_topic = node->get_parameter("body_relative_odom_topic").as_string();
 
+    cfg.world_frame=node->get_parameter("world_frame").as_string();
+    cfg.drone_odom_topic=node->get_parameter("drone_odom_topic").as_string();
     cfg.target_odom_topic = node->get_parameter("target_odom_topic").as_string();
     cfg.target_accel_topic = node->get_parameter("target_accel_topic").as_string();
-    cfg.debug_body_relative_trace = node->get_parameter("debug_body_relative_trace").as_bool();
 
     cfg.enable_terminal_freeze = node->get_parameter("enable_terminal_freeze").as_bool();
     cfg.terminal_freeze_enter_pos = node->get_parameter("terminal_freeze_enter_pos").as_double();

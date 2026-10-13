@@ -1,3 +1,5 @@
+#include <functional>
+#include <optional>
 /// Target state subscriptions: odometry and optional live acceleration.
 /// The OCP predictor consumes the latest position/velocity/acceleration snapshot.
 #pragma once
@@ -89,7 +91,9 @@ inline void setup(
     const std::string&                   accel_topic,
     TargetState&                         target_state,
     std::mutex&                          target_mutex,
-    Handles&                             handles)
+    Handles&                             handles,
+    std::function<std::optional<nav_msgs::msg::Odometry>(const nav_msgs::msg::Odometry&)> normalize_odom={},
+    std::function<std::optional<geometry_msgs::msg::AccelStamped>(const geometry_msgs::msg::AccelStamped&)> normalize_accel={})
 {
     rclcpp::SubscriptionOptions opts;
     opts.callback_group = callback_group;
@@ -97,29 +101,31 @@ inline void setup(
     // ── Odometry callback ────────────────────────────────────────────────────
     handles.odom_sub = node->create_subscription<nav_msgs::msg::Odometry>(
         odom_topic, 10,
-        [&target_state, &target_mutex, node](
+        [&target_state, &target_mutex, node,normalize_odom](
             const nav_msgs::msg::Odometry::SharedPtr msg)
         {
+            auto converted=normalize_odom?normalize_odom(*msg):std::optional<nav_msgs::msg::Odometry>(*msg);
+            if(!converted)return;const auto& sample=*converted;
             std::lock_guard<std::mutex> lk(target_mutex);
 
-            target_state.position << msg->pose.pose.position.x,
-                                     msg->pose.pose.position.y,
-                                     msg->pose.pose.position.z;
-            target_state.velocity << msg->twist.twist.linear.x,
-                                     msg->twist.twist.linear.y,
-                                     msg->twist.twist.linear.z;
+            target_state.position << sample.pose.pose.position.x,
+                                     sample.pose.pose.position.y,
+                                     sample.pose.pose.position.z;
+            target_state.velocity << sample.twist.twist.linear.x,
+                                     sample.twist.twist.linear.y,
+                                     sample.twist.twist.linear.z;
             Eigen::Vector3d prev_omega = target_state.angular_velocity;
-            target_state.angular_velocity << msg->twist.twist.angular.x,
-                                             msg->twist.twist.angular.y,
-                                             msg->twist.twist.angular.z;
-            target_state.orientation << msg->pose.pose.orientation.w,
-                                        msg->pose.pose.orientation.x,
-                                        msg->pose.pose.orientation.y,
-                                        msg->pose.pose.orientation.z;
+            target_state.angular_velocity << sample.twist.twist.angular.x,
+                                             sample.twist.twist.angular.y,
+                                             sample.twist.twist.angular.z;
+            target_state.orientation << sample.pose.pose.orientation.w,
+                                        sample.pose.pose.orientation.x,
+                                        sample.pose.pose.orientation.y,
+                                        sample.pose.pose.orientation.z;
 
             rclcpp::Time new_timestamp =
-                (msg->header.stamp.sec != 0 || msg->header.stamp.nanosec != 0)
-                    ? rclcpp::Time(msg->header.stamp)
+                (sample.header.stamp.sec != 0 || sample.header.stamp.nanosec != 0)
+                    ? rclcpp::Time(sample.header.stamp)
                     : node->now();
 
             if (target_state.odom_received) {
@@ -141,27 +147,29 @@ inline void setup(
     if (!accel_topic.empty()) {
         handles.accel_sub = node->create_subscription<geometry_msgs::msg::AccelStamped>(
             accel_topic, 10,
-            [&target_state, &target_mutex, node](
+            [&target_state, &target_mutex, node,normalize_accel](
                 const geometry_msgs::msg::AccelStamped::SharedPtr msg)
             {
-                std::lock_guard<std::mutex> lk(target_mutex);
+                auto converted=normalize_accel?normalize_accel(*msg):std::optional<geometry_msgs::msg::AccelStamped>(*msg);
+            if(!converted)return;const auto& sample=*converted;
+            std::lock_guard<std::mutex> lk(target_mutex);
 
-                target_state.acceleration << msg->accel.linear.x,
-                                             msg->accel.linear.y,
-                                             msg->accel.linear.z;
-                
+                target_state.acceleration << sample.accel.linear.x,
+                                             sample.accel.linear.y,
+                                             sample.accel.linear.z;
+
                 // Read optional angular acceleration from the AccelStamped message.
                 // This overrides the finite-difference estimate from odom if both exist.
-                target_state.angular_acceleration << msg->accel.angular.x,
-                                                     msg->accel.angular.y,
-                                                     msg->accel.angular.z;
-                
+                target_state.angular_acceleration << sample.accel.angular.x,
+                                                     sample.accel.angular.y,
+                                                     sample.accel.angular.z;
+
                 target_state.accel_received = true;
 
                 // Update ONLY the accel timestamp; odom timestamp is unaffected.
                 target_state.accel_timestamp =
-                    (msg->header.stamp.sec != 0 || msg->header.stamp.nanosec != 0)
-                        ? rclcpp::Time(msg->header.stamp)
+                    (sample.header.stamp.sec != 0 || sample.header.stamp.nanosec != 0)
+                        ? rclcpp::Time(sample.header.stamp)
                         : node->now();
             },
             opts);

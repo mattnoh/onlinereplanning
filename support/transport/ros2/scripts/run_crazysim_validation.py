@@ -49,7 +49,6 @@ try:
    with (out/'target.csv').open('w') as f:
     w=csv.writer(f);w.writerow(['t','x','y','z','vx','vy','vz','ax','ay','az']);w.writerows([[i*.01,.4*i*.01,0,.2,.4,0,0,0,0,0] for i in range(20001)])
    mode='trace_replay';args=f' -p trace_csv_path:={out}/target.csv'
-  target_command=f'{a.target} --ros-args -p target_mode:={mode} -p planning_frame:=world'+args
   if a.motion!='straight':spawn(target_command,'target')
   env='SZMUK_Z_STAGE=1.3 SZMUK_LOS_ALT_TRIG=1.2 MPC_RATE_LIMIT=.35 MPC_MAX_ITER=120 MPC_MAX_POLICY_AGE=2.0 MPC_HOVER_THRUST=.5460495715192737 MPC_RATE_TAU=.08' if a.direct else 'SZMUK_Z_STAGE=1.4 SZMUK_LOS_ALT_TRIG=1.2 SZMUK_RH_N=40 SZMUK_THH=.16'
   spawn(f'{env} {a.planner} --ros-args -p drone_name:=cf_1 -p platform:=crazyflie -p log_dir:={out} -p enable_logging:=true','planner')
