@@ -94,7 +94,6 @@ public:
             state_dim_               = desc.state_dim;
             control_dim_             = desc.control_dim;
             custom_make_hover_state_ = desc.make_hover_state;
-            applyOcpCoordinates(false);
             setTerminalTarget(hover_target_);
             rebuildMpcSolver();
             is_configured_ = true;
@@ -215,6 +214,7 @@ private:
         open_loop_abort_max_vz_error_mps_ = p_vze;
 
         if (profile_changed) {
+            feasible_start_since_={};
             if (new_ocp_type.empty()) {
                 ROS_ERROR("Cannot apply profile: ocp_type is not set.");
                 return;
@@ -231,7 +231,6 @@ private:
                 state_dim_    = desc.state_dim;
                 control_dim_  = desc.control_dim;
                 custom_make_hover_state_ = desc.make_hover_state;
-                applyOcpCoordinates(true);
                 if (n_replay_ == 0) n_replay_ = desc.default_n_replay;
             }
 
@@ -287,6 +286,19 @@ private:
                 std::abs(hover_thrust_d_ - comando_parameters::defaults.mpc.hover_thrust) > 1e-3) {
                 ROS_ERROR_THROTTLE(2.0,"Direct MPC requires hover_thrust to match MPC_HOVER_THRUST");
                 return;
+            }
+            const auto& descriptor=OCPRegistry::getDescriptor(ocp_type_);
+            if(descriptor.feasible_start) {
+                if(!hasState()||!hasFreshTargetState()){feasible_start_since_={};return;}
+                const auto target=getTargetSnapshot();
+                const auto live=planner_core::prepareOcpState(descriptor,getCurrentState(),target);
+                if(!hasState()||!hasFreshTargetState()||!descriptor.feasible_start(live)) {
+                    feasible_start_since_={};ROS_WARN_THROTTLE(2,"Waiting for feasible cone start for %s",ocp_type_.c_str());return;
+                }
+                if(feasible_start_since_==Clock::time_point{})feasible_start_since_=Clock::now();
+                if(std::chrono::duration<double>(Clock::now()-feasible_start_since_).count()<0.5)return;
+                nh_.setParam("prepare_cone_start",false);
+                ROS_INFO("Verified feasible cone start: r=[%.4f,%.4f,%.4f] v=%.4f omega=%.5f",live(0),live(1),live(2),live.segment<3>(3).norm(),live.segment<3>(10).norm());
             }
             last_command_seq_ = p_seq;
             if (platform_ == "mavros") platform::mavros::resetForNewFlight(mavros_handles_);
@@ -354,9 +366,6 @@ private:
     }
 
     // ── OCP drone odom mode ───────────────────────────────────────────────────
-    void applyOcpCoordinates(bool) {
-        // OCP selection changes solver coordinates, never the estimator subscription.
-    }
 
 
     // ── State / target access ─────────────────────────────────────────────────
@@ -486,6 +495,13 @@ private:
     }
 
     void publishPausedHoverHoldTick() {
+        bool prepare=false;nh_.param<bool>("prepare_cone_start",prepare,false);
+        if(prepare && hasState() && hasFreshTargetState()) {
+            auto hold=getCurrentState();const auto target=getTargetSnapshot();
+            hold.head<3>()=target.position+Eigen::Vector3d(0,0,1.85);hold.segment<3>(3)=target.velocity;
+            publishCommandAbsolute(hold,Eigen::VectorXd::Zero(4));return;
+        }
+
         if (command_mode_ == OCPDescriptor::CommandMode::CmdBodyRate) {
             // MAVROS keepalive handled by heartbeat_timer in mavros.hpp
             return;
@@ -913,6 +929,7 @@ private:
 
     std::string ocp_type_, platform_, solver_type_, mode_, drone_name_;
     std::string land_action_ = "none";  // none | auto_land | disarm (per-profile rosparam)
+    Clock::time_point feasible_start_since_{};
     std::shared_ptr<platform::FrameNormalizer> frames_;
     std::string world_frame_="world";
     std::string drone_odom_topic_;

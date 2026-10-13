@@ -322,7 +322,7 @@ def run_cell(motion, level, trial, outdir, args):
     cell = os.path.join(outdir, tag)
     if args.reuse and os.path.exists(os.path.join(cell, "solver_events.csv")):
         print(f"  [skip] {tag} (already complete)", flush=True)
-        return None
+        return json.load(open(os.path.join(cell,"cell.json")))
     os.makedirs(cell, exist_ok=True)
     seed = seed_for(motion, level, trial)
     logs = {k: os.path.join(cell, f"{k}.log") for k in
@@ -418,17 +418,24 @@ def run_cell(motion, level, trial, outdir, args):
         if not settled:
             result = "NO_SETTLE"
         else:
+            if getattr(args,"start","original")=="cone":
+                sh(f"{SETUP} && rosparam set /comando_planner/prepare_cone_start true",timeout=15)
+                time.sleep(3)
             # The target keeps moving during the ~25 s settle, so the bearing
             # we staged at is not the bearing at activation. Wait (briefly)
             # for it to come back into the screened band rather than firing
             # blind; record what we actually got either way.
-            beta, beta_wait = await_bearing(STAGE_ALPHA, BEARING_TOL,
-                                            BEARING_WAIT_S)
+            beta, beta_wait = (None,0.0) if getattr(args,"start","original")=="cone" else await_bearing(STAGE_ALPHA, BEARING_TOL,BEARING_WAIT_S)
             sh(f"{SETUP} && rosrun comando_planner apply_profile.sh /comando_planner "
                f"{args.profile}",
                timeout=60)
-            result = wait_landing(logs["planner"])
+            if getattr(args,"start","original")=="cone":
+                activation=wait_for("feasible cone activation",lambda: "Verified feasible cone start" in open(logs["planner"]).read(),30,poll=.25)
+                result=wait_landing(logs["planner"]) if activation<30 else "NO_FEASIBLE_START"
+            else:
+                result = wait_landing(logs["planner"])
     except Exception as e:                        # keep the campaign alive
+        print(f"  [error] {e}",flush=True)
         result = f"HARNESS_FAILED:{type(e).__name__}"
         z = vz = float("nan")
     finally:
@@ -452,7 +459,7 @@ def run_cell(motion, level, trial, outdir, args):
             shutil.move(f, os.path.join(cell, b))
 
     meta = dict(motion=motion, uncertainty=level, trial=trial, seed=seed,
-                profile=args.profile, hover_thrust=args.hover_thrust,
+                profile=args.profile, hover_thrust=args.hover_thrust, start=getattr(args,"start","original"),
                 stage_xy=[round(hx,3), round(hy,3)] if "hx" in dir() else None,
                 result=result, settle_z=z, settle_vz=vz, teardown=clean,
                 # Geometry actually achieved at activation. stage_alpha is what
@@ -476,6 +483,7 @@ def main():
     ap.add_argument("--trials", type=int, default=4)
     ap.add_argument("--out", default=None)
     ap.add_argument("--reuse", action="store_true")
+    ap.add_argument("--start", choices=("original","cone"),default="original",help="cone: target-following preparation and measured initial-feasibility gate")
     ap.add_argument("--profile", default=os.path.join(PKG,"config/ros1/profile_stc_landing_noaug_sitl.yaml"))
     ap.add_argument("--hover-thrust", type=float, default=0.3)
     ap.add_argument("--stc-z-stage", type=float, default=1.55)
@@ -507,6 +515,8 @@ def main():
                 for row in rows:
                     w.writerow({k: v for k, v in row.items()
                                 if k not in ("sigma", "motion_params")})
+            if r["result"]!="LANDED" or r["teardown"]!="CLEAN":
+                raise SystemExit(f"Stopped after {m}: {r['result']} / {r['teardown']}")
     print(f"\ncampaign complete -> {out}")
 
 

@@ -16,6 +16,9 @@ public:
     FrameNormalizer(rclcpp::Node* node,std::string world):node_(node),buffer_(node->get_clock()),listener_(buffer_),world_(std::move(world)){}
     Eigen::VectorXd state(const Eigen::VectorXd& x,const std::string& frame,const rclcpp::Time& stamp,bool body=false) {
         if(frame.empty())throw std::runtime_error("estimator frame_id is empty");
+        const double age=(node_->now()-stamp).seconds();
+        if(stamp.nanoseconds()==0||age>.2||age<-.001)throw std::runtime_error("missing, stale or future estimator timestamp");
+
         Eigen::Quaterniond rotation=Eigen::Quaterniond::Identity();Eigen::Vector3d translation=Eigen::Vector3d::Zero();
         if(frame!=world_) {
             auto tf=buffer_.lookupTransform(world_,frame,stamp,rclcpp::Duration::from_seconds(0));

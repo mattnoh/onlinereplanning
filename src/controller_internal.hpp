@@ -233,6 +233,7 @@ public:
             mpc_->setNextWarmStartShift(handoff.warm_start_shift);
         }
 
+        if(!primed_ && desc_.feasible_start && !desc_.feasible_start(x0)) {reject(out,"initial_state_infeasible","Initial state violates ordinary landing constraints");return out;}
         const bool apply_registry_transform = (desc_.coordinates == OCPDescriptor::Coordinates::TargetRelative);
         const double pos_err = apply_registry_transform && x0.size() >= 3
             ? x0.segment(0, 3).norm()
@@ -1044,7 +1045,7 @@ class DirectMpcController {
     // barrier curvature and previous-control memory; they are not a 50 Hz
     // physical feedback controller.
     static std::vector<Eigen::MatrixXd> commandGains(const OcpSolver::Result& r,
-                                                     OCPDescriptor::MpcModel& dyn) {
+                                                     OCPDescriptor::Model& dyn) {
         const int count=dyn.horizon*5;
         Eigen::MatrixXd q=Eigen::MatrixXd::Zero(dyn.nx,dyn.nx);
         q.diagonal().head(3)<<5,5,10;q.diagonal().segment(3,3)<<8,8,8;
@@ -1072,7 +1073,7 @@ class DirectMpcController {
             }
             try {
             const auto origin=input.now+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(lead));
-            auto dyn=desc_.make_mpc_model(input.target_snapshot.acceleration);
+            auto dyn=desc_.make_model(input.target_snapshot.acceleration);
             Eigen::VectorXd x=Eigen::VectorXd::Zero(dyn.nx);x.head(13)=relative(input.current_state,input.target_snapshot);x.tail(4)=applied;
 
             // Project through the currently applied command over the measured
@@ -1084,7 +1085,7 @@ class DirectMpcController {
                     const double h=std::min(0.02,lead-t);
                     const double age=std::clamp(seconds(input.now,prior->origin)+t,0.0,dyn.horizon*dyn.dt-1e-6);
                     const int i=static_cast<int>(age/dyn.dt);
-                    auto old_dyn=desc_.make_mpc_model(prior->acceleration);
+                    auto old_dyn=desc_.make_model(prior->acceleration);
                     auto reference=old_dyn.flow(prior->result.state_trajectory[i],prior->result.control_trajectory[i],age-i*dyn.dt,false).x;
                     reference.tail(4)=prior->result.state_trajectory[i].tail(4);
                     if(i!=previous_node){memory=predicted_control;previous_node=i;}
@@ -1155,8 +1156,8 @@ class DirectMpcController {
 public:
     ~DirectMpcController(){stop();}
     void stop(){ {std::lock_guard<std::mutex> lock(mutex_);stop_=true;ready_.notify_all();} if(worker_.joinable())worker_.join(); }
-    void configure(const PlannerCoreConfig& c){stop();std::lock_guard<std::mutex> lock(mutex_);config_=c;desc_=OCPRegistry::getDescriptor(c.ocp_type);if(!desc_.make_mpc_model)throw std::runtime_error("OCP lacks MPC model");stop_=false;busy_=false;
-        request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0.35;count_=0;last_u_=desc_.make_mpc_model(Eigen::Vector3d::Zero()).hover;feedback_memory_=last_u_;memory_policy_=-1;memory_node_=-1;
+    void configure(const PlannerCoreConfig& c){stop();std::lock_guard<std::mutex> lock(mutex_);config_=c;desc_=OCPRegistry::getDescriptor(c.ocp_type);if(!desc_.make_model)throw std::runtime_error("OCP lacks MPC model");stop_=false;busy_=false;
+        request_.reset();completed_.reset();policy_.reset();pending_.reset();last_request_={};last_apply_={};lead_=0.35;count_=0;last_u_=desc_.make_model(Eigen::Vector3d::Zero()).hover;feedback_memory_=last_u_;memory_policy_=-1;memory_node_=-1;
         worker_=std::thread([this]{run();});}
     void reset(){PlannerCoreConfig c; {std::lock_guard<std::mutex> lock(mutex_);c=config_;} configure(c);}
     void openControlLog(const std::string& path){controls_.open(path,"time,policy,age,nom_thrust,nom_roll,nom_pitch,nom_yaw,fb_thrust,fb_roll,fb_pitch,fb_yaw,thrust,roll,pitch,yaw,saturation,jump,feedback_limited,slew_limited,pos_error,vel_error\n");}
@@ -1166,6 +1167,7 @@ public:
         if(!validateFrameContract(input.state_frame,config_.world_frame).ok){out.rejection_reason="frame_contract";return out;}
         if(input.current_state.size()<13||!input.current_state.allFinite()||!input.target_snapshot.valid||!input.target_snapshot.position.allFinite()||!input.target_snapshot.velocity.allFinite()||!input.target_snapshot.acceleration.allFinite()){out.rejection_reason="direct_mpc_invalid_state";return out;}
         auto rel=relative(input.current_state,input.target_snapshot);
+        if(!policy_&&desc_.feasible_start&&!desc_.feasible_start(rel)){out.rejection_reason="initial_state_infeasible";return out;}
         if(policy_&&config_.enable_terminal_freeze&&rel.head(3).norm()<config_.terminal_freeze_enter_pos&&rel.segment(3,3).norm()<config_.terminal_freeze_enter_vel){out.terminal_freeze_engaged=true;out.solve_accepted=false;out.rejection_reason="terminal_freeze_engaged";return out;}
         if(!busy_&&(last_request_==Clock::time_point{}||seconds(input.now,last_request_)>=0.1)){
             request_=input;busy_=true;last_request_=input.now;ready_.notify_one();}
@@ -1175,7 +1177,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);PlannerCoreStepResult out;
         if(pending_&&now>=pending_->origin){policy_=std::move(pending_);pending_.reset();}
         if(!policy_)return out;out.has_replay_sample=true;out.solve_num=policy_->number;
-        auto dyn=desc_.make_mpc_model(policy_->acceleration);
+        auto dyn=desc_.make_model(policy_->acceleration);
         const double age=seconds(now,policy_->origin);
         if(age<0||age>=std::min(dyn.horizon*dyn.dt,comando_parameters::defaults.mpc.max_policy_age)||measured.size()<13||!measured.allFinite()||!target.valid||!target.position.allFinite()||!target.velocity.allFinite()){out.stale=true;return out;}
         int i=std::min(static_cast<int>(age/dyn.dt),dyn.horizon-1);

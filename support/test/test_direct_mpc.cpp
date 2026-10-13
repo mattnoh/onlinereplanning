@@ -12,6 +12,9 @@ int main(){try{
     auto dyn=std::make_shared<O::Dynamics>(pred);
     Eigen::VectorXd x=Eigen::VectorXd::Zero(O::NX);x<<.4,-.3,1.3,.2,.1,-.1,.99,.02,-.03,.01,.05,-.04,.02,.4,9.81,0,0,0;
     x.segment<4>(6).normalize();auto u=O::hover();u.tail(3)<<.08,-.06,.02;
+    auto model=OCPRegistry::getDescriptor("stc_landing_mpc").make_model(pred->a);
+    auto direct=dyn->flow(x,u,O::DT,true);auto through_interface=model.flow(x,u,O::DT,true);
+    check((direct.x-through_interface.x).norm()<1e-12 && (direct.a-through_interface.a).norm()<1e-12 && (direct.b-through_interface.b).norm()<1e-12,"MPC model interface must preserve dynamics and Jacobians");
     const auto a=dyn->fx(x,u), b=dyn->fu(x,u);double maxerr=0;double h=1e-6;
     for(int j=0;j<O::NX+O::NU;++j){auto xp=x,xm=x,up=u,um=u;
         if(j<O::NX){xp(j)+=h;xm(j)-=h;}else{up(j-O::NX)+=h;um(j-O::NX)-=h;}

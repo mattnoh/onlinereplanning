@@ -212,7 +212,13 @@ def convert(bag_path: Path, out_dir: Path, t0: float | None = None,
         tgt, rxyz, rvxyz = tgt[:end], rxyz[:end], rvxyz[:end]
 
     c = resolve_constants()
-    a_land, a_stage, a_los = compute_triggers(rxyz, c)
+    profile=out_dir / "landing_profile.yaml"
+    ordinary=profile.exists() and any(line.strip().startswith("ocp_type: landing_") for line in profile.read_text().splitlines())
+    c["ordinary_constraints"]=float(ordinary)
+    if ordinary:
+        a_land=np.ones(len(t));a_los=np.ones(len(t));a_stage=np.zeros(len(t))
+    else:
+        a_land, a_stage, a_los = compute_triggers(rxyz, c)
 
     header = ("t_acc,x,y,z,vx,vy,vz,qw,qx,qy,qz,wx,wy,wz,fz_B,"
               "tx,ty,tz,tvx,tvy,tvz,rx,ry,rz,rvx,rvy,rvz,"

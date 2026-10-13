@@ -1,0 +1,5 @@
+# Ordinary inequalities, active throughout landing; feasible cone start required.
+ocp_type: landing_mpc
+mode: mpc
+n_replay: 1
+land_action: force_disarm

@@ -106,7 +106,6 @@ public:
                 control_dim_ = desc.control_dim;
                 custom_make_hover_state_ = desc.make_hover_state;
             }
-            applyOcpCoordinates(false);
             setTerminalTarget(hover_target_);
             logging_initialized_=false;
             rebuildMpcSolver();
@@ -130,8 +129,8 @@ public:
         if((velocity_frame!="world"&&velocity_frame!="body")||(target_velocity_frame!="world"&&target_velocity_frame!="body"))throw std::runtime_error("velocity frame must be body or world");
         mavros_handles_.odom_topic=drone_odom_topic_.empty()?"/mavros/local_position/odom":drone_odom_topic_;
         mavros_handles_.normalize_odom=[this,velocity_frame](const nav_msgs::msg::Odometry& msg){return frames_->odometry(msg,velocity_frame=="body");};
-        const auto command_frame=declare_parameter<std::string>("command_frame","map");
-        mavros_handles_.command_to_local=[this,command_frame](const Eigen::VectorXd& x){return frames_->command(x,command_frame);};
+        command_frame_=declare_parameter<std::string>("command_frame",platform_=="mavros"?"map":"world");
+        mavros_handles_.command_to_local=[this](const Eigen::VectorXd& x){return frames_->command(x,command_frame_);};
         cf_handles_.normalize_odom=mavros_handles_.normalize_odom;
         cf_handles_.normalize_pose=[this](const nav_msgs::msg::Odometry& msg){return frames_->odometry(msg,false);};
         if (platform_ == "crazyflie") {
@@ -358,9 +357,6 @@ private:
         return marker;
     }
 
-    void applyOcpCoordinates(bool) {
-        // OCP selection changes solver coordinates, never the estimator subscription.
-    }
 
 
     void transitionOpenLoopToHold(const std::string& reason) {
@@ -545,7 +541,7 @@ private:
             return;
         }
         if (platform_ == "crazyflie") {
-            platform::crazyflie::publishCommand(this, cf_handles_, s_world, u, mass_kg_);
+            try{platform::crazyflie::publishCommand(this, cf_handles_, frames_->command(s_world,command_frame_), u, mass_kg_);}catch(const std::exception& e){RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),2000,"Missing command frame: %s",e.what());}
         } else if (platform_ == "mavros") {
             platform::mavros::publishFullStateCommand(mavros_handles_, s_world);
         }
@@ -1021,7 +1017,6 @@ private:
                 state_dim_ = desc.state_dim;
                 control_dim_ = desc.control_dim;
                 custom_make_hover_state_ = desc.make_hover_state;
-                applyOcpCoordinates(true);
                 if (n_replay_ == 0) {
                     n_replay_ = desc.default_n_replay;
                 }
@@ -1255,7 +1250,7 @@ private:
         } else if (cmd.kind == planner_core::CommandKind::BodyRate && platform_ == "mavros") {
             platform::mavros::publishBodyRateCommand(mavros_handles_, cmd.control);
         } else if (cmd.kind == planner_core::CommandKind::FullState && platform_ == "crazyflie") {
-            platform::crazyflie::publishCommand(this, cf_handles_, cmd.state, cmd.control, mass_kg_);
+            try{platform::crazyflie::publishCommand(this, cf_handles_, frames_->command(cmd.state,command_frame_), cmd.control, mass_kg_);}catch(const std::exception& e){RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),2000,"Missing command frame: %s",e.what());}
         } else if (cmd.kind == planner_core::CommandKind::FullState && platform_ == "mavros") {
             platform::mavros::publishFullStateCommand(mavros_handles_, cmd.state);
         }
@@ -1413,6 +1408,7 @@ private:
 
     std::string ocp_type_, platform_, solver_type_, mode_, drone_name_;
     std::shared_ptr<platform::FrameNormalizer> frames_;
+    std::string command_frame_="world";
     std::string world_frame_="world";
     std::string drone_odom_topic_;
     std::string target_odom_topic_ = "/target/odom";

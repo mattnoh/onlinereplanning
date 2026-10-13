@@ -285,15 +285,16 @@ struct OCPDescriptor {
     std::function<void(Eigen::VectorXd&)> sanitize_warm_control;
 
     struct Flow { Eigen::VectorXd x; Eigen::MatrixXd a, b; };
-    struct MpcModel {
+    struct Model {
         int nx = 0, nu = 4, horizon = 0;
         double dt = 0.1;
         std::function<Flow(const Eigen::VectorXd&, const Eigen::VectorXd&, double, bool)> flow;
         std::function<Eigen::VectorXd(Eigen::VectorXd)> bounded;
         Eigen::VectorXd hover;
     };
-    std::function<MpcModel(const Eigen::Vector3d&)> make_mpc_model;
+    std::function<Model(const Eigen::Vector3d&)> make_model;
 
+    std::function<bool(const Eigen::VectorXd&)> feasible_start;
     std::function<Param()> getSolverParams;
     std::function<std::shared_ptr<OptimalControlProblem<double>>(const OCPCreateArgs&)>
         create;

@@ -14,6 +14,9 @@ public:
     explicit FrameNormalizer(std::string world):world_(std::move(world)){}
     Eigen::VectorXd state(const Eigen::VectorXd& x,const std::string& frame,const ros::Time& stamp,bool body=false) {
         if(frame.empty())throw std::runtime_error("estimator frame_id is empty");
+        const double age=(ros::Time::now()-stamp).toSec();
+        if(stamp.isZero()||age>.2||age<-.001)throw std::runtime_error("missing, stale or future estimator timestamp");
+
         Eigen::Quaterniond rotation=Eigen::Quaterniond::Identity();Eigen::Vector3d translation=Eigen::Vector3d::Zero();
         if(frame!=world_) {
             auto tf=buffer_.lookupTransform(world_,frame,stamp,ros::Duration(0));

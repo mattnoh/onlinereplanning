@@ -1018,10 +1018,10 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
     problem->setInitialState(N,x);problem->setTerminalCost(std::make_shared<Terminal>());return problem;
 }
 inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=true; d.state_dim=13; d.control_dim=4; d.skip_altitude_validation=true; d.skip_trajectory_validation=true; d.coordinates=OCPDescriptor::Coordinates::TargetRelative; d.log_state_headers=OCPLoggerDefaults::getStateHeaders13D(); d.state_names=OCPLoggerDefaults::getStateNames13D(); d.extract_actual_state_row=OCPLoggerDefaults::getActualStateRow13D; d.make_hover_state=OCPLoggerDefaults::makeHoverState13D;d.name="stc_landing_mpc";d.execution_mode=planner_core::ExecutionMode::DirectMpc;d.dt=DT;d.variable_dt=false;
-    d.make_mpc_model=[](const Eigen::Vector3d& accel) {
+    d.make_model=[](const Eigen::Vector3d& accel) {
         auto pred=std::make_shared<Ref::ConstantAccelPredictor>(); pred->a=accel;
         auto dynamics=std::make_shared<Dynamics>(pred);
-        OCPDescriptor::MpcModel model; model.nx=NX;model.nu=NU;model.horizon=N;model.dt=DT;
+        OCPDescriptor::Model model; model.nx=NX;model.nu=NU;model.horizon=N;model.dt=DT;
         model.hover=hover();model.bounded=bounded;
         model.flow=[dynamics](const Eigen::VectorXd& x,const Eigen::VectorXd& u,double t,bool jac) {
             auto f=dynamics->flow(x,u,t,jac);return OCPDescriptor::Flow{f.x,f.a,f.b};

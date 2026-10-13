@@ -1,3 +1,5 @@
+#include "ocp/ocp_landing_rh.hpp"
+#include "ocp/ocp_landing_mpc.hpp"
 #include "ocp/ocp_hover.hpp"
 #include "ocp/ocp_stc_landing_noaug.hpp"
 #include "ocp/ocp_stc_landing_mpc.hpp"
@@ -9,6 +11,8 @@ namespace OCPRegistry {
 const std::map<std::string, OCPDescriptor>& getTable() {
     static const std::map<std::string, OCPDescriptor> table = {
         {"hover", HoverOCP::descriptor()},
+        {"landing_rh", LandingRhOCP::descriptor()},
+        {"landing_mpc", LandingMpcOCP::descriptor()},
         {"stc_landing_noaug", StcLandingNoAugOCP::descriptor()},
         {"stc_landing_mpc", StcLandingMpcOCP::descriptor()},
     };

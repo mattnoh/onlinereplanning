@@ -1228,6 +1228,20 @@ inline OCPDescriptor descriptor() {
     };
 
     d.sanitize_warm_control = [](Eigen::VectorXd& u) { clampWarmControl(u); };
+    d.make_model=[](const Eigen::Vector3d& accel) {
+        auto pred=std::make_shared<ConstantAccelPredictor>();pred->a=accel;
+        auto dyn=std::make_shared<Quad6DOFVarTimeRelativePred<double>>(pred);
+        dyn->setMass(MASS);dyn->setGravity(GRAVITY);dyn->setJb(J_B);
+        OCPDescriptor::Model model;model.nx=NX_SS;model.nu=NU_SS;model.horizon=HORIZON;model.dt=TH0;
+        model.hover=Eigen::VectorXd::Zero(NU_SS);model.hover(0)=HOVER_THRUST;model.hover(IDX_THETA)=TH0;
+        model.bounded=[](Eigen::VectorXd u){clampWarmControl(u);return u;};
+        model.flow=[dyn](const Eigen::VectorXd& x,const Eigen::VectorXd& u,double h,bool jac) {
+            auto control=u;control(IDX_THETA)=h;
+            OCPDescriptor::Flow result;result.x=dyn->f(x,control);
+            if(jac){result.a=dyn->fx(x,control);result.b=dyn->fu(x,control);result.b.col(IDX_THETA).setZero();}
+            return result;
+        };return model;
+    };
     d.getSolverParams = getSolverParams;
     d.create = [](const OCPCreateArgs& a) {
         StcLandingNoAugExtra ex;
