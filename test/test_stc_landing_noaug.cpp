@@ -1,13 +1,13 @@
 /// @file test_stc_landing_noaug.cpp
 /// @brief Standalone (no ROS master) receding-horizon smoke test for the
 ///        "stc_landing_noaug" OCP: descriptor sanity, predictor plumbing, 5
-///        warm-started solves through QuadrotorMPC against a moving circular
+///        warm-started solves through OcpSolver against a moving circular
 ///        target using the deployed realtime tuning and planner acceptance
 ///        gate (the no-aug arm has no accumulator state — solver state is
 ///        14-dim).
 
-#include "planner_core/quadrotor_mpc.hpp"
-#include "planner_core/ocp_registry.hpp"
+#include "controller_internal.hpp"
+#include "planner_core/types.hpp"
 #include "ocp/ocp_stc_landing_noaug.hpp"
 
 #include <Eigen/Dense>
@@ -150,10 +150,10 @@ int main(int argc, char** argv) {
         // the target). This cold solve is the one the planner node's
         // max_constraint_error gate must accept, so it must CONVERGE.
         {
-            QuadrotorMPC::Config cold_cfg;
+            OcpSolver::Config cold_cfg;
             cold_cfg.ocp_type = "stc_landing_noaug";
             cold_cfg.n_shift = NEX;
-            QuadrotorMPC cold_mpc(cold_cfg);
+            OcpSolver cold_mpc(cold_cfg);
 
             Eigen::VectorXd x_rel_hover(13);
             x_rel_hover << 2.0, 1.5, StcLandingNoAugOCP::Z_STAGE + 0.05,
@@ -180,11 +180,11 @@ int main(int argc, char** argv) {
                     "max_constraint_error gate");
         }
 
-        // ── 3. Receding-horizon smoke through QuadrotorMPC ──────────────────
-        QuadrotorMPC::Config mpc_cfg;
+        // ── 3. Receding-horizon smoke through OcpSolver ──────────────────
+        OcpSolver::Config mpc_cfg;
         mpc_cfg.ocp_type = "stc_landing_noaug";
         mpc_cfg.n_shift = NEX;
-        QuadrotorMPC mpc(mpc_cfg);
+        OcpSolver mpc(mpc_cfg);
 
         // Benchmark default initial condition (relative frame).
         Eigen::VectorXd x_rel0(13);

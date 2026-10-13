@@ -1,5 +1,5 @@
 #include "planner_core/controller.hpp"
-#include "planner_core/ocp_registry.hpp"
+#include "planner_core/types.hpp"
 #include <stdexcept>
 #include <iostream>
 static void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}

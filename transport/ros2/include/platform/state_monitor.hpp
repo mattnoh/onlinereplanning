@@ -12,7 +12,7 @@
 
 #include "platform/crazyflie.hpp"
 #include "platform/target_tracker.hpp"
-#include "planner_core/ocp_registry.hpp"
+#include "planner_core/types.hpp"
 
 class StateMonitor {
 public:

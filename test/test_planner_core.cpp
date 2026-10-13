@@ -13,9 +13,24 @@
 #include <string>
 #include <vector>
 
-#define private public
-#include "planner_core/planner_core.hpp"
-#undef private
+#include "controller_internal.hpp"
+
+namespace planner_core {
+struct PlannerCoreTestAccess {
+    using HandoffSchedule = PlannerCore::HandoffSchedule;
+    template<class... Args>
+    static bool prepareHandoffSchedule(const PlannerCore& core,Args&&... args) {
+        return core.prepareHandoffSchedule(std::forward<Args>(args)...);
+    }
+    template<class... Args>
+    static Eigen::VectorXd selectInitialState(const PlannerCore& core,Args&&... args) {
+        return core.selectInitialState(std::forward<Args>(args)...);
+    }
+    static void setOdomMode(PlannerCore& core,OCPDescriptor::DroneOdomMode mode) {
+        core.desc_.drone_odom_mode=mode;
+    }
+};
+}
 
 namespace {
 
@@ -121,7 +136,8 @@ int main() {
             cfg.max_first_solve_age_sec = 1.0;
             core.configure(cfg);
             // Exercise generic relative-frame guards with the active descriptor.
-            core.desc_.drone_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
+            planner_core::PlannerCoreTestAccess::setOdomMode(
+                core,OCPDescriptor::DroneOdomMode::TargetFrameRelative);
             auto input = inputAt(t0);
             input.active_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
             input.active_odom_topic = "/mavros/local_position/odom";
@@ -140,7 +156,8 @@ int main() {
             cfg.skip_trajectory_validation = true;
             core.configure(cfg);
             // Exercise generic relative-frame guards with the active descriptor.
-            core.desc_.drone_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
+            planner_core::PlannerCoreTestAccess::setOdomMode(
+                core,OCPDescriptor::DroneOdomMode::TargetFrameRelative);
             auto input = inputAt(t0);
             input.active_odom_mode = OCPDescriptor::DroneOdomMode::TargetFrameRelative;
             input.active_odom_topic = "/mavros/local_position/odom";
@@ -209,17 +226,17 @@ int main() {
 
             auto early = inputAt(t0 + std::chrono::milliseconds(150));
             planner_core::PlannerCoreStepResult early_out;
-            planner_core::PlannerCore::HandoffSchedule early_handoff;
-            require(core.prepareHandoffSchedule(early, early_out, early_handoff),
+            planner_core::PlannerCoreTestAccess::HandoffSchedule early_handoff;
+            require(planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,early, early_out, early_handoff),
                     "future handoff should solve immediately and wait as a pending plan");
 
             auto handoff = inputAt(t0 + std::chrono::milliseconds(180));
             planner_core::PlannerCoreStepResult out;
-            planner_core::PlannerCore::HandoffSchedule schedule;
-            require(core.prepareHandoffSchedule(handoff, out, schedule),
+            planner_core::PlannerCoreTestAccess::HandoffSchedule schedule;
+            require(planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,handoff, out, schedule),
                     "solve should start in lead window");
             double hp = 0.0, hv = 0.0;
-            Eigen::VectorXd x0 = core.selectInitialState(
+            Eigen::VectorXd x0 = planner_core::PlannerCoreTestAccess::selectInitialState(core,
                 handoff.current_state, handoff.target_snapshot, schedule,
                 &hp, &hv, out.x0_source, out);
             require(out.x0_source == "predicted_handoff",
@@ -258,16 +275,16 @@ int main() {
 
                 auto early = inputAt(t0 + std::chrono::milliseconds(150));
                 planner_core::PlannerCoreStepResult early_out;
-                planner_core::PlannerCore::HandoffSchedule early_handoff;
-                core.prepareHandoffSchedule(early, early_out, early_handoff);
+                planner_core::PlannerCoreTestAccess::HandoffSchedule early_handoff;
+                planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,early, early_out, early_handoff);
 
                 auto handoff = inputAt(t0 + std::chrono::milliseconds(180));
                 planner_core::PlannerCoreStepResult out;
-                planner_core::PlannerCore::HandoffSchedule schedule;
-                require(core.prepareHandoffSchedule(handoff, out, schedule),
+                planner_core::PlannerCoreTestAccess::HandoffSchedule schedule;
+                require(planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,handoff, out, schedule),
                         "measured-seed fixture: solve should start in lead window");
                 double hp = 0.0, hv = 0.0;
-                Eigen::VectorXd x = core.selectInitialState(
+                Eigen::VectorXd x = planner_core::PlannerCoreTestAccess::selectInitialState(core,
                     handoff.current_state, handoff.target_snapshot, schedule,
                     &hp, &hv, out.x0_source, out);
                 return std::make_pair(x, out.x0_source);
@@ -325,8 +342,8 @@ int main() {
 
             auto next_input = inputAt(t0 + std::chrono::milliseconds(10));
             planner_core::PlannerCoreStepResult next_out;
-            planner_core::PlannerCore::HandoffSchedule next_schedule;
-            require(core.prepareHandoffSchedule(next_input, next_out, next_schedule),
+            planner_core::PlannerCoreTestAccess::HandoffSchedule next_schedule;
+            require(planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,next_input, next_out, next_schedule),
                     "long solve should start immediately when lead spans the replay interval");
             require(next_schedule.activation_elapsed > next_schedule.active_elapsed_now,
                     "handoff activation was scheduled in the past");
@@ -343,8 +360,8 @@ int main() {
 
             auto third_input = inputAt(t0 + std::chrono::milliseconds(220));
             planner_core::PlannerCoreStepResult third_out;
-            planner_core::PlannerCore::HandoffSchedule third_schedule;
-            core.prepareHandoffSchedule(third_input, third_out, third_schedule);
+            planner_core::PlannerCoreTestAccess::HandoffSchedule third_schedule;
+            planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,third_input, third_out, third_schedule);
             require(third_schedule.activation_elapsed >
                         third_schedule.active_elapsed_now,
                     "successive handoff reused an expired origin");
@@ -362,8 +379,8 @@ int main() {
             core.acceptSolvedResult(inputAt(t0), state(0.0), first);
 
             planner_core::PlannerCoreStepResult out;
-            planner_core::PlannerCore::HandoffSchedule schedule;
-            require(!core.prepareHandoffSchedule(
+            planner_core::PlannerCoreTestAccess::HandoffSchedule schedule;
+            require(!planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,
                         inputAt(t0 + std::chrono::milliseconds(10)), out, schedule),
                     "handoff beyond the active horizon must be rejected");
             require(out.rejection_reason == "handoff_beyond_active_horizon",
@@ -382,11 +399,11 @@ int main() {
             auto recovery = inputAt(t0 + std::chrono::milliseconds(180));
             recovery.current_state = state(100.0);
             planner_core::PlannerCoreStepResult out;
-            planner_core::PlannerCore::HandoffSchedule schedule;
-            require(core.prepareHandoffSchedule(recovery, out, schedule),
+            planner_core::PlannerCoreTestAccess::HandoffSchedule schedule;
+            require(planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,recovery, out, schedule),
                     "recovery should be inside lead window");
             double hp = 0.0, hv = 0.0;
-            Eigen::VectorXd x0 = core.selectInitialState(
+            Eigen::VectorXd x0 = planner_core::PlannerCoreTestAccess::selectInitialState(core,
                 recovery.current_state, recovery.target_snapshot, schedule,
                 &hp, &hv, out.x0_source, out);
             require(out.x0_source == "recovery_live",
@@ -407,11 +424,11 @@ int main() {
             auto handoff = inputAt(t0 + std::chrono::milliseconds(180));
             handoff.current_state = state(1.8);
             planner_core::PlannerCoreStepResult out;
-            planner_core::PlannerCore::HandoffSchedule schedule;
-            require(core.prepareHandoffSchedule(handoff, out, schedule),
+            planner_core::PlannerCoreTestAccess::HandoffSchedule schedule;
+            require(planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,handoff, out, schedule),
                     "handoff should be inside lead window");
             double hp = 0.0, hv = 0.0;
-            Eigen::VectorXd x0 = core.selectInitialState(
+            Eigen::VectorXd x0 = planner_core::PlannerCoreTestAccess::selectInitialState(core,
                 handoff.current_state, handoff.target_snapshot, schedule,
                 &hp, &hv, out.x0_source, out);
             require(out.x0_source == "predicted_handoff",

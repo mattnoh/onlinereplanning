@@ -6,17 +6,15 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <Eigen/Dense>
 
-#include "planner_core/quadrotor_mpc.hpp"
 #include "parameters.hpp"
-#include "planner_core/direct_control_math.hpp"
-#include "planner_core/ocp_registry.hpp"
+#include "planner_core/adapters.hpp"
+#include "planner_core/types.hpp"
 #include "platform/mavros.hpp"
 #include "platform/target_tracker.hpp"
 #include "platform/state_monitor.hpp"
 #include "trajectory_replayer.hpp"
 #include "planner_runtime_config.hpp"
 #include "planner_logging.hpp"
-#include "planner_core/adapters.hpp"
 #include "planner_core/controller.hpp"
 #include "hover_controller.hpp"
 

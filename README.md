@@ -5,7 +5,8 @@ The active MAVROS/ROS1 planner uses a ROS-independent RH/MPC core. The previous 
 - `include/ocp`: three complete formulations: startup hover, `stc_landing_noaug` for RH state tracking, and `stc_landing_mpc` for direct thrust/body-rate feedback. Equations, costs, constraints and derivatives stay in each OCP file.
 - `include/parameters.hpp`: shared typed vehicle, horizon, cost-weight, constraint, MPC and ALIPDDP solver defaults. The same parameter types serve all three OCPs. Startup environment loading preserves saved tuning.
 - `include/target`: one `target_generator.hpp` for synthetic movements and seeded MC1 shapes; one `predictor.hpp` for constant-acceleration prediction. Neither depends on ROS.
-- `include/planner_core`, `src`: controller lifecycle, solving, RH replay and direct MPC feedback.
+- `include/planner_core`: three public headers: `controller.hpp` (RH/MPC API), `types.hpp` (shared contracts and OCP registry queries), and `adapters.hpp` (frame/command conversion).
+- `src`: compiled controller and OCP registry. One private `controller_internal.hpp` contains the shared `OcpSolver`, RH/direct-MPC runtime and async logging implementation; ROS adapters do not include it.
 - `transport/ros1`, `transport/ros2`: ROS adapters, nodes and launch files. The ROS2 Crazyflie adapter remains pending flight validation.
 - `config/ros1`, `config/ros2`: matching hover/RH/MPC profiles in each ROS parameter format.
 - `scripts`: profile application and RViz markers, plus the sequential SITL campaign, its bearing probe, metrics and MPC audit.

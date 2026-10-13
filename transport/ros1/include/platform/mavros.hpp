@@ -27,7 +27,7 @@
 #pragma once
 
 #include <ros/ros.h>
-#include "planner_core/direct_control_math.hpp"
+#include "planner_core/adapters.hpp"
 #include <nav_msgs/Odometry.h>
 #include <mavros_msgs/AttitudeTarget.h>
 #include <mavros_msgs/PositionTarget.h>

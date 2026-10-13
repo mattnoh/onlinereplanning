@@ -8,8 +8,7 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <Eigen/Dense>
 
-#include "planner_core/quadrotor_mpc.hpp"
-#include "planner_core/ocp_registry.hpp"
+#include "planner_core/types.hpp"
 #include "platform/crazyflie.hpp"
 #include "platform/mavros.hpp"
 #include "platform/target_tracker.hpp"
@@ -19,7 +18,6 @@
 #include "planner_logging.hpp"
 #include "planner_core/adapters.hpp"
 #include "planner_core/controller.hpp"
-#include "planner_core/direct_control_math.hpp"
 #include "hover_controller.hpp"
 
 #include <chrono>
