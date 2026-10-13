@@ -13,6 +13,7 @@
 #include "ocp/ocp_stc_landing.hpp"
 #include "ocp/ocp_perception_track.hpp"
 #include "ocp/ocp_stc_landing_noaug.hpp"
+#include "ocp/ocp_stc_landing_mpc.hpp"
 #include "ocp/ocp_stc_landing_noaug_legacy.hpp"
 #include "ocp/ocp_tracking_circle_target.hpp"
 #include "ocp/ocp_tracking_bodyrate_tf_noimu.hpp"
@@ -39,6 +40,7 @@ inline const std::map<std::string, OCPDescriptor>& getTable() {
         {"rh_stc",                         StcLandingOCP::descriptor()},
         {"perception_track",               PerceptionTrackOCP::descriptor()},
         {"stc_landing_noaug",              StcLandingNoAugOCP::descriptor()},
+        {"stc_landing_mpc",                StcLandingMpcOCP::descriptor()},
         {"rh_stc_noaug",                   StcLandingNoAugOCP::descriptor()},
         {"stc_landing_noaug_legacy",       StcLandingNoAugLegacyOCP::descriptor()},
         {"rh_stc_noaug_legacy",            StcLandingNoAugLegacyOCP::descriptor()},

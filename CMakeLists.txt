@@ -111,6 +111,12 @@ add_executable(test_stc_landing_noaug_ctcs test/test_stc_landing_noaug_ctcs.cpp)
 target_include_directories(test_stc_landing_noaug_ctcs PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
 target_link_libraries(test_stc_landing_noaug_ctcs planner_core)
 
+find_package(Threads REQUIRED)
+add_executable(test_direct_mpc test/test_direct_mpc.cpp ${SHARED_SOURCES})
+target_include_directories(test_direct_mpc PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
+target_link_libraries(test_direct_mpc planner_core Threads::Threads)
+target_link_libraries(comando_planner Threads::Threads)
+
 add_executable(tools_seed_probe test/tools_seed_probe.cpp ${SHARED_SOURCES})
 target_include_directories(tools_seed_probe PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
 target_link_libraries(tools_seed_probe planner_core)

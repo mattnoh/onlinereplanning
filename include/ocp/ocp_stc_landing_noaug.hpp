@@ -905,10 +905,11 @@ class GeneralSpeedCon : public StageConstraintBase<Scalar> { public:
 // The shared interface owns the production CTCS row and its interval
 // sensitivities. The host's original integrand/integral above remain an
 // independent diagnostic reference. Weights and epsilon both use Y_SCALE.
-template<typename Scalar>
+template<typename Scalar, typename Dynamics>
 std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
-    std::shared_ptr<Quad6DOFVarTimeRelativePred<Scalar>> dyn,
-    double eps = CTCS_STEP_EPS / CTCS_Y_SCALE) {
+    std::shared_ptr<Dynamics> dyn,
+    double eps = CTCS_STEP_EPS / CTCS_Y_SCALE,
+    int idx_theta = IDX_THETA, double fixed_dt = 0.0, int substeps = 1) {
     using Vec = Vector<Scalar>;
     using StateFn = std::function<Scalar(const Vec&)>;
     using GradFn = std::function<Vec(const Vec&)>;
@@ -1044,8 +1045,9 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             }, W_LAND_GS);
     }
     StcIntervalDynamics<Scalar> host;
-    host.idx_theta = IDX_THETA;
-    host.substeps = 1; // matches the deployed one-step RK4 discrete map
+    host.idx_theta = idx_theta;
+    host.dt = fixed_dt;
+    host.substeps = substeps;
     host.xdot = [dyn](const Vec& x, const Vec& u, Scalar) -> Vec { return dyn->intervalRates(x,u); };
     host.fx = [dyn](const Vec& x, const Vec& u, Scalar) -> Matrix<Scalar> { return dyn->intervalRatesX(x,u); };
     host.fu = [dyn](const Vec& x, const Vec& u, Scalar) -> Matrix<Scalar> { return dyn->intervalRatesU(x,u); };

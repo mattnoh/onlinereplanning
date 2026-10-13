@@ -362,7 +362,7 @@ def run_cell(motion, level, trial, outdir, args):
         env = " ".join(f"{k}={v}" for k, v in PLANNER_ENV.items())
         procs.append(spawn(
             f"{SETUP} && export {env} && roslaunch comando_planner planner_launch.launch "
-            "platform:=mavros drone_name:=px4_drone terminal_freeze_enter_vel:=0.30 "
+            f"platform:=mavros drone_name:=px4_drone hover_thrust:={args.hover_thrust} terminal_freeze_enter_vel:=0.30 "
             f"stc_z_stage:=1.55 stc_los_alt_trig:=1.2 log_dir:={cell}", logs["planner"]))
         wait_for("planner node", lambda: node_alive("comando_planner"), 45)
         # ...then wait for it to actually be flying-ready, and give the
@@ -417,7 +417,7 @@ def run_cell(motion, level, trial, outdir, args):
             beta, beta_wait = await_bearing(STAGE_ALPHA, BEARING_TOL,
                                             BEARING_WAIT_S)
             sh(f"{SETUP} && rosrun comando_planner apply_profile.sh /comando_planner "
-               f"$(rospack find comando_planner)/config/profile_stc_landing_noaug_sitl.yaml",
+               f"{args.profile}",
                timeout=60)
             result = wait_landing(logs["planner"])
     except Exception as e:                        # keep the campaign alive
@@ -444,6 +444,7 @@ def run_cell(motion, level, trial, outdir, args):
             shutil.move(f, os.path.join(cell, b))
 
     meta = dict(motion=motion, uncertainty=level, trial=trial, seed=seed,
+                profile=args.profile, hover_thrust=args.hover_thrust,
                 stage_xy=[round(hx,3), round(hy,3)] if "hx" in dir() else None,
                 result=result, settle_z=z, settle_vz=vz, teardown=clean,
                 # Geometry actually achieved at activation. stage_alpha is what
@@ -467,6 +468,8 @@ def main():
     ap.add_argument("--trials", type=int, default=4)
     ap.add_argument("--out", default=None)
     ap.add_argument("--reuse", action="store_true")
+    ap.add_argument("--profile", default=os.path.join(PKG,"config/profile_stc_landing_noaug_sitl.yaml"))
+    ap.add_argument("--hover-thrust", type=float, default=0.3)
     ap.add_argument("--motions", default=",".join(MOTIONS))
     ap.add_argument("--levels", default=",".join(UNCERT))
     args = ap.parse_args()

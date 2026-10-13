@@ -27,6 +27,7 @@
 #pragma once
 
 #include <ros/ros.h>
+#include "planner_core/direct_control_math.hpp"
 #include <nav_msgs/Odometry.h>
 #include <mavros_msgs/AttitudeTarget.h>
 #include <mavros_msgs/PositionTarget.h>
@@ -48,6 +49,8 @@ enum class ArmState { Idle, WarmingUp, ReadyToArm, Armed };
 struct Handles {
     Eigen::VectorXd current = Eigen::VectorXd::Zero(13);
     bool odom_received = false;
+    std::chrono::steady_clock::time_point last_odom{};
+    std::recursive_mutex command_mutex;
 
     ArmState arm_state = ArmState::Idle;
     std::chrono::steady_clock::time_point warmup_start;
@@ -107,7 +110,7 @@ inline void publishAttitudeTargetMsg(Handles& h, const Eigen::VectorXd& u) {
     msg.body_rate.y = u.size() > 2 ? float(u(2)) : 0.0f;
     msg.body_rate.z = u.size() > 3 ? float(u(3)) : 0.0f;
     msg.thrust = u.size() > 0
-        ? float(std::clamp(u(0) * h.hover_thrust / 9.81, 0.0, 1.0))
+        ? float(planner_core::normalizedThrust(u(0), h.hover_thrust))
         : 0.0f;
     h.att_pub.publish(msg);
 }
@@ -199,6 +202,7 @@ inline void landActionTick(Handles& h) {
 /// Called by the planner at touchdown (terminal freeze on a landing OCP).
 /// Stops all offboard setpoints and hands the stop to PX4.
 inline void engageLandAction(Handles& h, const std::string& action) {
+    std::lock_guard<std::recursive_mutex> guard(h.command_mutex);
     if (h.land_engaged) return;
     h.land_action = action;
     h.land_engaged = true;
@@ -211,6 +215,7 @@ inline void engageLandAction(Handles& h, const std::string& action) {
 /// (disarmed after a completed landing), clear the one-shot engagement guards
 /// so the heartbeat re-engages OFFBOARD+ARM for the new flight.
 inline void resetForNewFlight(Handles& h) {
+    std::lock_guard<std::recursive_mutex> guard(h.command_mutex);
     bool armed;
     {
         std::lock_guard<std::mutex> lk(h.fcu_mutex);
@@ -229,6 +234,7 @@ inline void resetForNewFlight(Handles& h) {
 }
 
 inline void heartbeatTick(Handles& h) {
+    std::lock_guard<std::recursive_mutex> guard(h.command_mutex);
     using namespace std::chrono;
 
     // 0) After touchdown the planner no longer commands; drive PX4 to a stop.
@@ -337,6 +343,7 @@ inline void setup(ros::NodeHandle& nh,
             state_out(10)=w.x; state_out(11)=w.y; state_out(12)=w.z;
             h.current = state_out;
             h.odom_received = true;
+            h.last_odom = std::chrono::steady_clock::now();
         });
 
     h.state_sub = nh.subscribe<mavros_msgs::State>(
@@ -367,6 +374,7 @@ inline void setup(ros::NodeHandle& nh,
 }
 
 inline void publishBodyRateCommand(Handles& h, const Eigen::VectorXd& u) {
+    std::lock_guard<std::recursive_mutex> guard(h.command_mutex);
     h.last_rate_cmd = u;
     h.last_cmd_is_bodyrate = true;
     h.has_rate_cmd = true;
@@ -374,6 +382,7 @@ inline void publishBodyRateCommand(Handles& h, const Eigen::VectorXd& u) {
 }
 
 inline void publishFullStateCommand(Handles& h, const Eigen::VectorXd& s) {
+    std::lock_guard<std::recursive_mutex> guard(h.command_mutex);
     h.last_state_cmd = s;
     h.last_cmd_is_bodyrate = false;
     h.has_state_cmd = true;

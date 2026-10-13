@@ -7,6 +7,8 @@
 #include <Eigen/Dense>
 
 #include "planner_core/quadrotor_mpc.hpp"
+#include "planner_core/direct_mpc.hpp"
+#include "planner_core/direct_control_math.hpp"
 #include "planner_core/ocp_registry.hpp"
 #include "platform/mavros.hpp"
 #include "platform/target_tracker.hpp"
@@ -401,7 +403,11 @@ private:
     Eigen::VectorXd getCurrentState() const {
         if (platform_ == "mavros") {
             std::lock_guard<std::mutex> lk(state_monitor_.stateMutex());
-            return mavros_handles_.current;
+            Eigen::VectorXd x = mavros_handles_.current;
+            if (ocp_type_ == "stc_landing_mpc") {
+                x = planner_core::bodyOdometryToWorld(x);
+            }
+            return x;
         }
         return state_monitor_.getCurrentState(platform_);
     }
@@ -426,7 +432,7 @@ private:
         Eigen::VectorXd term  = Eigen::VectorXd::Zero(state_dim_);
         if (state_dim_ >= 7) { term(0)=xyz.x(); term(1)=xyz.y(); term(2)=xyz.z(); term(6)=1.0; }
         terminal_state_ = term;
-        if (planner_core_configured_) planner_core_.setTerminalTarget(xyz);
+        if (planner_core_configured_ && ocp_type_ != "stc_landing_mpc") planner_core_.setTerminalTarget(xyz);
     }
 
     void rebuildMpcSolver() {
@@ -458,19 +464,29 @@ private:
         core_cfg.max_relative_position_norm = max_relative_position_norm_;
         core_cfg.max_relative_vertical_abs  = max_relative_vertical_abs_;
         core_cfg.max_relative_velocity_norm = max_relative_velocity_norm_;
-        planner_core_.configure(core_cfg);
+        if (ocp_type_ == "stc_landing_mpc") {
+            if (platform_ != "mavros") throw std::runtime_error("stc_landing_mpc requires MAVROS");
+            direct_mpc_.configure(core_cfg);
+            std::string directory; nh_.param<std::string>("log_dir", directory, "/tmp");
+            direct_mpc_.openControlLog(directory + "/direct_mpc_controls.csv");
+        } else {
+            direct_mpc_.stop();
+            planner_core_.configure(core_cfg);
+        }
         planner_core_configured_ = true;
     }
 
     void createModeTimers() {
         if (mode_ == "mpc") {
+            if (solver_timer_.isValid()) solver_timer_.setPeriod(ros::Duration(ocp_type_ == "stc_landing_mpc" ? 0.1 : 0.001));
+            if (mpc_replay_timer_.isValid()) mpc_replay_timer_.setPeriod(ros::Duration(ocp_type_ == "stc_landing_mpc" ? 0.02 : ocp_dt_));
             if (!solver_timer_.isValid()) {
                 solver_timer_ = nh_.createTimer(
-                    ros::Duration(0.001), &PlannerNode::solverLoop, this);
+                    ros::Duration(ocp_type_ == "stc_landing_mpc" ? 0.1 : 0.001), &PlannerNode::solverLoop, this);
             }
             if (!mpc_replay_timer_.isValid() && ocp_dt_ > 0) {
                 mpc_replay_timer_ = nh_.createTimer(
-                    ros::Duration(ocp_dt_), &PlannerNode::mpcReplayTick, this);
+                    ros::Duration(ocp_type_ == "stc_landing_mpc" ? 0.02 : ocp_dt_), &PlannerNode::mpcReplayTick, this);
                 ROS_INFO("MPC replay timer created (ocp_dt=%.3f valid=%d)",
                          ocp_dt_, mpc_replay_timer_.isValid() ? 1 : 0);
             }
@@ -486,7 +502,7 @@ private:
         stopReplayTimer();
         stopOpenLoopHoldTimer();
         setOpenLoopPhase(OpenLoopPhase::Idle);
-        planner_core_.reset();
+        if (ocp_type_ == "stc_landing_mpc") direct_mpc_.reset(); else planner_core_.reset();
         is_primed_.store(false);
         terminal_freeze_.store(false);
         stale_warning_count_ = 0;
@@ -744,7 +760,9 @@ private:
         planner_core::PlannerCoreStepResult core_result;
         {
             std::lock_guard<std::mutex> slk(solver_mutex_);
-            core_result = planner_core_.trySolve(makeCoreInput(x0_abs, target_snapshot));
+            core_result = ocp_type_ == "stc_landing_mpc"
+                ? direct_mpc_.trySolve(makeCoreInput(x0_abs, target_snapshot))
+                : planner_core_.trySolve(makeCoreInput(x0_abs, target_snapshot));
         }
         if (!core_result.diagnostics.empty() &&
             core_result.rejection_reason != "waiting_for_handoff_time" &&
@@ -765,8 +783,8 @@ private:
         replay_ticks_since_solve_.store(0);
         last_replan_delay_sec_ = core_result.replan_delay_sec;
 
-        ROS_INFO("[RH %d] %.1fms iters=%d x0=[%.3f,%.3f,%.3f] source=%s",
-            core_result.solve_num, core_result.solve_result.solve_time_ms,
+        ROS_INFO("[%s %d] %.1fms iters=%d x0=[%.3f,%.3f,%.3f] source=%s",
+            ocp_type_ == "stc_landing_mpc" ? "Direct MPC" : "RH", core_result.solve_num, core_result.solve_result.solve_time_ms,
             core_result.solve_result.solve_iters,
             core_result.solve_result.state_trajectory.front().size()>0 ? core_result.solve_result.state_trajectory.front()(0):0.0,
             core_result.solve_result.state_trajectory.front().size()>1 ? core_result.solve_result.state_trajectory.front()(1):0.0,
@@ -775,7 +793,7 @@ private:
 
         is_primed_.store(true);
         terminal_freeze_.store(false);
-        solve_count_ = planner_core_.solveCount();
+        solve_count_ = ocp_type_ == "stc_landing_mpc" ? core_result.solve_num+1 : planner_core_.solveCount();
         publishTrajectory(core_result.path.states);
 
         if (logging_enabled_ && logging_initialized_) {
@@ -792,7 +810,15 @@ private:
         if (!is_primed_.load()) return;
 
         last_target_snapshot_ = getTargetSnapshot();
-        auto replay = planner_core_.sampleReplay(Clock::now(), last_target_snapshot_);
+        planner_core::PlannerCoreStepResult replay;
+        if (ocp_type_ == "stc_landing_mpc") {
+            bool fresh;
+            { std::lock_guard<std::mutex> lock(state_monitor_.stateMutex());
+              fresh = std::chrono::duration<double>(Clock::now()-mavros_handles_.last_odom).count() < 0.2; }
+            if (!fresh || !hasFreshTargetState()) { holdHoverAndPause("direct MPC stale state"); return; }
+            replay = direct_mpc_.sample(Clock::now(), getCurrentState(), last_target_snapshot_);
+            if (replay.stale) { holdHoverAndPause("direct MPC expired policy"); return; }
+        } else replay = planner_core_.sampleReplay(Clock::now(), last_target_snapshot_);
         if (!replay.has_replay_sample) return;
         logCoreDiagnostics(replay.diagnostics);
         logReplaySolverEvents(replay);
@@ -997,6 +1023,7 @@ private:
     ros::Publisher traj_pub_;
 
     planner_core::PlannerCore planner_core_;
+    planner_core::DirectMpcController direct_mpc_;
     bool planner_core_configured_ = false;
     StateMonitor state_monitor_;
 

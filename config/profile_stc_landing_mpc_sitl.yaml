@@ -1,0 +1,5 @@
+# Direct thrust/body-rate MPC; the fixed grid is part of the OCP descriptor.
+ocp_type: stc_landing_mpc
+mode: mpc
+n_replay: 1
+land_action: force_disarm
