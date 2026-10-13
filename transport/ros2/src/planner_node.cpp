@@ -19,6 +19,7 @@
 #include "planner_logging.hpp"
 #include "planner_core/adapters.hpp"
 #include "planner_core/controller.hpp"
+#include "planner_core/direct_control_math.hpp"
 #include "hover_controller.hpp"
 
 #include <chrono>
