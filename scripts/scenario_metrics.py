@@ -105,7 +105,10 @@ def flight_stats(cell):
     constraints.csv and gated on the logged CTCS activation flags."""
     ex = os.path.join(cell, "moving_executed.csv")
     cn = os.path.join(cell, "constraints.csv")
-    out = dict(beta_at_activation="", beta_abs="",
+    out = dict(v_target_max="", v_target_med="", beta_at_activation="", beta_abs="",
+               trig_land_z="", trig_land_t="", trig_land_rxy="",
+               trig_los_z="", trig_los_t="", trig_los_rxy="",
+               trig_stage_off_z="", trig_stage_off_t="", trig_stage_off_rxy="",
                td_lateral="", td_z="", viol_glideslope="", viol_speed="",
                viol_tilt="", viol_omega="", max_stc_viol="")
     if not (os.path.exists(ex) and os.path.exists(cn)):
@@ -159,6 +162,39 @@ def flight_stats(cell):
     # and the target->drone bearing has moved for reasons that have nothing to
     # do with the target). From the bag it is exact: take the first sample of
     # the descent window, where rx/ry are already target-relative.
+    # WHERE and WHEN each state-triggered constraint switched on. The CTCS
+    # activation flags are already logged per sample; record the altitude and
+    # the time-since-descent-start at which each first goes positive, so the
+    # trigger behaviour can be compared across motions instead of assumed
+    # identical. a_stage is a de-activation (it is on far from the pad and
+    # turns OFF on capture), so its LAST active sample is the meaningful one.
+    t0d = f(rows[0], "t_acc")
+    for key, col in (("land", "ctcs_a_altitude_state"), ("los", "ctcs_a_los")):
+        if col not in rows[0]:
+            continue
+        for r in rows:
+            if f(r, col) > 1e-9:
+                out[f"trig_{key}_z"] = round(f(r, "rz"), 4)
+                out[f"trig_{key}_t"] = round(f(r, "t_acc") - t0d, 3)
+                out[f"trig_{key}_rxy"] = round(math.hypot(f(r, "rx"), f(r, "ry")), 4)
+                break
+    if "ctcs_a_stage" in rows[0]:
+        last = None
+        for r in rows:
+            if f(r, "ctcs_a_stage") > 1e-9:
+                last = r
+        if last is not None:
+            out["trig_stage_off_z"] = round(f(last, "rz"), 4)
+            out["trig_stage_off_t"] = round(f(last, "t_acc") - t0d, 3)
+            out["trig_stage_off_rxy"] = round(math.hypot(f(last, "rx"), f(last, "ry")), 4)
+
+    # Peak target speed over the descent, measured from the bag rather than
+    # from the drawn parameters. This is the variable that turned out to
+    # explain every failure in MC1, so it belongs in samples.csv.
+    tv = [math.hypot(f(r, "tvx"), f(r, "tvy")) for r in rows]
+    if tv:
+        out["v_target_max"] = round(max(tv), 4)
+        out["v_target_med"] = round(sorted(tv)[len(tv) // 2], 4)
     r0 = rows[0]
     tvx, tvy = f(r0, "tvx"), f(r0, "tvy")
     if math.hypot(tvx, tvy) > 1e-6:
@@ -213,7 +249,9 @@ def main():
         w.writeheader()
         w.writerows(rows)
 
-    num = ["beta_abs", "stage_beta_err", "td_lateral", "max_stc_viol", "viol_glideslope", "track_err_med",
+    num = ["trig_land_z", "trig_land_t", "trig_los_z", "trig_los_t",
+           "trig_stage_off_z", "trig_stage_off_t",
+           "v_target_max", "beta_abs", "stage_beta_err", "td_lateral", "max_stc_viol", "viol_glideslope", "track_err_med",
            "track_err_max", "solve_ms_med", "solve_ms_p90", "deadline_miss_rate",
            "n_accept", "n_reject"]
     summ = []

@@ -1,0 +1,17 @@
+ M CLAUDE.md
+ M CMakeLists.txt
+ M config/planner_runtime_config.hpp
+ M config/planner_runtime_config_types.hpp
+ M docs/MAVROS_SITL.md
+ M include/ocp/ocp_perception_track.hpp
+ M include/ocp/ocp_stc_landing_noaug.hpp
+ M include/planner_core/planner_core.hpp
+ M include/planner_core/types.hpp
+ M include/trajectory_replayer.hpp
+ M launch/planner_launch.launch
+ M src/planner_node.cpp
+ M test/test_perception_feedback_ablation.cpp
+ M test/test_planner_core.cpp
+?? claude-session-files.txt
+?? claude-session.patch
+?? test/test_perception_ablation.cpp

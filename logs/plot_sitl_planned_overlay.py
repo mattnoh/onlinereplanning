@@ -21,6 +21,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
@@ -228,10 +229,84 @@ def plot_overlay(args):
     print(out.resolve())
 
 
+def animate_overlay(args):
+    """Render a compact looping replay for presentation use.
+
+    The animation intentionally keeps just the currently active MPC horizon,
+    executed vehicle history, and target history.  This makes replanning legible
+    at slide size without the static figure's full horizon bundle.
+    """
+    base = Path(args.dir)
+    exec_csv = resolve_exec_csv(base, args.exec_csv)
+    bag_path = resolve_bag(base, args.bag)
+    data = load_csv(exec_csv)
+    t_min = None if args.all_horizons else landing_start_time(bag_path)
+    planned_paths = load_planned_paths(bag_path, args.topic, t_min)
+
+    dpos = np.column_stack([data["x"], data["y"], data["z"]])
+    tpos = np.column_stack([data["tx"], data["ty"], data["tz"]])
+    frame_count = max(12, args.animate_frames)
+    sampled = np.linspace(0, len(dpos) - 1, frame_count, dtype=int)
+
+    fig = plt.figure(figsize=(6.4, 4.5), facecolor="white")
+    ax = fig.add_axes([0.02, 0.04, 0.96, 0.92], projection="3d")
+    ax.set_facecolor("white")
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        axis.pane.set_facecolor("white")
+        axis.pane.set_edgecolor(GRID)
+        axis._axinfo["grid"]["color"] = GRID
+        axis._axinfo["grid"]["linewidth"] = 0.75
+    equalish_limits(ax, [dpos, tpos, *planned_paths])
+    try:
+        ax.set_box_aspect((1.15, 1.15, 0.85))
+    except Exception:
+        pass
+    ax.set_xlabel(r"$x$ [m]")
+    ax.set_ylabel(r"$y$ [m]")
+    ax.set_zlabel(r"$z$ [m]")
+    ax.view_init(elev=args.elev,
+                 azim=args.azim if args.azim is not None else
+                 (122.0 if args.flip_view else -58.0))
+
+    (executed_line,) = ax.plot([], [], [], color=EXECUTED, linewidth=2.8,
+                                label="Executed (SITL)")
+    (target_line,) = ax.plot([], [], [], color=TARGET, linewidth=1.5,
+                              linestyle="--", alpha=0.78, label="Target")
+    (horizon_line,) = ax.plot([], [], [], color=PLANNED, linewidth=2.0,
+                               alpha=0.95, label="Active MPC horizon")
+    drone_dot = ax.scatter([], [], [], s=34, c=EXECUTED, depthshade=False)
+    target_dot = ax.scatter([], [], [], s=38, c=TARGET, marker="s", depthshade=False)
+    ax.legend(loc="upper left", fontsize=8, framealpha=0.90)
+
+    def update(frame_idx):
+        i = sampled[frame_idx]
+        h = min(len(planned_paths) - 1,
+                int(round(frame_idx * (len(planned_paths) - 1) /
+                              max(1, frame_count - 1))))
+        executed_line.set_data(dpos[: i + 1, 0], dpos[: i + 1, 1])
+        executed_line.set_3d_properties(dpos[: i + 1, 2])
+        target_line.set_data(tpos[: i + 1, 0], tpos[: i + 1, 1])
+        target_line.set_3d_properties(tpos[: i + 1, 2])
+        horizon = planned_paths[h]
+        horizon_line.set_data(horizon[:, 0], horizon[:, 1])
+        horizon_line.set_3d_properties(horizon[:, 2])
+        drone_dot._offsets3d = ([dpos[i, 0]], [dpos[i, 1]], [dpos[i, 2]])
+        target_dot._offsets3d = ([tpos[i, 0]], [tpos[i, 1]], [tpos[i, 2]])
+        return executed_line, target_line, horizon_line, drone_dot, target_dot
+
+    animation = FuncAnimation(fig, update, frames=frame_count, interval=1000 / args.animate_fps,
+                              blit=False)
+    out = Path(args.animate_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    animation.save(out, writer=PillowWriter(fps=args.animate_fps), dpi=args.dpi)
+    plt.close(fig)
+    print(out.resolve())
+
+
 def main():
     parser = argparse.ArgumentParser(description="Plot SITL planned horizons over executed flight.")
     parser.add_argument("--dir", required=True, help="SITL result dir or planner_phase dir")
-    parser.add_argument("--out", required=True, help="Output image path")
+    parser.add_argument("--out", default=None, help="Output static image path")
     parser.add_argument("--exec-csv", default=None, help="Override executed CSV path")
     parser.add_argument("--bag", default=None, help="Override bag path")
     parser.add_argument("--topic", default="/px4_drone/planned_trajectory")
@@ -242,7 +317,19 @@ def main():
     parser.add_argument("--title", default=None, help="Optional plot title; omitted by default")
     parser.add_argument("--all-horizons", action="store_true",
                         help="Also plot pre-landing (hover) planned horizons")
-    plot_overlay(parser.parse_args())
+    parser.add_argument("--animate-out", default=None,
+                        help="Optional GIF output: active horizon + executed flight replay")
+    parser.add_argument("--animate-frames", type=int, default=80,
+                        help="Number of GIF frames (default: 80)")
+    parser.add_argument("--animate-fps", type=int, default=20,
+                        help="GIF frame rate (default: 20)")
+    args = parser.parse_args()
+    if args.animate_out:
+        animate_overlay(args)
+    else:
+        if not args.out:
+            parser.error("--out is required unless --animate-out is supplied")
+        plot_overlay(args)
 
 
 if __name__ == "__main__":

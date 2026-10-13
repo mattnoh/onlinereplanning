@@ -1,0 +1,798 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index f04b762..823e4f3 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -84,6 +84,48 @@ estimator swaps in with `sim_relative_estimate:=false`. Contract and math:
+ 
+ Full PX4 SITL bring-up (PX4 + gz + mavros + planner): **`docs/MAVROS_SITL.md`**.
+ 
++### SITL process hygiene (agents: mandatory)
++
++**Tear the whole SITL stack down as soon as you report a result.** A finished
++run means the simulator is done, not parked — leaving `px4`, `gz sim`,
++`mavros` and `target_publisher` idling burns CPU, holds UDP 14540, and makes
++the next run start from a stale EKF/armed state instead of a clean spawn.
++
++The rule:
++
++- **Done + reported → kill it.** After you finish talking about a run's
++  results, shut everything down. Start the next run from a fresh stack.
++- **Tuning → keep it.** The *only* case for reusing a live stack is an
++  in-progress tuning sweep where you are still flying variations back to back
++  and have not yet reported a conclusion. The moment you report, kill it.
++- Never leave a stack running across a conversation turn boundary you have
++  ended with a summary.
++
++```bash
++# 1. Planner FIRST, and wait — this is what finalizes logs/flight_<date>.bag.
++pkill -INT -f "roslaunch comando_planner planner_launch"; sleep 6
++
++# 2. Everything else, by PID (see the pkill warning below).
++pgrep -af "bin/px4|gz sim|mavros_node|target_publisher|rosmaster|px4_sitl"
++kill -INT <pids>; sleep 4; kill -9 <pids>   # gz/px4 often need the -9
++
++# 3. Verify — this MUST print CLEAN before you consider the run closed.
++pgrep -af "bin/px4|gz sim|mavros_node|target_publisher|rosmaster|px4_sitl" \
++  | grep -vE "pgrep|snapshot" || echo "CLEAN"
++```
++
++Two traps, both hit in practice:
++
++- **Order matters.** SIGINT the planner launch first and give it several
++  seconds. Killing the simulator out from under a live recorder leaves a
++  `.bag.active` that `analyze_flight.py` cannot read.
++- **Do not `pkill -f px4` (or any broad pattern) from an agent shell.** The
++  agent's own `zsh -c ...` wrapper contains the command string, so the pattern
++  matches that shell and pkill kills the teardown mid-flight (observed: exit
++  144, half the stack still alive). Enumerate with `pgrep -af` and kill by
++  **PID**, or anchor the pattern to something the wrapper cannot contain
++  (`bin/px4`, not `px4`).
++
+ ## Current Architecture
+ 
+ | Area | Files | Notes |
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6961018..b8ba63e 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -95,6 +95,10 @@ add_executable(test_stc_landing test/test_stc_landing.cpp ${SHARED_SOURCES})
+ target_include_directories(test_stc_landing PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
+ target_link_libraries(test_stc_landing planner_core)
+ 
++add_executable(test_perception_ablation test/test_perception_ablation.cpp ${SHARED_SOURCES})
++target_include_directories(test_perception_ablation PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
++target_link_libraries(test_perception_ablation planner_core)
++
+ add_executable(test_perception_feedback_ablation test/test_perception_feedback_ablation.cpp ${SHARED_SOURCES})
+ target_include_directories(test_perception_feedback_ablation PRIVATE ${EIGEN3_INCLUDE_DIR} include config)
+ target_link_libraries(test_perception_feedback_ablation planner_core)
+diff --git a/config/planner_runtime_config.hpp b/config/planner_runtime_config.hpp
+index 51dbe38..eb53088 100644
+--- a/config/planner_runtime_config.hpp
++++ b/config/planner_runtime_config.hpp
+@@ -51,6 +51,11 @@ inline PlannerRuntimeConfig loadPlannerRuntimeConfig(ros::NodeHandle& nh) {
+     nh.param<std::string>("target_predicted_accel_topic", cfg.target_predicted_accel_topic, cfg.target_predicted_accel_topic);
+     nh.param<bool>       ("debug_body_relative_trace",    cfg.debug_body_relative_trace,    cfg.debug_body_relative_trace);
+ 
++    nh.param<double>("handoff_blend_alpha_pos",     cfg.handoff_blend_alpha_pos,     cfg.handoff_blend_alpha_pos);
++    nh.param<double>("handoff_blend_alpha_vel",     cfg.handoff_blend_alpha_vel,     cfg.handoff_blend_alpha_vel);
++    nh.param<double>("recovery_pos_err",            cfg.recovery_pos_err,            cfg.recovery_pos_err);
++    nh.param<double>("recovery_vel_err",            cfg.recovery_vel_err,            cfg.recovery_vel_err);
++
+     nh.param<bool>  ("enable_terminal_freeze",      cfg.enable_terminal_freeze,      cfg.enable_terminal_freeze);
+     nh.param<double>("terminal_freeze_enter_pos",   cfg.terminal_freeze_enter_pos,   cfg.terminal_freeze_enter_pos);
+     nh.param<double>("terminal_freeze_enter_vel",   cfg.terminal_freeze_enter_vel,   cfg.terminal_freeze_enter_vel);
+diff --git a/config/planner_runtime_config_types.hpp b/config/planner_runtime_config_types.hpp
+index 23d1083..ba2db34 100644
+--- a/config/planner_runtime_config_types.hpp
++++ b/config/planner_runtime_config_types.hpp
+@@ -35,6 +35,13 @@ struct PlannerRuntimeConfig {
+     std::string target_predicted_accel_topic = "/target/predicted_accel";
+     bool debug_body_relative_trace = false;
+ 
++    // Handoff seed blending / recovery thresholds (see PlannerCoreConfig in
++    // include/planner_core/types.hpp for the measured defaults).
++    double handoff_blend_alpha_pos = 0.0;
++    double handoff_blend_alpha_vel = 0.0;
++    double recovery_pos_err = 0.50;
++    double recovery_vel_err = 2.00;
++
+     bool enable_terminal_freeze = true;
+     double terminal_freeze_enter_pos = 0.20;
+     double terminal_freeze_enter_vel = 0.10;
+diff --git a/docs/MAVROS_SITL.md b/docs/MAVROS_SITL.md
+index 432ad29..b8c9247 100644
+--- a/docs/MAVROS_SITL.md
++++ b/docs/MAVROS_SITL.md
+@@ -293,6 +293,68 @@ RViz fixed frame is `odom` — without the chain, whichever frame is
+ disconnected renders nothing (the classic symptom: target visible, quad
+ missing).
+ 
++### Handoff seed blending and the jump metric
++
++Each replan is seeded from the active plan sampled at the activation instant,
++plus the persistent fraction of the current tracking error:
++
++```text
++x0 = plan(t_activation) + alpha * (live(now) - plan(now))
++```
++
++`alpha` is a measured physical quantity — the fraction of tracking error PX4's
++position controller still leaves at activation. From the reference bags (odom
++vs published `PositionTarget`, least-squares `e(t+tau) = rho * e(t)`, at the
++~0.48 s operating lead):
++
++| run | `rho_pos(0.48)` | `rho_vel(0.48)` |
++| --- | --- | --- |
++| `stc_landing_noaug_sitl_2m_platform` | 0.642 | 0.574 |
++| `stc_landing_noaug_sitl_circle`      | 0.774 | 0.627 |
++
++**The blend is DISABLED by default (`alpha = 0`) because it does not currently
++work.** A controlled SITL A/B (identical config, only alpha differs, 2026-08-19)
++found that a nonzero alpha destroys solver convergence:
++
++| arm | accepted solves | rejected | `constraint_error` |
++| --- | --- | --- | --- |
++| `alpha = 0` (predicted seed) | 36 | **0** | converged |
++| `alpha = 0.70 / 0.60` | 10 | **78-84** | up to **3.4e8** |
++
++Reproduced twice. The likely cause: `x0 = plan(t_act) + alpha*e` is off the
++warm-start manifold. The OCP's `create()` rebases against `prev_X`, whose first
++node is `plan(t_act)`, so the blended seed introduces a defect between `x0` and
++the warm start's node 0, and this OCP's hard per-node interval constraint makes
++the IPM unable to absorb it. Making the blend usable requires correcting the
++whole warm-start trajectory by the same offset (or re-deriving it from the
++blended seed), not just perturbing `x0` — that work is not done.
++
++With `alpha = 0` the seed is the plan's own predicted state, which is smooth
++(measured plan-swap jump 0.0001-0.0128, physical states) but leaves the planner
++blind to tracking error: `handoff_pos_err` drifts to ~0.49 m in a normal
++descent with no corrective action.
++
++`recovery_pos_err` / `recovery_vel_err` (0.50 m / 2.00 m/s) hard-switch the
++seed to the raw live state. This fires in normal flight and puts a genuine step
++into the reference — a 0.52 m position step was measured at solve 7->8 of
++`stc_landing_noaug_sitl_2m_platform`. They are now rosparams so the threshold
++can be raised, but raising it has NOT been flight-validated.
++
++Watch the plan-swap discontinuity directly — `solver_events.csv` now carries
++`event="handoff"` rows (previously the `state_jump_norm` columns were written
++as headers but never populated by any writer, so they were NaN in every CSV):
++
++```bash
++awk -F, 'NR==1 || $3=="handoff"' <run>/solver_events.csv | column -t -s,
++```
++
++`state_jump_norm` covers the **physical states only**. It deliberately excludes
++the variable-dt cumulative-time slot: the two plans' clocks differ by exactly
++the activation lead by construction, so including it pinned the metric at
++~0.48 regardless of what the trajectory did. Healthy values are centimetre
++scale; `jump_pos`/`jump_vel`/`jump_quat`/`jump_omega` in `extra_values` say
++which block moved.
++
+ ### Where everything gets written
+ 
+ - **Planner CSVs** (`all_solves.csv`, `solver_events.csv`): the node's
+diff --git a/include/ocp/ocp_perception_track.hpp b/include/ocp/ocp_perception_track.hpp
+index c68110d..73d41d0 100644
+--- a/include/ocp/ocp_perception_track.hpp
++++ b/include/ocp/ocp_perception_track.hpp
+@@ -304,11 +304,30 @@ inline double satSeparation(const Eigen::Vector3d& p0, const Eigen::Vector3d& p1
+     return best;
+ }
+ 
++/// Minimum SAT clearance of the camera->target segment against the whole array.
++///
++/// EXACT branch-and-bound, not an approximation: the separation along a box axis
++/// is already a valid SAT separating-axis value, so it lower-bounds nothing --
++/// but the AABB-vs-AABB gap DOES lower-bound the true minimum distance, and any
++/// pillar whose cheap bound already exceeds the running minimum cannot become
++/// the minimum. Skipping those is exact.
++///
++/// This matters because losClearance sits inside the finite-differenced
++/// constraint Jacobians and dominates solve time (measured: ~28 ms per pillar
++/// per solve). Culling is the cheapest available speedup and changes no result.
+ inline double losClearance(const Eigen::Vector3d& p0, const Eigen::Vector3d& p1) {
+     const auto& P = pillars();
+     if (P.empty()) return 1e3;
++    const Eigen::Vector3d slo = p0.cwiseMin(p1), shi = p0.cwiseMax(p1);
+     double m = std::numeric_limits<double>::infinity();
+-    for (const auto& p : P) m = std::min(m, satSeparation(p0, p1, p.lo, p.hi));
++    for (const auto& p : P) {
++        // cheap axis-aligned gap: <= true separation, so a valid lower bound
++        double lb = -std::numeric_limits<double>::infinity();
++        for (int i = 0; i < 3; ++i)
++            lb = std::max(lb, std::max(p.lo(i) - shi(i), slo(i) - p.hi(i)));
++        if (lb >= m) continue;                       // cannot beat the running min
++        m = std::min(m, satSeparation(p0, p1, p.lo, p.hi));
++    }
+     return m;
+ }
+ 
+diff --git a/include/ocp/ocp_stc_landing_noaug.hpp b/include/ocp/ocp_stc_landing_noaug.hpp
+index cab906b..ed3fccd 100644
+--- a/include/ocp/ocp_stc_landing_noaug.hpp
++++ b/include/ocp/ocp_stc_landing_noaug.hpp
+@@ -26,6 +26,19 @@
+ /// the augmented dynamics and there is no such row here. These are the
+ /// defaults below; export the SZMUK_* vars before launching to retune.
+ ///
++/// ENFORCEABILITY NOTE (CmdFullState): this OCP commands the vehicle through
++/// PositionTarget (position + velocity + yaw), so PX4's position controller
++/// generates attitude internally and the planner never commands it. The tilt
++/// and omega CT-cSTC terms therefore shape the PLAN only and have no authority
++/// over flown attitude — they are not merely tracked loosely, there is no
++/// causal path from planned q/omega to flown q/omega at all. Measured on
++/// logs/stc_landing_noaug_sitl_2m_platform (post-motor-cut samples excluded):
++/// planned tilt/omega violation 0.000/0.000 vs flown 1.25 deg / 0.454 rad/s.
++/// The position/velocity terms (glideslope, speed, stage height, LOS) ARE
++/// commanded and degrade only by tracking lag: planned 0.000 vs flown 0.149 m
++/// glideslope. Giving tilt/omega real authority requires CmdBodyRate plus a
++/// mass/inertia/thrust-map fix (MASS and IXX below are Crazyflie values).
++///
+ /// Warm-start note: the planner core's makeXshifted() does a plain index
+ /// shift, so create() rebases IDX_DT against the new horizon start
+ /// (prev_X[0] after the shift == the previously executed node), exactly as
+diff --git a/include/planner_core/planner_core.hpp b/include/planner_core/planner_core.hpp
+index 1f85643..8bcd8dc 100644
+--- a/include/planner_core/planner_core.hpp
++++ b/include/planner_core/planner_core.hpp
+@@ -232,7 +232,8 @@ public:
+                              config_.ocp_dt,
+                              config_.n_replay,
+                              desc_.variable_dt,
+-                             desc_.state_dim);
++                             desc_.state_dim,
++                             result.feedback_gains);   // DDP gains reach the replayer
+ 
+         last_accepted_solve_timestamp_ = plan_origin_time;
+         primed_ = true;
+@@ -289,6 +290,10 @@ public:
+                 {"solve_latency_sec", diag->solve_latency_sec},
+                 {"state_jump_norm", diag->state_jump_norm},
+                 {"control_jump_norm", diag->control_jump_norm},
++                {"jump_pos", diag->jump_pos},
++                {"jump_vel", diag->jump_vel},
++                {"jump_quat", diag->jump_quat},
++                {"jump_omega", diag->jump_omega},
+             };
+             const auto old_cmd = makePlannerCommand(config_.platform, desc_, diag->old_state_cmd,
+                                                     diag->old_control_cmd, target_snapshot);
+@@ -447,6 +452,7 @@ private:
+         result.success = r.success;
+         result.next_state = r.next_state;
+         result.state_trajectory = r.state_trajectory;
++        result.feedback_gains = r.feedback_gains;
+         result.control_trajectory = r.control_trajectory;
+         result.solve_time_ms = r.solve_time_ms;
+         result.constraint_error = r.constraint_error;
+@@ -560,11 +566,13 @@ private:
+                                                                     predicted_target,
+                                                                     live_x0.size());
+         Eigen::VectorXd tracking_x0 = predicted_x0;
++        bool have_tracking_sample = false;
+         TrajectoryReplayer::ReplaySample active_now;
+         if (replayer_.sampleActiveAtElapsed(handoff.active_elapsed_now, config_.ocp_dt, &active_now) &&
+             active_now.has_plan &&
+             active_now.x_cmd.size() >= live_x0.size()) {
+             tracking_x0 = preparePredictedHandoffState(active_now.x_cmd, target_snapshot, live_x0.size());
++            have_tracking_sample = true;
+         } else {
+             addDiagnostic(out, DiagnosticSeverity::Warn, "handoff_tracking_sample_missing",
+                           "Active-plan sample unavailable for tracking-error check",
+@@ -587,10 +595,67 @@ private:
+                            {"activation_elapsed", handoff.activation_elapsed}});
+             return live_x0;
+         }
++        // Carry the persistent fraction of the current tracking error onto the
++        // predicted seed.  alpha = 0 reproduces predicted_handoff exactly;
++        // alpha = 1 carries the whole current error onto the activation state.
++        // Note alpha = 1 is NOT the old recovery_live seed — that returned the
++        // raw live state, which is stale by construction because the plan it
++        // seeds does not activate until one lead time later.  Blending rather
++        // than switching is what keeps the reference continuous: the
++        // correction enters as a small increment on every replan instead of
++        // arriving as one step the first time a threshold is crossed.
++        // Without a tracking sample there is no measured error to carry, and
++        // tracking_x0 is still just a copy of predicted_x0 — blending against
++        // it would fold in the activation lead instead of the tracking error.
++        const Eigen::VectorXd blended_x0 =
++            have_tracking_sample ? blendHandoffState(predicted_x0, live_x0, tracking_x0)
++                                 : predicted_x0;
++        if (blended_x0.size() == predicted_x0.size() &&
++            !blended_x0.isApprox(predicted_x0)) {
++            x0_source = "blended_handoff";
++            return blended_x0;
++        }
+         x0_source = "predicted_handoff";
+         return predicted_x0;
+     }
+ 
++    /// x0 = predicted + alpha * (live - tracking), per state block.
++    ///
++    /// `tracking` is the active plan sampled at *now* and `live` the measured
++    /// state at *now*, so their difference is the current tracking error;
++    /// `predicted` is the same plan sampled at the activation instant.  The
++    /// quaternion block is blended with a sign-corrected lerp and renormalised
++    /// (the same treatment sampleStateFrom applies when interpolating between
++    /// nodes), and any trailing cumulative-time slot is left untouched.
++    Eigen::VectorXd blendHandoffState(const Eigen::VectorXd& predicted,
++                                      const Eigen::VectorXd& live,
++                                      const Eigen::VectorXd& tracking) const {
++        const int n = static_cast<int>(predicted.size());
++        if (live.size() != n || tracking.size() != n || n <= 0) {
++            return predicted;
++        }
++        const double a_pos = config_.handoff_blend_alpha_pos;
++        const double a_vel = config_.handoff_blend_alpha_vel;
++        if (a_pos <= 0.0 && a_vel <= 0.0) {
++            return predicted;
++        }
++        Eigen::VectorXd out = predicted;
++        const Eigen::VectorXd err = live - tracking;
++        if (n >= 3) out.segment(0, 3) += a_pos * err.segment(0, 3);
++        if (n >= 6) out.segment(3, 3) += a_vel * err.segment(3, 3);
++        // Attitude and body rates are fast states; they persist like velocity.
++        if (n >= 10) {
++            Eigen::Vector4d q_pred = predicted.segment(6, 4);
++            Eigen::Vector4d q_live = live.segment(6, 4);
++            if (q_pred.dot(q_live) < 0.0) q_live = -q_live;
++            Eigen::Vector4d q = (1.0 - a_vel) * q_pred + a_vel * q_live;
++            const double qn = q.norm();
++            out.segment(6, 4) = (qn > 1e-9) ? Eigen::Vector4d(q / qn) : q_pred;
++        }
++        if (n >= 13) out.segment(10, 3) += a_vel * err.segment(10, 3);
++        return out;
++    }
++
+     Eigen::VectorXd preparePredictedHandoffState(const Eigen::VectorXd& predicted_sample,
+                                                  const TargetSnapshot& target,
+                                                  int live_size) const {
+diff --git a/include/planner_core/types.hpp b/include/planner_core/types.hpp
+index 804a75c..89162ea 100644
+--- a/include/planner_core/types.hpp
++++ b/include/planner_core/types.hpp
+@@ -383,6 +383,31 @@ struct PlannerCoreConfig {
+     std::string target_frame_odom_topic = "/drone/target_frame_odom";
+     double solve_lead_guard_sec = 0.05;
+     double initial_solve_lead_sec = 0.20;
++    // Handoff seed blending: x0 = plan(t_act) + alpha * (live(now) - plan(now)).
++    //
++    // DISABLED BY DEFAULT (alpha = 0) — the mechanism does not currently work.
++    // A controlled SITL A/B (identical config, only alpha differs, 2026-08-19)
++    // showed a nonzero alpha destroys solver convergence on this OCP family:
++    //     alpha = 0          -> 36 accepted, 0 rejected
++    //     alpha = 0.70/0.60  -> 10 accepted, 78-84 rejected, constraint 3.4e8
++    // Reproduced twice.  Cause (unconfirmed): the blended seed is off the
++    // warm-start manifold.  create() rebases against prev_X whose first node
++    // is plan(t_act), so perturbing only x0 leaves a defect against the warm
++    // start's node 0, and the hard per-node interval constraint makes the IPM
++    // unable to absorb it.  A working version must offset the whole warm-start
++    // trajectory (or re-derive it), not just x0.
++    //
++    // alpha = 0 keeps the pre-existing predicted-handoff seed exactly.  The
++    // motivating measurement is still valid and worth recording: PX4 leaves
++    // rho_pos 0.642-0.774 / rho_vel 0.574-0.627 of the tracking error at the
++    // ~0.48 s activation lead (bag odom vs published PositionTarget), so the
++    // predicted seed's implicit "error will be zero" assumption is wrong --
++    // the planner just cannot currently act on that without breaking solves.
++    double handoff_blend_alpha_pos = 0.0;
++    double handoff_blend_alpha_vel = 0.0;
++    // Recovery-live is retained only as a genuine loss-of-tracking fault path.
++    // With blending active it should never fire in normal flight; the old 0.50
++    // threshold made it a routine event (and a 0.52 m step in the reference).
+     double recovery_pos_err = 0.50;
+     double recovery_vel_err = 2.00;
+     double max_first_solve_age_sec = 1.00;
+diff --git a/include/trajectory_replayer.hpp b/include/trajectory_replayer.hpp
+index 036f26f..7e90849 100644
+--- a/include/trajectory_replayer.hpp
++++ b/include/trajectory_replayer.hpp
+@@ -30,6 +30,7 @@ public:
+         state_dim_ = 13;
+         last_solve_wall_time_ = std::chrono::steady_clock::time_point{};
+         pending_state_trajectory_.clear();
++        pending_gains_.clear();
+         pending_control_trajectory_.clear();
+         pending_solve_num_ = -1;
+         pending_has_variable_dt_ = false;
+@@ -50,6 +51,13 @@ public:
+         Eigen::VectorXd x_cmd;
+         Eigen::VectorXd x_cmd_lookahead;
+         Eigen::VectorXd u_cmd;
++        // DDP feedback: the gain at the bracketing node and the FULL planned
++        // reference state it is relative to. x_cmd is truncated to state_dim for
++        // the command path; x_ref_full keeps the augmented block (monitor states
++        // included) so a caller can form K (x_measured - x_ref) over ALL rows.
++        // Empty when the plan carried no gains.
++        Eigen::MatrixXd K;
++        Eigen::VectorXd x_ref_full;
+     };
+ 
+     struct HandoffDiagnostic {
+@@ -58,8 +66,16 @@ public:
+         int new_solve_num = -1;
+         double active_plan_age_sec = 0.0;
+         double solve_latency_sec = 0.0;
++        // Physical-state jump only.  x_cmd carries the variable-dt cumulative
++        // time slot at index state_dim, and the two plans' clocks differ by
++        // exactly the activation lead by construction, so including that slot
++        // pins the norm at ~activation_elapsed and hides the real motion.
+         double state_jump_norm = 0.0;
+         double control_jump_norm = 0.0;
++        double jump_pos = 0.0;
++        double jump_vel = 0.0;
++        double jump_quat = 0.0;
++        double jump_omega = 0.0;
+         Eigen::VectorXd old_state_cmd;
+         Eigen::VectorXd new_state_cmd;
+         Eigen::VectorXd old_control_cmd;
+@@ -81,7 +97,8 @@ public:
+                     double /*ocp_dt*/,
+                     int min_replay_before_swap,
+                     bool is_variable_dt = false,
+-                    int state_dim = 13) {
++                    int state_dim = 13,
++                    const std::vector<Eigen::MatrixXd>& feedback_gains = {}) {
+         std::lock_guard<std::mutex> lk(mutex_);
+         min_replay_before_swap_ = std::max(1, min_replay_before_swap);
+ 
+@@ -98,6 +115,7 @@ public:
+ 
+         // Keep only the freshest pending plan; swap-in decision happens in sample().
+         pending_state_trajectory_ = state_trajectory;
++        pending_gains_ = feedback_gains;
+         pending_control_trajectory_ = control_trajectory;
+         pending_solve_num_ = solve_num;
+         pending_solve_wall_time_ = plan_origin_time;
+@@ -147,7 +165,7 @@ public:
+         if (state_trajectory_.empty()) {
+             return false;
+         }
+-        *out = makeSampleLocked(state_trajectory_, control_trajectory_, active_solve_num_,
++        *out = makeSampleLocked(state_trajectory_, control_trajectory_, gains_, active_solve_num_,
+                                 has_variable_dt_, state_dim_, elapsed, ocp_dt);
+         return out->has_plan;
+     }
+@@ -192,7 +210,7 @@ public:
+         s.active_solve_num = active_solve_num_;
+         s.elapsed = std::chrono::duration<double>(now - last_solve_wall_time_).count();
+ 
+-        return makeSampleLocked(state_trajectory_, control_trajectory_, active_solve_num_,
++        return makeSampleLocked(state_trajectory_, control_trajectory_, gains_, active_solve_num_,
+                                 has_variable_dt_, state_dim_, s.elapsed, ocp_dt);
+     }
+ 
+@@ -291,6 +309,7 @@ private:
+ 
+     ReplaySample makeSampleLocked(const std::vector<Eigen::VectorXd>& states,
+                                   const std::vector<Eigen::VectorXd>& controls,
++                                  const std::vector<Eigen::MatrixXd>& gains,
+                                   int solve_num,
+                                   bool variable_dt,
+                                   int state_dim,
+@@ -324,6 +343,17 @@ private:
+         s.x_cmd = sampleStateFrom(states, variable_dt, state_dim, t_sample, ocp_dt);
+         s.x_cmd_lookahead = sampleStateFrom(states, variable_dt, state_dim, t_lookahead, ocp_dt);
+         s.u_cmd = sampleControlFrom(controls, states, variable_dt, state_dim, t_sample, ocp_dt);
++
++        // DDP feedback: gains are ZERO-ORDER HELD at the bracketing node. They
++        // are not interpolated -- a gain matrix is a linear map, and blending two
++        // of them has no meaning, whereas holding the one whose linearization
++        // point we are inside does.
++        if (!gains.empty()) {
++            const int kg = std::min(k_lo, static_cast<int>(gains.size()) - 1);
++            s.K = gains[kg];
++            const int ks = std::min(k_lo, static_cast<int>(states.size()) - 1);
++            s.x_ref_full = states[ks];   // FULL state, augmented block included
++        }
+         return s;
+     }
+ 
+@@ -349,11 +379,12 @@ private:
+ 
+         const double old_elapsed = std::chrono::duration<double>(now - last_solve_wall_time_).count();
+         const double new_elapsed = std::chrono::duration<double>(now - pending_solve_wall_time_).count();
+-        const auto old_sample = makeSampleLocked(state_trajectory_, control_trajectory_,
++        const auto old_sample = makeSampleLocked(state_trajectory_, control_trajectory_, gains_,
+                                                  active_solve_num_, has_variable_dt_, state_dim_,
+                                                  old_elapsed, ocp_dt);
+         const auto new_sample = makeSampleLocked(pending_state_trajectory_,
+-                                                 pending_control_trajectory_, pending_solve_num_,
++                                                 pending_control_trajectory_, pending_gains_,
++                                                 pending_solve_num_,
+                                                  pending_has_variable_dt_, pending_state_dim_,
+                                                  new_elapsed, ocp_dt);
+ 
+@@ -368,7 +399,17 @@ private:
+         diag.old_control_cmd = old_sample.u_cmd;
+         diag.new_control_cmd = new_sample.u_cmd;
+         if (diag.old_state_cmd.size() == diag.new_state_cmd.size() && diag.old_state_cmd.size() > 0) {
+-            diag.state_jump_norm = (diag.new_state_cmd - diag.old_state_cmd).norm();
++            // Compare physical states only — drop the trailing cumulative-time
++            // slot (and anything past it) so the metric measures the reference
++            // discontinuity rather than the two plans' clock offset.
++            const int phys = std::min<int>(state_dim_, diag.old_state_cmd.size());
++            const Eigen::VectorXd d =
++                diag.new_state_cmd.head(phys) - diag.old_state_cmd.head(phys);
++            diag.state_jump_norm = d.norm();
++            if (phys >= 3)  diag.jump_pos   = d.segment(0, 3).norm();
++            if (phys >= 6)  diag.jump_vel   = d.segment(3, 3).norm();
++            if (phys >= 10) diag.jump_quat  = d.segment(6, 4).norm();
++            if (phys >= 13) diag.jump_omega = d.segment(10, 3).norm();
+         }
+         if (diag.old_control_cmd.size() == diag.new_control_cmd.size() &&
+             diag.old_control_cmd.size() > 0) {
+@@ -377,12 +418,14 @@ private:
+ 
+         state_trajectory_ = pending_state_trajectory_;
+         control_trajectory_ = pending_control_trajectory_;
++        gains_ = pending_gains_;
+         active_solve_num_ = pending_solve_num_;
+         last_solve_wall_time_ = pending_solve_wall_time_;
+         has_variable_dt_ = pending_has_variable_dt_;
+         state_dim_ = pending_state_dim_;
+ 
+         pending_state_trajectory_.clear();
++        pending_gains_.clear();
+         pending_control_trajectory_.clear();
+         pending_solve_num_ = -1;
+         pending_has_variable_dt_ = false;
+@@ -414,6 +457,7 @@ private:
+     mutable std::mutex mutex_;
+     std::vector<Eigen::VectorXd> state_trajectory_;
+     std::vector<Eigen::VectorXd> control_trajectory_;
++    std::vector<Eigen::MatrixXd> gains_;
+     int active_solve_num_ = -1;
+     bool has_variable_dt_ = false;
+     int state_dim_ = 13;  ///< Physical state dimension; DT slot lives at index state_dim_
+@@ -421,6 +465,7 @@ private:
+ 
+     std::vector<Eigen::VectorXd> pending_state_trajectory_;
+     std::vector<Eigen::VectorXd> pending_control_trajectory_;
++    std::vector<Eigen::MatrixXd> pending_gains_;
+     int pending_solve_num_ = -1;
+     bool pending_has_variable_dt_ = false;
+     int pending_state_dim_ = 13;
+diff --git a/launch/planner_launch.launch b/launch/planner_launch.launch
+index 97fcb0b..c691e6d 100644
+--- a/launch/planner_launch.launch
++++ b/launch/planner_launch.launch
+@@ -42,6 +42,15 @@
+   <arg name="target_predicted_accel_topic"      default="/target/predicted_accel"/>
+ 
+   <!-- Terminal freeze -->
++  <!-- Handoff seed blending: x0 = plan(t_act) + alpha*(live(now) - plan(now)).
++       alpha is the measured fraction of tracking error PX4 still leaves at the
++       activation lead (see docs/MAVROS_SITL.md). alpha=0 reproduces the old
++       predicted-handoff seed exactly, which is the A/B baseline. -->
++  <arg name="handoff_blend_alpha_pos"           default="0.0"/>
++  <arg name="handoff_blend_alpha_vel"           default="0.0"/>
++  <arg name="recovery_pos_err"                  default="0.50"/>
++  <arg name="recovery_vel_err"                  default="2.00"/>
++
+   <arg name="enable_terminal_freeze"            default="true"/>
+   <arg name="terminal_freeze_enter_pos"         default="0.20"/>
+   <arg name="terminal_freeze_enter_vel"         default="0.10"/>
+@@ -106,6 +115,10 @@
+     <param name="target_accel_topic"                value="$(arg target_accel_topic)"/>
+     <param name="target_predicted_accel_topic"      value="$(arg target_predicted_accel_topic)"/>
+ 
++    <param name="handoff_blend_alpha_pos"           type="double" value="$(arg handoff_blend_alpha_pos)"/>
++    <param name="handoff_blend_alpha_vel"           type="double" value="$(arg handoff_blend_alpha_vel)"/>
++    <param name="recovery_pos_err"                  type="double" value="$(arg recovery_pos_err)"/>
++    <param name="recovery_vel_err"                  type="double" value="$(arg recovery_vel_err)"/>
+     <param name="enable_terminal_freeze"            value="$(arg enable_terminal_freeze)"/>
+     <param name="terminal_freeze_enter_pos"         type="double" value="$(arg terminal_freeze_enter_pos)"/>
+     <param name="terminal_freeze_enter_vel"         type="double" value="$(arg terminal_freeze_enter_vel)"/>
+diff --git a/src/planner_node.cpp b/src/planner_node.cpp
+index b089919..157092f 100644
+--- a/src/planner_node.cpp
++++ b/src/planner_node.cpp
+@@ -68,6 +68,10 @@ public:
+         target_predicted_accel_topic_    = runtime_cfg.target_predicted_accel_topic;
+         debug_body_relative_trace_       = runtime_cfg.debug_body_relative_trace;
+         body_relative_odom_topic_        = runtime_cfg.body_relative_odom_topic;
++        handoff_blend_alpha_pos_         = runtime_cfg.handoff_blend_alpha_pos;
++        handoff_blend_alpha_vel_         = runtime_cfg.handoff_blend_alpha_vel;
++        recovery_pos_err_                = runtime_cfg.recovery_pos_err;
++        recovery_vel_err_                = runtime_cfg.recovery_vel_err;
+         enable_terminal_freeze_          = runtime_cfg.enable_terminal_freeze;
+         terminal_freeze_enter_pos_       = runtime_cfg.terminal_freeze_enter_pos;
+         terminal_freeze_enter_vel_       = runtime_cfg.terminal_freeze_enter_vel;
+@@ -433,6 +437,10 @@ private:
+         core_cfg.n_replay                = n_replay_;
+         core_cfg.max_constraint_error    = max_constraint_error_;
+         core_cfg.skip_trajectory_validation = skip_trajectory_validation_;
++        core_cfg.handoff_blend_alpha_pos = handoff_blend_alpha_pos_;
++        core_cfg.handoff_blend_alpha_vel = handoff_blend_alpha_vel_;
++        core_cfg.recovery_pos_err        = recovery_pos_err_;
++        core_cfg.recovery_vel_err        = recovery_vel_err_;
+         core_cfg.enable_terminal_freeze  = enable_terminal_freeze_;
+         core_cfg.terminal_freeze_enter_pos = terminal_freeze_enter_pos_;
+         core_cfg.terminal_freeze_enter_vel = terminal_freeze_enter_vel_;
+@@ -578,10 +586,14 @@ private:
+         for (const auto& d : diagnostics) {
+             if (d.code == "handoff") {
+                 const auto val = [&](const char* k){ const auto it=d.values.find(k); return it==d.values.end()?0.0:it->second; };
+-                ROS_INFO("[handoff] solve %.0f->%.0f age=%.3fs latency=%.3fs state_jump=%.4f control_jump=%.4f hover_z_jump=%.4f",
++                ROS_INFO("[handoff] solve %.0f->%.0f age=%.3fs latency=%.3fs state_jump=%.4f "
++                         "(pos=%.4f vel=%.4f quat=%.4f om=%.4f) control_jump=%.4f hover_z_jump=%.4f",
+                     val("previous_solve_num"),val("new_solve_num"),
+                     val("active_plan_age_sec"),val("solve_latency_sec"),
+-                    val("state_jump_norm"),val("control_jump_norm"),val("hover_z_jump"));
++                    val("state_jump_norm"),
++                    val("jump_pos"),val("jump_vel"),val("jump_quat"),val("jump_omega"),
++                    val("control_jump_norm"),val("hover_z_jump"));
++                logHandoffEvent(d);
+                 continue;
+             }
+             if (d.code == "solve_rejected") {
+@@ -677,6 +689,37 @@ private:
+         }
+     }
+ 
++    /// Emit the plan-swap discontinuity as a CSV row. Until this existed the
++    /// state_jump_norm / control_jump_norm / hover_z_jump columns were declared
++    /// and written as headers but never populated by any writer, so every
++    /// solver_events.csv ever produced carried NaN for them and the reference
++    /// discontinuity was only visible in the ROS console stream.
++    void logHandoffEvent(const planner_core::PlannerDiagnostic& d) {
++        if (!logging_enabled_ || !logging_initialized_) return;
++        const auto val = [&](const char* k) {
++            const auto it = d.values.find(k);
++            return it == d.values.end() ? std::numeric_limits<double>::quiet_NaN() : it->second;
++        };
++        planner_logging::SolverEventLogRow row;
++        row.solve_num = static_cast<int>(val("new_solve_num"));
++        row.event = "handoff";
++        row.reason = "plan_swap";
++        row.coord_mode = currentFrameLabel();
++        row.active_elapsed_now_sec = val("active_plan_age_sec");
++        row.state_jump_norm = val("state_jump_norm");
++        row.control_jump_norm = val("control_jump_norm");
++        row.hover_z_jump = val("hover_z_jump");
++        row.extra_values = {
++            {"previous_solve_num", val("previous_solve_num")},
++            {"solve_latency_sec", val("solve_latency_sec")},
++            {"jump_pos", val("jump_pos")},
++            {"jump_vel", val("jump_vel")},
++            {"jump_quat", val("jump_quat")},
++            {"jump_omega", val("jump_omega")},
++        };
++        logger_.logSolverEvent(row);
++    }
++
+     void logReplaySolverEvents(const planner_core::PlannerCoreStepResult& replay) {
+         if (!logging_enabled_ || !logging_initialized_) return;
+         if (replay.stale) {
+@@ -932,6 +975,11 @@ private:
+     std::string target_predicted_accel_topic_ = "/target/predicted_accel";
+     bool debug_body_relative_trace_ = false;
+ 
++    double handoff_blend_alpha_pos_   = 0.0;
++    double handoff_blend_alpha_vel_   = 0.0;
++    double recovery_pos_err_          = 0.50;
++    double recovery_vel_err_          = 2.00;
++
+     bool enable_terminal_freeze_      = true;
+     double terminal_freeze_enter_pos_ = 0.20;
+     double terminal_freeze_enter_vel_ = 0.10;
+diff --git a/test/test_perception_feedback_ablation.cpp b/test/test_perception_feedback_ablation.cpp
+index 2f5edfb..6a38614 100644
+--- a/test/test_perception_feedback_ablation.cpp
++++ b/test/test_perception_feedback_ablation.cpp
+@@ -13,6 +13,7 @@
+ #include <cstdlib>
+ #include <iostream>
+ #include <string>
++#include <vector>
+ 
+ namespace PT = PerceptionTrackOCP;
+ 
+@@ -158,7 +159,24 @@ SolveCheck solveCase(double yaw, double staleness) {
+ 
+ int main() {
+     unsetenv("PT_ENABLE_GIMBAL");
+-    PT::setPillars({});
++    // Default (unchanged): no obstacles -- "lost" then means only "yawed away".
++    // PT_TEST_PILLARS=1 restores the pillar field so the lost case is lost by
++    // OCCLUSION, which is the actual mechanism of loss in the real scenario and
++    // the half this regression otherwise skips.
++    if (std::getenv("PT_TEST_PILLARS")) {
++        std::vector<PT::Pillar> P;
++        for (int i = 0; i < 6; ++i) {
++            const double px = 3.0 + 2.0*i, hw = 0.5;
++            const double py = 1.5*std::sin(0.40*((px - 1.0)/0.45));
++            PT::Pillar q;
++            q.lo = Eigen::Vector3d(px-hw, py-hw, 0.0);
++            q.hi = Eigen::Vector3d(px+hw, py+hw, 3.0);
++            P.push_back(q);
++        }
++        PT::setPillars(P);
++    } else {
++        PT::setPillars({});
++    }
+ 
+     const auto& d = OCPRegistry::getDescriptor("perception_track");
+     require(d.name == "perception_track", "perception_track must be registered");
+diff --git a/test/test_planner_core.cpp b/test/test_planner_core.cpp
+index d1500bc..9a3b7bc 100644
+--- a/test/test_planner_core.cpp
++++ b/test/test_planner_core.cpp
+@@ -186,6 +186,9 @@ int main() {
+             auto cfg = hoverConfig();
+             cfg.recovery_pos_err = 1000.0;
+             cfg.recovery_vel_err = 1000.0;
++            // alpha = 0 must reproduce the pure predicted-handoff seed.
++            cfg.handoff_blend_alpha_pos = 0.0;
++            cfg.handoff_blend_alpha_vel = 0.0;
+             core.configure(cfg);
+             auto input = inputAt(t0);
+             core.acceptSolvedResult(input, input.current_state, solved(t0, 0.0));
+@@ -211,6 +214,65 @@ int main() {
+                     "predicted handoff did not sample active plan at activation elapsed");
+         }
+ 
++        {
++            // Handoff seed blending is a strict generalisation of the two
++            // pre-existing paths: x0 = predicted + alpha * (live - tracking).
++            // alpha = 0 is the old predicted_handoff seed; alpha = 1 carries
++            // the whole current tracking error onto the activation state.
++            // (alpha = 1 is NOT the old recovery_live seed: that returned the
++            // raw live state, discarding the plan's progress over the lead.)
++            const auto seed_at = [&](double a_pos, double a_vel) {
++                planner_core::PlannerCore core;
++                auto cfg = hoverConfig();
++                cfg.recovery_pos_err = 1000.0;
++                cfg.recovery_vel_err = 1000.0;
++                cfg.handoff_blend_alpha_pos = a_pos;
++                cfg.handoff_blend_alpha_vel = a_vel;
++                core.configure(cfg);
++                auto input = inputAt(t0);
++                core.acceptSolvedResult(input, input.current_state, solved(t0, 0.0));
++
++                auto early = inputAt(t0 + std::chrono::milliseconds(150));
++                planner_core::PlannerCoreStepResult early_out;
++                planner_core::PlannerCore::HandoffSchedule early_handoff;
++                core.prepareHandoffSchedule(early, early_out, early_handoff);
++
++                auto handoff = inputAt(t0 + std::chrono::milliseconds(180));
++                planner_core::PlannerCoreStepResult out;
++                planner_core::PlannerCore::HandoffSchedule schedule;
++                require(core.prepareHandoffSchedule(handoff, out, schedule),
++                        "blend fixture: solve should start in lead window");
++                double hp = 0.0, hv = 0.0;
++                Eigen::VectorXd x = core.selectInitialState(
++                    handoff.current_state, handoff.target_snapshot, schedule,
++                    &hp, &hv, out.x0_source, out);
++                return std::make_pair(x, out.x0_source);
++            };
++
++            const auto zero = seed_at(0.0, 0.0);
++            const auto full = seed_at(1.0, 1.0);
++            const auto half = seed_at(0.5, 0.5);
++
++            require(zero.second == "predicted_handoff",
++                    "alpha = 0 must fall through to the predicted handoff seed");
++            require(full.second == "blended_handoff" && half.second == "blended_handoff",
++                    "nonzero alpha must be reported as a blended handoff seed");
++
++            // The fixture's live state is x = 0 while the active plan is
++            // already past x = 1.8 at the solve instant, so the error is
++            // negative and the blended seed must fall short of the predicted
++            // one, monotonically in alpha.
++            require(full.first(0) < half.first(0) && half.first(0) < zero.first(0),
++                    "blended seed is not monotone in alpha");
++            require(std::abs(half.first(0) - 0.5 * (zero.first(0) + full.first(0))) < 1e-9,
++                    "alpha = 0.5 is not the midpoint of the alpha = 0 and alpha = 1 seeds");
++            require(std::abs(zero.first(0) - 2.0) < 1e-6,
++                    "alpha = 0 seed drifted from the predicted handoff state");
++            // Quaternion block must stay unit-norm through the blend.
++            require(std::abs(full.first.segment(6, 4).norm() - 1.0) < 1e-9,
++                    "blended seed quaternion is not normalised");
++        }
++
+         {
+             // Regression: when solve latency is longer than one replay step,
+             // the next origin must remain in the future instead of advancing
