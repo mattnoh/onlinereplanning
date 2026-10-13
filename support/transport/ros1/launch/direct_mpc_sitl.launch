@@ -2,12 +2,16 @@
   <arg name="drone_name" default="px4_drone"/>
   <arg name="log_dir" default="$(find comando_planner)/logs"/>
   <arg name="hover_thrust" default="0.7282821834"/>
+  <arg name="motor_thrust_exponent" default="2.0"/>
+  <arg name="motor_speed_offset" default="0.17647058823529413"/>
   <arg name="rate_tau" default="0.08"/>
   <arg name="rate_limit" default="0.35"/>
   <arg name="max_iter" default="120"/>
   <arg name="max_policy_age" default="2.0"/>
   <group>
     <env name="MPC_HOVER_THRUST" value="$(arg hover_thrust)"/>
+    <env name="MPC_MOTOR_THRUST_EXPONENT" value="$(arg motor_thrust_exponent)"/>
+    <env name="MPC_MOTOR_SPEED_OFFSET" value="$(arg motor_speed_offset)"/>
     <env name="MPC_RATE_TAU" value="$(arg rate_tau)"/>
     <env name="MPC_RATE_LIMIT" value="$(arg rate_limit)"/>
     <env name="MPC_MAX_ITER" value="$(arg max_iter)"/>

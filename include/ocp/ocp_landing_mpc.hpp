@@ -398,7 +398,7 @@ constexpr int N = comando_parameters::MpcParameters::horizon;
 inline double rateTau() { return std::max(0.02, Ref::defaults.mpc.rate_tau); }
 inline int substeps() { return std::max(2,static_cast<int>(std::ceil(DT/(0.65*rateTau())))); }
 inline double rateLimit() { return Ref::defaults.mpc.rate_limit; }
-inline double thrustMax() { return std::min(Ref::FMAX/Ref::MASS,9.81/std::max(0.1,Ref::defaults.mpc.hover_thrust)); }
+inline double thrustMax() { return std::min(Ref::FMAX/Ref::MASS,9.81*std::pow((1+Ref::defaults.mpc.motor_speed_offset)/std::max(.1,Ref::defaults.mpc.hover_thrust+Ref::defaults.mpc.motor_speed_offset),Ref::defaults.mpc.motor_thrust_exponent)); }
 inline Eigen::VectorXd bounded(Eigen::VectorXd u) {
     if(u.size()!=NU || !u.allFinite()) throw std::runtime_error("invalid MPC control");
     u(0)=std::clamp(u(0), Ref::FMIN/Ref::MASS, thrustMax());

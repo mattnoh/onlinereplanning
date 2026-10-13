@@ -17,6 +17,8 @@
 #pragma once
 
 #include <rclcpp/rclcpp.hpp>
+#include "parameters.hpp"
+#include "planner_core/adapters.hpp"
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <Eigen/Dense>
@@ -231,7 +233,9 @@ inline void publishBodyRateCommand(Handles& h, const Eigen::VectorXd& u) {
     msg.body_rate.y = u.size() > 2 ? float(u(2)) : 0.0f;
     msg.body_rate.z = u.size() > 3 ? float(u(3)) : 0.0f;
     msg.thrust = u.size() > 0
-        ? float(std::clamp(u(0) * h.hover_thrust / 9.81, 0.0, 1.0))
+        ? float(planner_core::normalizedThrust(u(0),h.hover_thrust,
+            comando_parameters::defaults.mpc.motor_thrust_exponent,
+            comando_parameters::defaults.mpc.motor_speed_offset))
         : 0.0f;
     h.att_pub->publish(msg);
 }

@@ -28,6 +28,7 @@
 
 #include <ros/ros.h>
 #include "planner_core/adapters.hpp"
+#include "parameters.hpp"
 #include <nav_msgs/Odometry.h>
 #include <mavros_msgs/AttitudeTarget.h>
 #include <mavros_msgs/PositionTarget.h>
@@ -115,7 +116,9 @@ inline void publishAttitudeTargetMsg(Handles& h, const Eigen::VectorXd& u) {
     msg.body_rate.y = u.size() > 2 ? float(u(2)) : 0.0f;
     msg.body_rate.z = u.size() > 3 ? float(u(3)) : 0.0f;
     msg.thrust = u.size() > 0
-        ? float(planner_core::normalizedThrust(u(0), h.hover_thrust))
+        ? float(planner_core::normalizedThrust(u(0), h.hover_thrust,
+            comando_parameters::defaults.mpc.motor_thrust_exponent,
+            comando_parameters::defaults.mpc.motor_speed_offset))
         : 0.0f;
     h.att_pub.publish(msg);
 }

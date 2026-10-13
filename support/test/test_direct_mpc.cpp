@@ -33,6 +33,13 @@ int main(){try{
     Eigen::VectorXd odom=Eigen::VectorXd::Zero(13);odom(3)=1;odom(6)=std::sqrt(.5);odom(9)=std::sqrt(.5);odom(10)=.2;
     auto world=planner_core::bodyOdometryToWorld(odom);check(std::abs(world(4)-1)<1e-12&&std::abs(world(3))<1e-12&&world(10)==.2,"odometry frame conversion");
     check(std::abs(planner_core::normalizedThrust(9.81,.7)-.7)<1e-12&&planner_core::normalizedThrust(30,.7)==1,"thrust normalization");
+    for(double requested:{0.,3.,6.,9.81,12.}) {
+        const double signal=planner_core::normalizedThrust(requested,.7282821834,2,150./850);
+        if(signal>0&&signal<1) {
+            const double physical=9.81*std::pow((signal+150./850)/(.7282821834+150./850),2);
+            check(std::abs(physical-requested)<1e-12,"motor thrust inverse must preserve DDP acceleration");
+        }
+    }
     O::SpeedBound speed;StcLandingNoAugOCP::GeneralSpeedCon<double> legacy_speed;
     check((speed.c(x,u)-legacy_speed.c(x.head(14),u)).norm()<1e-12,"speed cone convention");
     OCPCreateArgs args;args.current_state=x;args.target_accel=pred->a;auto problem=O::create(args);

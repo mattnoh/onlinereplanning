@@ -94,8 +94,11 @@ inline Eigen::VectorXd bodyOdometryToWorld(Eigen::VectorXd x) {
     if(q.norm()<1e-8)throw std::runtime_error("invalid odometry quaternion");
     x.segment<3>(3)=q.normalized()*x.segment<3>(3).eval();return x;
 }
-inline double normalizedThrust(double acceleration,double hover) {
-    if(!std::isfinite(acceleration)||!std::isfinite(hover))return 0;
-    return std::clamp(acceleration*hover/9.81,0.0,1.0);
+inline double normalizedThrust(double acceleration,double hover,double exponent=1,double offset=0) {
+    if(!std::isfinite(acceleration)||!std::isfinite(hover)||!std::isfinite(exponent)||
+       !std::isfinite(offset)||exponent<=0||offset<0)return 0;
+    // a/g = ((signal + offset)/(hover + offset))^exponent.
+    // offset is minimum motor speed divided by the usable speed range.
+    return std::clamp((hover+offset)*std::pow(std::max(0.,acceleration)/9.81,1/exponent)-offset,0.0,1.0);
 }
 }

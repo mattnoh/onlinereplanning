@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <string>
+#include <stdexcept>
 
 // Shared data/defaults only. Dynamics, costs, constraints, and their derivatives
 // belong to each complete OCP file. Construct Parameters to override defaults
@@ -106,6 +107,8 @@ struct MpcParameters {
     double rate_tau = 0.08;
     double rate_limit = 1.0;
     double hover_thrust = 0.7282821834;
+    double motor_thrust_exponent = 1.0;
+    double motor_speed_offset = 0.0;
     double max_policy_age = 1.0;
     double slew_thrust_weight = 0.1;
     double slew_rate_weight = 2.0;
@@ -190,6 +193,10 @@ inline Parameters fromEnvironment() {
     p.solver.verbose=envOrInt("SZMUK_SOLVER_VERBOSE",0)!=0;
     p.mpc.rate_tau=envOrQ("MPC_RATE_TAU",p.mpc.rate_tau);p.mpc.rate_limit=envOrQ("MPC_RATE_LIMIT",p.mpc.rate_limit);
     p.mpc.hover_thrust=envOrQ("MPC_HOVER_THRUST",p.mpc.hover_thrust);
+    p.mpc.motor_thrust_exponent=envOrQ("MPC_MOTOR_THRUST_EXPONENT",p.mpc.motor_thrust_exponent);
+    p.mpc.motor_speed_offset=envOrQ("MPC_MOTOR_SPEED_OFFSET",p.mpc.motor_speed_offset);
+    if(p.mpc.motor_thrust_exponent<=0||p.mpc.motor_speed_offset<0)
+        throw std::invalid_argument("invalid motor thrust mapping parameters");
     p.mpc.max_policy_age=envOrQ("MPC_MAX_POLICY_AGE",p.mpc.max_policy_age);
     p.mpc.max_iter=static_cast<int>(envOrQ("MPC_MAX_ITER",p.mpc.max_iter));
     p.mpc.slew_thrust_weight=envOrQ("MPC_SLEW_THR",p.mpc.slew_thrust_weight);
