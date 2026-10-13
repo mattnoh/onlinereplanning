@@ -11,7 +11,8 @@
 ///
 /// Instead of carrying the CT-cSTC violation as an augmented state y with a
 /// terminal EQ y_N = 0, the SAME RK4 interval integral of the STC density H
-/// is recomputed directly from (x_k, u_k) inside a per-stage inequality:
+/// is integrated by StcStageConstraint directly from (x_k, u_k) inside a
+/// per-stage inequality, using the host dynamics and analytic Jacobians:
 ///
 ///   integral(H dt) over [t_k, t_k + theta_k]  <=  eps      (hard-wired, always on)
 ///
@@ -43,6 +44,7 @@
 #include <utility>
 #include <vector>
 #include "optimal_control_problem.h"
+#include "constraint/stc_stage_constraint.h"
 #include "alipddp/alipddp.h"
 #include "planner_core/types.hpp"
 
@@ -310,6 +312,32 @@ private:
     }
 
 public:
+    // Continuous host dynamics for StcStageConstraint's interval quadrature.
+    // IDX_DT is integrated alongside the physical state; tau must not be
+    // added a second time when sampling the predictor.
+    Vector<Scalar> intervalRates(const Vector<Scalar>& x, const Vector<Scalar>& u) const {
+        Vector<Scalar> out = Vector<Scalar>::Zero(NX_SS);
+        out.head(NX) = this->xdot_impl(x.head(NX).template cast<double>(),
+            u.head(NU).template cast<double>(),
+            pred_->predictAccel(static_cast<double>(x(IDX_DT)))).template cast<Scalar>();
+        out(IDX_DT) = Scalar(1);
+        return out;
+    }
+
+    Matrix<Scalar> intervalRatesX(const Vector<Scalar>& x, const Vector<Scalar>& u) const {
+        Matrix<Scalar> out = Matrix<Scalar>::Zero(NX_SS, NX_SS);
+        out.topLeftCorner(NX, NX) = this->Amat_impl(
+            x.head(NX).template cast<double>(), u.head(NU).template cast<double>()).template cast<Scalar>();
+        // ConstantAccelPredictor has zero acceleration derivative in time.
+        return out;
+    }
+
+    Matrix<Scalar> intervalRatesU(const Vector<Scalar>& x, const Vector<Scalar>&) const {
+        Matrix<Scalar> out = Matrix<Scalar>::Zero(NX_SS, NU_SS);
+        out.topLeftCorner(NX, NU) = this->Bmat_impl(x.head(NX).template cast<double>()).template cast<Scalar>();
+        return out;
+    }
+
     // The SAME RK4 interval integral the accumulator would have added to y,
     // computed directly from (x,u). No augmented state is involved.
     double intervalIntegral(const Vector<Scalar>& x, const Vector<Scalar>& u) const {
@@ -874,59 +902,156 @@ class GeneralSpeedCon : public StageConstraintBase<Scalar> { public:
     Matrix<Scalar> cu(const Vector<Scalar>&, const Vector<Scalar>&) const override {
         return Matrix<Scalar>::Zero(4, NU_SS); }};
 
-// No-aug CT-cSTC interval constraint:
-//   integral(H dt) over [t_k, t_k + theta_k] <= eps
-// computed by the SAME RK4 quadrature the augmented accumulator used, but
-// directly from (x_k, u_k) — no augmented state involved.
+// The shared interface owns the production CTCS row and its interval
+// sensitivities. The host's original integrand/integral above remain an
+// independent diagnostic reference. Weights and epsilon both use Y_SCALE.
 template<typename Scalar>
-class CtcsIntervalStepIneqCon : public StageConstraintBase<Scalar> {
-public:
-    CtcsIntervalStepIneqCon(
-        std::shared_ptr<Quad6DOFVarTimeRelativePred<Scalar>> dyn,
-        double eps)
-        : dyn_(std::move(dyn)), eps_(Scalar(eps)) {
-        this->constraint_type = ConstraintType::NO;
-        this->dim_c = 1;
-    }
+std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
+    std::shared_ptr<Quad6DOFVarTimeRelativePred<Scalar>> dyn,
+    double eps = CTCS_STEP_EPS / CTCS_Y_SCALE) {
+    using Vec = Vector<Scalar>;
+    using StateFn = std::function<Scalar(const Vec&)>;
+    using GradFn = std::function<Vec(const Vec&)>;
+    auto row = std::make_shared<StcStageConstraint<Scalar>>(StcForm::Density, eps);
+    const auto zero = [](const Vec& x) -> Vec { return Vec::Zero(x.size()); };
+    const auto always = [](const Vec&) -> Scalar { return Scalar(-1); };
+    const auto tilt = [](const Vec& x) -> Scalar { return x(7)*x(7) + x(8)*x(8); };
+    const auto dtilt = [](const Vec& x) -> Vec {
+        Vec g = Vec::Zero(x.size()); g(7) = Scalar(2)*x(7); g(8) = Scalar(2)*x(8); return g;
+    };
+    const auto omega = [](const Vec& x) -> Scalar { return x.template segment<3>(10).squaredNorm(); };
+    const auto domega = [](const Vec& x) -> Vec {
+        Vec g = Vec::Zero(x.size()); g.template segment<3>(10) = Scalar(2)*x.template segment<3>(10); return g;
+    };
+    const auto tiltLimit = [](double degrees) {
+        return Scalar(std::pow(std::sin(0.5 * degrees * M_PI / 180.0), 2));
+    };
+    auto add = [&](const std::string& name, StateFn trigger, GradFn dtrigger,
+                   StateFn consequence, GradFn dconsequence, double weight) {
+        row->add(name).triggerWhenNegative(std::move(trigger), std::move(dtrigger))
+            .consequence(
+                [consequence](const Vec& x, const Vec&) -> Scalar { return consequence(x); },
+                [dconsequence](const Vec& x, const Vec&) -> Vec { return dconsequence(x); },
+                [](const Vec&, const Vec& u) -> Vec { return Vec::Zero(u.size()); })
+            .weight(Scalar(weight / CTCS_Y_SCALE));
+    };
+    const Scalar looseTilt = tiltLimit(THETA_PHASE0_DEG);
+    add("loose_tilt", always, zero,
+        [=](const Vec& x) -> Scalar { return tilt(x) - looseTilt; }, dtilt, 1.0);
+    add("loose_omega", always, zero,
+        [=](const Vec& x) -> Scalar { return omega(x) - Scalar(OMEGA_PHASE0_MAX*OMEGA_PHASE0_MAX); }, domega, 1.0);
 
-    Vector<Scalar> c(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
-        Vector<Scalar> out(1);
-        out(0) = Scalar(dyn_->intervalIntegral(x, u)) - eps_;
-        return out;
-    }
+    if (useTriggeredLandingStc()) {
+        const bool settle = stageTriggerMode() == "settle";
+        const Scalar settleTilt = tiltLimit(STAGE_SETTLE_TILT_DEG);
+        StateFn stageTrigger = [=](const Vec& x) -> Scalar {
+            if (settle) return -(posPart(tilt(x) - settleTilt) +
+                posPart(omega(x) - Scalar(STAGE_SETTLE_OMEGA_MAX*STAGE_SETTLE_OMEGA_MAX)));
+            const Scalar margin = (std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) -
+                                   Scalar(STAGE_RADIUS)) / Scalar(STAGE_TRIGGER_SCALE);
+            return margin > Scalar(0) ? -(Scalar(STAGE_TRIGGER_FLOOR) + margin) : Scalar(0);
+        };
+        GradFn dstage = [=](const Vec& x) -> Vec {
+            Vec g = Vec::Zero(x.size());
+            if (settle) {
+                if (tilt(x) > settleTilt) g -= dtilt(x);
+                if (omega(x) > Scalar(STAGE_SETTLE_OMEGA_MAX*STAGE_SETTLE_OMEGA_MAX)) g -= domega(x);
+            } else {
+                const Scalar r = std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
+                if (r > Scalar(STAGE_RADIUS)) {
+                    g(0) = -x(0)/(r*Scalar(STAGE_TRIGGER_SCALE));
+                    g(1) = -x(1)/(r*Scalar(STAGE_TRIGGER_SCALE));
+                }
+            }
+            return g;
+        };
+        add("staging", stageTrigger, dstage,
+            [](const Vec& x) -> Scalar { return Scalar(Z_STAGE) - x(2); },
+            [](const Vec& x) -> Vec { Vec g = Vec::Zero(x.size()); g(2) = Scalar(-1); return g; }, W_STC_STAGE);
 
-    Matrix<Scalar> cx(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
-        Matrix<Scalar> J = Matrix<Scalar>::Zero(1, x.size());
-        const double eps = 1e-6;
-        for (int i = 0; i < x.size(); ++i) {
-            Vector<Scalar> xp = x;
-            Vector<Scalar> xm = x;
-            xp(i) += Scalar(eps);
-            xm(i) -= Scalar(eps);
-            J(0, i) = Scalar(dyn_->intervalIntegral(xp, u) -
-                             dyn_->intervalIntegral(xm, u)) / Scalar(2.0 * eps);
-        }
-        return J;
-    }
+        StateFn losTrigger = [](const Vec& x) -> Scalar {
+            const Scalar m = (Scalar(LOS_ALT_TRIG) - x(2))/Scalar(LOS_TRIGGER_SCALE);
+            return m > Scalar(0) ? -(Scalar(LOS_TRIGGER_FLOOR) + m) : Scalar(0);
+        };
+        GradFn dlosTrigger = [](const Vec& x) -> Vec {
+            Vec g = Vec::Zero(x.size());
+            if (x(2) < Scalar(LOS_ALT_TRIG)) g(2) = Scalar(1)/Scalar(LOS_TRIGGER_SCALE);
+            return g;
+        };
+        // Body boresight and its quaternion derivatives, without normalizing
+        // intermediate RK4 states (the deployed interval uses them as-is).
+        const auto boresight = [](const Vec& x) -> Eigen::Matrix<Scalar,3,1> {
+            const Scalar w=x(6), a=x(7), b=x(8), c=x(9);
+            return {Scalar(2)*(a*c+w*b), Scalar(2)*(b*c-w*a), w*w-a*a-b*b+c*c};
+        };
+        StateFn los = [=](const Vec& x) -> Scalar {
+            const Scalar axial = x.template head<3>().dot(boresight(x));
+            const Scalar lateral2 = x.template head<3>().squaredNorm() - axial*axial;
+            return std::sqrt(posPart(lateral2)+Scalar(1e-12)) - Scalar(LOS_CONE_TAN)*axial;
+        };
+        GradFn dlos = [=](const Vec& x) -> Vec {
+            const Scalar w=x(6), a=x(7), b=x(8), c=x(9);
+            const auto axis = boresight(x);
+            const Scalar axial = x.template head<3>().dot(axis);
+            Vec da = Vec::Zero(x.size()); da.template head<3>() = axis;
+            Eigen::Matrix<Scalar,3,4> db;
+            db << Scalar(2)*b, Scalar(2)*c, Scalar(2)*w, Scalar(2)*a,
+                  -Scalar(2)*a, -Scalar(2)*w, Scalar(2)*c, Scalar(2)*b,
+                  Scalar(2)*w, -Scalar(2)*a, -Scalar(2)*b, Scalar(2)*c;
+            da.template segment<4>(6) = db.transpose()*x.template head<3>();
+            const Scalar lateral2 = x.template head<3>().squaredNorm()-axial*axial;
+            Vec g = -Scalar(LOS_CONE_TAN)*da;
+            if (lateral2 > Scalar(0)) {
+                Vec dl = -Scalar(2)*axial*da; dl.template head<3>() += Scalar(2)*x.template head<3>();
+                g += dl/(Scalar(2)*std::sqrt(lateral2+Scalar(1e-12)));
+            }
+            return g;
+        };
+        add("los", losTrigger, dlosTrigger, los, dlos, W_STC_LOS);
 
-    Matrix<Scalar> cu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
-        Matrix<Scalar> J = Matrix<Scalar>::Zero(1, u.size());
-        const double eps = 1e-6;
-        for (int i = 0; i < u.size(); ++i) {
-            Vector<Scalar> up = u;
-            Vector<Scalar> um = u;
-            up(i) += Scalar(eps);
-            um(i) -= Scalar(eps);
-            J(0, i) = Scalar(dyn_->intervalIntegral(x, up) -
-                             dyn_->intervalIntegral(x, um)) / Scalar(2.0 * eps);
-        }
-        return J;
+        const bool capture = useRhCaptureLandingTrigger();
+        StateFn landTrigger = [=](const Vec& x) -> Scalar {
+            if (!capture) return x(2) - Scalar(ALT_TRIG);
+            return -landingAltitudeTrigger<Scalar>(x(2), x(0)*x(0)+x(1)*x(1));
+        };
+        GradFn dland = [=](const Vec& x) -> Vec {
+            Vec g = Vec::Zero(x.size());
+            if (!capture) { g(2) = Scalar(1); return g; }
+            const Scalar cap2 = Scalar(CAP_LAND_RADIUS*CAP_LAND_RADIUS);
+            const Scalar altitude = posPart(Scalar(ALT_TRIG)-x(2));
+            const Scalar lateral = posPart(cap2-x(0)*x(0)-x(1)*x(1));
+            const Scalar denominator = Scalar(ALT_TRIG)*cap2;
+            if (altitude > Scalar(0)) g(2) = lateral/denominator;
+            if (lateral > Scalar(0)) {
+                g(0) = Scalar(2)*x(0)*altitude/denominator;
+                g(1) = Scalar(2)*x(1)*altitude/denominator;
+            }
+            return g;
+        };
+        add("landing_speed", landTrigger, dland,
+            [](const Vec& x) -> Scalar { return x.template segment<3>(3).squaredNorm()-Scalar(SPD_STC_MAX*SPD_STC_MAX); },
+            [](const Vec& x) -> Vec { Vec g=Vec::Zero(x.size()); g.template segment<3>(3)=Scalar(2)*x.template segment<3>(3); return g; }, W_LAND_SPEED);
+        const Scalar landTilt = tiltLimit(ALPHA_THETA_STC*THETA_STC_DEG);
+        add("landing_tilt", landTrigger, dland,
+            [=](const Vec& x) -> Scalar { return tilt(x)-landTilt; }, dtilt, W_LAND_TILT);
+        add("landing_omega", landTrigger, dland,
+            [=](const Vec& x) -> Scalar { return omega(x)-Scalar(OMEGA_STC_MAX*OMEGA_STC_MAX); }, domega, W_LAND_OMEGA);
+        add("landing_glideslope", landTrigger, dland,
+            [](const Vec& x) -> Scalar { return std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) - Scalar(GS_CONE_TAN)*(x(2)+Scalar(GS_APEX_OFFSET)); },
+            [](const Vec& x) -> Vec {
+                Vec g=Vec::Zero(x.size()); const Scalar r=std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
+                g(0)=x(0)/r; g(1)=x(1)/r; g(2)=-Scalar(GS_CONE_TAN); return g;
+            }, W_LAND_GS);
     }
-
-private:
-    std::shared_ptr<Quad6DOFVarTimeRelativePred<Scalar>> dyn_;
-    Scalar eps_;
-};
+    StcIntervalDynamics<Scalar> host;
+    host.idx_theta = IDX_THETA;
+    host.substeps = 1; // matches the deployed one-step RK4 discrete map
+    host.xdot = [dyn](const Vec& x, const Vec& u, Scalar) -> Vec { return dyn->intervalRates(x,u); };
+    host.fx = [dyn](const Vec& x, const Vec& u, Scalar) -> Matrix<Scalar> { return dyn->intervalRatesX(x,u); };
+    host.fu = [dyn](const Vec& x, const Vec& u, Scalar) -> Matrix<Scalar> { return dyn->intervalRatesU(x,u); };
+    row->setIntervalDynamics(std::move(host));
+    return row;
+}
 
 inline Eigen::VectorXd ensureNoAugStateSize(const Eigen::VectorXd& x) {
     if (x.size() == NX_SS) return x;
@@ -1022,8 +1147,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     // The constraint sees the SCALED integral, so the physical budget
     // CTCS_STEP_EPS is divided by CTCS_Y_SCALE (same zero set as unscaled).
     // Hard-wired: this OCP has no other enforcement mode.
-    auto cstep = std::make_shared<CtcsIntervalStepIneqCon<double>>(
-        dyn, CTCS_STEP_EPS / CTCS_Y_SCALE);
+    auto cstep = makeCtcsConstraint<double>(dyn);
 
     const double eps_cost = envOrQ("SZMUK_W_EPS", 1.0);
     const Eigen::Vector3d r_follow(0.0, 0.0, Z_STAGE);
