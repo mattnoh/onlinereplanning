@@ -252,6 +252,7 @@ struct OCPDescriptor {
     WarmStart warm_start = WarmStart::Shift;
     CommandMode command_mode = CommandMode::CmdFullState;
     Coordinates coordinates = Coordinates::World;
+    std::function<Eigen::Vector3d(const Eigen::VectorXd&,const Eigen::VectorXd&)> world_acceleration;
 
     bool disarm_on_landing_finish = false;
     bool skip_altitude_validation = false;
@@ -334,6 +335,7 @@ struct PlannerCommand {
     CommandKind kind = CommandKind::None;
     Eigen::VectorXd state;
     Eigen::VectorXd control;
+    std::optional<Eigen::Vector3d> acceleration;
     Eigen::Vector4d hover = Eigen::Vector4d::Zero();  // [vx_body, vy_body, z_world, yaw_rate]
 };
 

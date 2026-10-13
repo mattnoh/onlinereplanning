@@ -73,6 +73,7 @@ struct Handles {
     ros::Time last_arm_request{0.0};
 
     Eigen::VectorXd last_state_cmd = Eigen::VectorXd::Zero(13);
+    std::optional<Eigen::Vector3d> last_acceleration;
     Eigen::VectorXd last_rate_cmd  = Eigen::VectorXd::Zero(5);
     bool last_cmd_is_bodyrate = false;
     bool has_state_cmd = false;
@@ -119,7 +120,8 @@ inline void publishAttitudeTargetMsg(Handles& h, const Eigen::VectorXd& u) {
     h.att_pub.publish(msg);
 }
 
-inline void publishPositionTargetMsg(Handles& h, const Eigen::VectorXd& state) {
+inline void publishPositionTargetMsg(Handles& h, const Eigen::VectorXd& state,
+                                    const std::optional<Eigen::Vector3d>& acceleration={}) {
     Eigen::VectorXd s;try{s=h.command_to_local?h.command_to_local(state):state;}catch(const std::exception& e){ROS_WARN_THROTTLE(2,"Missing command transform: %s",e.what());return;}
     if (h.land_engaged) return;  // control handed to PX4 for touchdown/stop
     mavros_msgs::PositionTarget msg;
@@ -129,6 +131,13 @@ inline void publishPositionTargetMsg(Handles& h, const Eigen::VectorXd& state) {
                     mavros_msgs::PositionTarget::IGNORE_AFY |
                     mavros_msgs::PositionTarget::IGNORE_AFZ |
                     mavros_msgs::PositionTarget::IGNORE_YAW_RATE;
+    if(acceleration) {
+        Eigen::VectorXd vector=Eigen::VectorXd::Zero(13);vector(6)=1;vector.segment<3>(3)=*acceleration;
+        try {if(h.command_to_local)vector=h.command_to_local(vector);}
+        catch(const std::exception& e){ROS_WARN_THROTTLE(2,"Missing acceleration transform: %s",e.what());return;}
+        msg.type_mask=mavros_msgs::PositionTarget::IGNORE_YAW_RATE;
+        msg.acceleration_or_force.x=vector(3);msg.acceleration_or_force.y=vector(4);msg.acceleration_or_force.z=vector(5);
+    }
     if (s.size() >= 3) { msg.position.x=float(s(0)); msg.position.y=float(s(1)); msg.position.z=float(s(2)); }
     if (s.size() >= 6) { msg.velocity.x=float(s(3)); msg.velocity.y=float(s(4)); msg.velocity.z=float(s(5)); }
     if (s.size() >= 10) {
@@ -254,7 +263,7 @@ inline void heartbeatTick(Handles& h) {
     if (h.has_rate_cmd && h.last_cmd_is_bodyrate) {
         publishAttitudeTargetMsg(h, h.last_rate_cmd);
     } else if (h.has_state_cmd) {
-        publishPositionTargetMsg(h, h.last_state_cmd);
+        publishPositionTargetMsg(h, h.last_state_cmd,h.last_acceleration);
     } else {
         publishHoldPositionTarget(h);
     }
@@ -399,12 +408,14 @@ inline void publishBodyRateCommand(Handles& h, const Eigen::VectorXd& u) {
     publishAttitudeTargetMsg(h, u);
 }
 
-inline void publishFullStateCommand(Handles& h, const Eigen::VectorXd& s) {
+inline void publishFullStateCommand(Handles& h, const Eigen::VectorXd& s,
+                                    const std::optional<Eigen::Vector3d>& acceleration={}) {
     std::lock_guard<std::recursive_mutex> guard(h.command_mutex);
     h.last_state_cmd = s;
+    h.last_acceleration=acceleration;
     h.last_cmd_is_bodyrate = false;
     h.has_state_cmd = true;
-    publishPositionTargetMsg(h, s);
+    publishPositionTargetMsg(h, s,acceleration);
 }
 
 }  // namespace mavros

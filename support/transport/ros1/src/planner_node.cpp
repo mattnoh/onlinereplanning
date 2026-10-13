@@ -492,8 +492,12 @@ private:
 
     // ── Command publishing ────────────────────────────────────────────────────
     void publishCommandAbsolute(const Eigen::VectorXd& s, const Eigen::VectorXd& u) {
-        if (platform_ == "mavros") platform::mavros::publishFullStateCommand(mavros_handles_, s);
-        (void)u;
+        std::optional<Eigen::Vector3d> acceleration;
+        if(!ocp_type_.empty()&&u.size()>0&&u(0)>0) {
+            const auto& descriptor=OCPRegistry::getDescriptor(ocp_type_);
+            if(descriptor.world_acceleration)acceleration=descriptor.world_acceleration(s,u);
+        }
+        if (platform_ == "mavros") platform::mavros::publishFullStateCommand(mavros_handles_, s,acceleration);
     }
 
     void publishPausedHoverHoldTick() {
@@ -587,7 +591,7 @@ private:
         if (cmd.kind == planner_core::CommandKind::BodyRate && platform_ == "mavros") {
             platform::mavros::publishBodyRateCommand(mavros_handles_, cmd.control);
         } else if (cmd.kind == planner_core::CommandKind::FullState && platform_ == "mavros") {
-            platform::mavros::publishFullStateCommand(mavros_handles_, cmd.state);
+            platform::mavros::publishFullStateCommand(mavros_handles_, cmd.state,cmd.acceleration);
         }
     }
 
@@ -806,7 +810,13 @@ private:
         std::shared_lock<std::shared_mutex> session(session_mutex_);
         if (mode_ != "mpc") return;
         if (command_paused_.load()) { publishPausedHoverHoldTick(); return; }
-        if (!is_primed_.load()) return;
+        if (!is_primed_.load()) {
+            // Keep the moving startup reference current while DDP solves.
+            // Re-streaming one frozen position with a nonzero target velocity
+            // creates a position/velocity inconsistency in PX4's cascade.
+            if(!ordinary_control_started_)publishPausedHoverHoldTick();
+            return;
+        }
 
         last_target_snapshot_ = getTargetSnapshot();
         planner_core::PlannerCoreStepResult replay;

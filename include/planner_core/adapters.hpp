@@ -81,6 +81,7 @@ inline PlannerCommand makePlannerCommand(Platform platform,
 
     cmd.kind = CommandKind::FullState;
     cmd.state = reconstructWorldState(desc,state,target);
+    if(desc.world_acceleration)cmd.acceleration=desc.world_acceleration(cmd.state,control);
     return cmd;
 }
 

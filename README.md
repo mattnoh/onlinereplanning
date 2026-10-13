@@ -216,3 +216,7 @@ The unflown separate tracking-QP experiment was removed. The older custom LQR ba
 The non-ROS solver runs are the reference for checking the ROS/PX4 mismatch. This correction does not establish physical constraint satisfaction: matched simulator checks, actuator/tracking model validation, and faster warm-started DDP updates remain required. No physical limit or solve-acceptance threshold was changed.
 
 Verification for this correction: all six core tests passed, including exact DDP control delivery and scheduled-policy handoff. ROS1 and shared ROS2 planner builds passed sequentially. The historical ROS horizon audits are not matched comparisons with the non-ROS driver. New SITL constraint validation remains pending.
+
+The first DDP-only ordinary MPC straight run (`logs/ddp_only_landing_mpc`) timed out after policy expiry. Its accepted horizon had zero future-node physical excess, but first controlled measured angular speed was 0.05753 rad/s. During the first solve, the startup reference was frozen despite a nonzero moving-target velocity; that reference update is now maintained until DDP handoff.
+
+RH MAVROS commands now include world acceleration feedforward computed by the selected OCP as `a = R(q) * [0,0,T/m] + g`. The full equations stay in each OCP. Target acceleration is not added twice. Hold/preparation commands have no fabricated thrust feedforward. MAVROS rotates acceleration into the command frame without translating it. Six core tests and the ROS1 build pass; simulator verification remains required.

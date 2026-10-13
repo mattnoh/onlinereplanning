@@ -241,7 +241,8 @@ inline void publishBodyRateCommand(Handles& h, const Eigen::VectorXd& u) {
 // s = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, wx, wy, wz]
 // Sends position + velocity + yaw via PositionTarget (ENU)
 // ─────────────────────────────────────────────────────────────────────────────
-inline void publishFullStateCommand(Handles& h, const Eigen::VectorXd& world) {
+inline void publishFullStateCommand(Handles& h, const Eigen::VectorXd& world,
+                                    const std::optional<Eigen::Vector3d>& acceleration={}) {
     Eigen::VectorXd s;try{s=h.command_to_local?h.command_to_local(world):world;}catch(const std::exception&){return;}
     h.last_state_cmd   = s;
     h.last_cmd_is_bodyrate = false;
@@ -258,6 +259,12 @@ inline void publishFullStateCommand(Handles& h, const Eigen::VectorXd& world) {
                     mavros_msgs::msg::PositionTarget::IGNORE_AFY |
                     mavros_msgs::msg::PositionTarget::IGNORE_AFZ |
                     mavros_msgs::msg::PositionTarget::IGNORE_YAW_RATE;
+    if(acceleration) {
+        Eigen::VectorXd vector=Eigen::VectorXd::Zero(13);vector(6)=1;vector.segment<3>(3)=*acceleration;
+        try {if(h.command_to_local)vector=h.command_to_local(vector);}catch(const std::exception&){return;}
+        msg.type_mask=mavros_msgs::msg::PositionTarget::IGNORE_YAW_RATE;
+        msg.acceleration_or_force.x=vector(3);msg.acceleration_or_force.y=vector(4);msg.acceleration_or_force.z=vector(5);
+    }
 
     if (s.size() >= 3) {
         msg.position.x = float(s(0));
@@ -300,7 +307,8 @@ inline void publishBodyRateCommand(Handles&, const Eigen::VectorXd&) {
     throw std::runtime_error("MAVROS not available (built without HAS_MAVROS_MSGS)");
 }
 
-inline void publishFullStateCommand(Handles&, const Eigen::VectorXd&) {
+inline void publishFullStateCommand(Handles&, const Eigen::VectorXd&,
+                                    const std::optional<Eigen::Vector3d>& ={}) {
     throw std::runtime_error("MAVROS not available (built without HAS_MAVROS_MSGS)");
 }
 

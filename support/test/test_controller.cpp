@@ -7,6 +7,19 @@
 #include <iostream>
 static void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 int main(){try{
+ for(const char* name:{"hover","landing_rh","stc_landing_noaug"}) {
+  auto descriptor=OCPRegistry::getDescriptor(name);
+  Eigen::VectorXd x=Eigen::VectorXd::Zero(13);x(6)=1;x(2)=1;
+  Eigen::VectorXd u=Eigen::VectorXd::Zero(4);u(0)=descriptor.default_mass_kg*9.81;
+  TargetSnapshot target;target.valid=true;target.acceleration<<.1,.2,0;
+  auto command=planner_core::makePlannerCommand(planner_core::Platform::Mavros,descriptor,x,u,target);
+  check(command.acceleration.has_value()&&command.acceleration->norm()<1e-12,"DDP hover acceleration must include gravity exactly once");
+  x.segment<4>(6)<<std::cos(.1),0,std::sin(.1),0;
+  auto acceleration=descriptor.world_acceleration(x,u);
+  check(std::abs(acceleration.x()-9.81*std::sin(.2))<1e-12,"DDP thrust acceleration direction");
+  check(std::abs(acceleration.z()-9.81*(std::cos(.2)-1))<1e-12,"DDP thrust acceleration magnitude");
+  check((planner_core::makePlannerCommand(planner_core::Platform::Mavros,descriptor,x,u,target).acceleration.value()-acceleration).norm()<1e-12,"target acceleration must not be added twice to world feedforward");
+ }
  planner_core::Controller controller;
  planner_core::PlannerCoreConfig config;config.ocp_type="hover";config.ocp_dt=.05;
  controller.configure(config);check(!controller.isDirect(),"hover must use RH");

@@ -1252,7 +1252,7 @@ private:
         } else if (cmd.kind == planner_core::CommandKind::FullState && platform_ == "crazyflie") {
             try{platform::crazyflie::publishCommand(this, cf_handles_, frames_->command(cmd.state,command_frame_), cmd.control, mass_kg_);}catch(const std::exception& e){RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),2000,"Missing command frame: %s",e.what());}
         } else if (cmd.kind == planner_core::CommandKind::FullState && platform_ == "mavros") {
-            platform::mavros::publishFullStateCommand(mavros_handles_, cmd.state);
+            platform::mavros::publishFullStateCommand(mavros_handles_, cmd.state,cmd.acceleration);
         }
     }
 

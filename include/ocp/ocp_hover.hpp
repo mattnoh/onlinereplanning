@@ -283,6 +283,12 @@ inline OCPDescriptor descriptor() {
     d.default_mass_kg = DEFAULT_MASS_KG;
     d.warm_start = OCPDescriptor::WarmStart::Shift;
     d.command_mode = OCPDescriptor::CommandMode::CmdFullState;
+    d.world_acceleration=[](const Eigen::VectorXd& x,const Eigen::VectorXd& u) {
+        if(x.size()<13||u.size()<1||!x.allFinite()||!u.allFinite())throw std::invalid_argument("invalid DDP acceleration input");
+        Eigen::Quaterniond q(x(6),x(7),x(8),x(9));
+        if(q.norm()<1e-8)throw std::invalid_argument("invalid DDP attitude");
+        return Eigen::Vector3d(q.normalized()*Eigen::Vector3d(0,0,u(0)/MASS)+Eigen::Vector3d(0,0,-9.81));
+    };
     d.coordinates = OCPDescriptor::Coordinates::World;
     d.state_dim = 13;
     d.control_dim = 4;
