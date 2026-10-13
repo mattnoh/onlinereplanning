@@ -7,11 +7,12 @@ The active MAVROS/ROS1 planner uses a ROS-independent RH/MPC core. The previous 
 - `include/target`: one `target_generator.hpp` for synthetic movements and seeded MC1 shapes; one `predictor.hpp` for constant-acceleration prediction. Neither depends on ROS.
 - `include/planner_core`: three public headers: `controller.hpp` (RH/MPC API), `types.hpp` (shared contracts and OCP registry queries), and `adapters.hpp` (frame/command conversion).
 - `src`: compiled controller and OCP registry. One private `controller_internal.hpp` contains the shared `OcpSolver`, RH/direct-MPC runtime and async logging implementation; ROS adapters do not include it.
-- `transport/ros1`, `transport/ros2`: ROS adapters, nodes and launch files. The ROS2 Crazyflie adapter remains pending flight validation.
+- `support/transport/ros1`, `support/transport/ros2`: ROS adapters, nodes and launch files. The ROS2 Crazyflie adapter remains pending flight validation.
 - `config/ros1`, `config/ros2`: matching hover/RH/MPC profiles in each ROS parameter format.
-- `scripts`: profile application and RViz markers, plus the sequential SITL campaign, its bearing probe, metrics and MPC audit.
-- `tools/analysis`: the existing bag converter, flight analysis, 3D/state plots, animation and horizon overlay. Flight analysis uses the paper plot/animation scripts; their designs are retained.
-- `test`: six focused regressions, disabled by default. Retired OCP tests, offline research tools, session patches and duplicate campaign plotters are removed.
+- `support/rviz`: the retained ROS1 viewer settings.
+- `support/scripts`: profile application and RViz markers, plus the sequential SITL campaign, its bearing probe, metrics and MPC audit.
+- `support/tools/analysis`: the existing bag converter, flight analysis, 3D/state plots, animation and horizon overlay. Flight analysis uses the paper plot/animation scripts; their designs are retained.
+- `support/test`: six focused regressions, disabled by default. Retired OCP tests, offline research tools, session patches and duplicate campaign plotters are removed.
 - `logs`: runtime output only; empty after cleanup.
 
 ## Run

@@ -16,7 +16,7 @@
   <arg name="replay"     default="false"
        doc="true when viewing a rosbag: sets /use_sim_time so RViz follows /clock"/>
   <arg name="drone_name" default="px4_drone"/>
-  <arg name="rviz_config" default="$(find comando_planner)/rviz/comando_sitl.rviz"/>
+  <arg name="rviz_config" default="$(find comando_planner)/support/rviz/comando_sitl.rviz"/>
 
   <!-- Always set explicitly: a leftover /use_sim_time=true from a previous
        replay session freezes every node started afterwards (no /clock). -->

@@ -35,13 +35,13 @@ RH: `SZMUK_RH_N=40`, `SZMUK_MAX_ITER=120`, `SZMUK_THH=0.16`, `SZMUK_W_LAND_GS=20
 The sequential campaign saves the applied profile, inherited SZMUK/MPC environment, source revision, deterministic motion seed and activation geometry per cell. Example for one RH target:
 
 ```sh
-python3 scripts/run_scenario_campaign.py --motions circle --levels zero \
+python3 support/scripts/run_scenario_campaign.py --motions circle --levels zero \
   --trials 1 --out /tmp/comando-rh-check
-python3 scripts/scenario_metrics.py /tmp/comando-rh-check
+python3 support/scripts/scenario_metrics.py /tmp/comando-rh-check
 ```
 
 Use one target at a time and the prebuilt PX4 simulator. Do not launch a second simulator or an uncapped build alongside it. The completed six RH/MPC flights are recorded in `CLEAN_PLANNER_VALIDATION.md`; successful landing does not imply exact flown STC satisfaction.
 
 ## Existing plots
 
-`tools/analysis/analyze_flight.py` converts a bag and invokes the existing 3D/state plotters. `plot_planned_states.py` and `plot_sitl_planned_overlay.py` show planner states and horizon overlays. `rviz.launch` uses the retained marker script and RViz settings. Generated flight/plot outputs belong in a run directory, not in the source tree.
+`support/tools/analysis/analyze_flight.py` converts a bag and invokes the existing 3D/state plotters. `plot_planned_states.py` and `plot_sitl_planned_overlay.py` show planner states and horizon overlays. `rviz.launch` uses the retained marker script and RViz settings. Generated flight/plot outputs belong in a run directory, not in the source tree.

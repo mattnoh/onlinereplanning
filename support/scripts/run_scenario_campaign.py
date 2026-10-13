@@ -29,7 +29,7 @@ import sys
 import time
 import zlib
 
-PKG = os.environ.get("COMANDO_PACKAGE", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PKG = os.environ.get("COMANDO_PACKAGE", os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 PX4 = "/home/lab/projects/px4/PX4-Autopilot"
 SETUP = os.environ.get("COMANDO_ROS_SETUP", "source /opt/ros/noetic/setup.bash && source /home/lab/mavros_ws/devel/setup.bash")
 
@@ -109,7 +109,7 @@ def wrap_pi(a):
 def bearing_probe():
     """(beta, rate) in rad and rad/s, or (None, None). One rospy process reads
     both topics in ~0.2 s; the old two-rostopic-echo poll took 3-4 s."""
-    r = sh(f"{SETUP} && timeout 20 python3 {PKG}/scripts/_bearing_probe.py", timeout=30)
+    r = sh(f"{SETUP} && timeout 20 python3 {PKG}/support/scripts/_bearing_probe.py", timeout=30)
     try:
         b, d = r.stdout.strip().split()[:2]
         b, d = float(b), float(d)

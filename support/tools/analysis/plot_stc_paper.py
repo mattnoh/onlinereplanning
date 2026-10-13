@@ -33,9 +33,236 @@ import matplotlib.colors as mcolors
 from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
-# The benchmark's plotting module, renamed here because logs/animate.py is
-# the (different) legacy landing animator for all_solves.csv.
-import animate_benchmark as anim
+# Existing drawing helpers retained from the original benchmark plotter.
+# Alias this module so per-plot cone adjustments keep their original behavior.
+import sys
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+mpl.rcParams["figure.dpi"] = 120
+mpl.rc("font", family="serif", serif=["Computer Modern Roman", "DejaVu Serif"])
+mpl.rcParams.update({
+    "figure.autolayout": False,
+    "font.size": 12,
+    "legend.fontsize": 9,
+    "axes.xmargin": 0,
+    "lines.solid_capstyle": "round",
+    "lines.solid_joinstyle": "round",
+    "lines.dash_capstyle": "round",
+    "lines.dash_joinstyle": "round",
+})
+
+BG = "#ffffff"
+
+PANE = "#ffffff"
+
+GRID = "#d8d8d8"
+
+TEXT = "#111111"
+
+TARGET = "#d62728"
+
+CONE = "#2ca02c"
+
+BX = "#d62728"
+
+BY = "#2ca02c"
+
+BZ = "#1f77b4"
+
+ARM = "#3f4f5f"
+
+RING = "#63788c"
+
+WHEEL = "#202020"
+
+ARM_LEN = 0.40
+
+MOTOR_R = 0.28
+
+N_RING = 80
+
+RING_T = np.linspace(0, 2 * np.pi, N_RING)
+
+ARM_ANGLES = np.linspace(np.pi / 4, np.pi / 4 + 2 * np.pi, 4, endpoint=False)
+
+TARGET_HALF = 0.35
+
+TARGET_LIFT = 0.012
+
+WHEEL_RADIUS = 0.065
+
+WHEEL_Z_OFFSET = -0.075
+
+GS_DEG = 35.0
+
+GS_TAN = np.tan(np.radians(GS_DEG))
+
+GS_APEX_OFFSET = 0.1
+
+BCONE_HALF_ANGLE_DEG = 35.0
+
+BCONE_TAN = np.tan(np.radians(BCONE_HALF_ANGLE_DEG))
+
+BCONE_OFFSET = 0.5
+
+CONE_H = 3.5
+
+CONE_N = 16
+
+CONE_ALPHA = 0.50
+
+def _glyph_quat_to_rotmat(q) -> np.ndarray:
+    qw, qx, qy, qz = q
+    n = max(float(np.linalg.norm(q)), 1e-9)
+    qw, qx, qy, qz = qw / n, qx / n, qy / n, qz / n
+    return np.array([
+        [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qw * qz), 2 * (qx * qz + qw * qy)],
+        [2 * (qx * qy + qw * qz), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qw * qx)],
+        [2 * (qx * qz - qw * qy), 2 * (qy * qz + qw * qx), 1 - 2 * (qx * qx + qy * qy)],
+    ])
+
+def cone_axes(v: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    v = v / max(np.linalg.norm(v), 1e-9)
+    ref = np.array([0.0, 0.0, 1.0]) if abs(v[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    u = np.cross(v, ref)
+    u = u / max(np.linalg.norm(u), 1e-9)
+    return u, np.cross(v, u)
+
+def cone_wire(apex, axis, tan_cone, height, rim_theta, spoke_theta):
+    axis = axis / max(np.linalg.norm(axis), 1e-9)
+    u, v = cone_axes(axis)
+    center = apex + height * axis
+    radius = tan_cone * height
+    rim = center[None, :] + radius * (
+        np.cos(rim_theta)[:, None] * u[None, :] + np.sin(rim_theta)[:, None] * v[None, :]
+    )
+    spokes = []
+    for th in spoke_theta:
+        p = center + radius * (np.cos(th) * u + np.sin(th) * v)
+        spokes.append(np.vstack([apex, p]))
+    return rim, spokes
+
+def target_pad_vertices(center, yaw=0.0, half=TARGET_HALF):
+    c, s = np.cos(yaw), np.sin(yaw)
+    bx = np.array([c, s, 0.0])
+    by = np.array([-s, c, 0.0])
+    o = np.asarray(center, dtype=float)
+    return [o - half * bx - half * by, o + half * bx - half * by,
+            o + half * bx + half * by, o - half * bx + half * by]
+
+def target_pad_points(center, yaw=0.0, half=TARGET_HALF, lift=TARGET_LIFT):
+    c, s = np.cos(yaw), np.sin(yaw)
+    bx = np.array([c, s, 0.0])
+    by = np.array([-s, c, 0.0])
+    o = np.asarray(center, dtype=float) + np.array([0.0, 0.0, lift])
+    corners = np.array([
+        o - half * bx - half * by,
+        o + half * bx - half * by,
+        o + half * bx + half * by,
+        o - half * bx + half * by,
+        o - half * bx - half * by,
+    ])
+    cross_x = np.array([o - 0.55 * half * bx, o + 0.55 * half * bx])
+    cross_y = np.array([o - 0.55 * half * by, o + 0.55 * half * by])
+    heading = np.array([o + 0.18 * half * bx, o + 1.28 * half * bx])
+    return corners, cross_x, cross_y, heading
+
+def target_wheel_points(center, yaw=0.0, half=TARGET_HALF):
+    c, s = np.cos(yaw), np.sin(yaw)
+    bx = np.array([c, s, 0.0])
+    by = np.array([-s, c, 0.0])
+    ez = np.array([0.0, 0.0, 1.0])
+    base = np.asarray(center, dtype=float) + np.array([0.0, 0.0, WHEEL_Z_OFFSET])
+    theta = np.linspace(0, 2 * np.pi, 24)
+    wheels = []
+    for sx in (-0.58, 0.58):
+        for sy in (-1.08, 1.08):
+            wc = base + sx * half * bx + sy * half * by
+            wheels.append(wc[None, :] + WHEEL_RADIUS * np.cos(theta)[:, None] * bx[None, :]
+                          + WHEEL_RADIUS * np.sin(theta)[:, None] * ez[None, :])
+    return wheels
+
+def make_target_pad_artists(ax):
+    pad = Poly3DCollection([target_pad_vertices(np.zeros(3))], color=TARGET, alpha=0.62, zorder=10)
+    ax.add_collection3d(pad)
+    outline, = ax.plot([], [], [], color=TARGET, lw=2.0, alpha=0.95, zorder=11)
+    cross_x, = ax.plot([], [], [], color=TEXT, lw=1.2, alpha=0.75, zorder=12)
+    cross_y, = ax.plot([], [], [], color=TEXT, lw=1.2, alpha=0.75, zorder=12)
+    heading, = ax.plot([], [], [], color=TARGET, lw=3.0, alpha=0.95, zorder=12)
+    wheels = [ax.plot([], [], [], color=WHEEL, lw=3.0, alpha=0.88, zorder=9)[0] for _ in range(4)]
+    return {"pad": pad, "outline": outline, "cross_x": cross_x,
+            "cross_y": cross_y, "heading": heading, "wheels": wheels}
+
+def update_target_pad(artists, center, yaw=0.0):
+    artists["pad"].set_verts([target_pad_vertices(center, yaw)])
+    corners, cross_x, cross_y, heading = target_pad_points(center, yaw)
+    artists["outline"].set_data_3d(corners[:, 0], corners[:, 1], corners[:, 2])
+    artists["cross_x"].set_data_3d(cross_x[:, 0], cross_x[:, 1], cross_x[:, 2])
+    artists["cross_y"].set_data_3d(cross_y[:, 0], cross_y[:, 1], cross_y[:, 2])
+    artists["heading"].set_data_3d(heading[:, 0], heading[:, 1], heading[:, 2])
+    for wheel, pts in zip(artists["wheels"], target_wheel_points(center, yaw)):
+        wheel.set_data_3d(pts[:, 0], pts[:, 1], pts[:, 2])
+
+def draw_target_pad(ax, center, yaw=0.0, alpha=0.72):
+    artists = make_target_pad_artists(ax)
+    artists["pad"].set_alpha(alpha)
+    update_target_pad(artists, center, yaw)
+
+def draw_drone(ax, pos, quat, scale=0.75, alpha=0.9):
+    pos = np.asarray(pos, dtype=float)
+    r = _glyph_quat_to_rotmat(quat)
+    bx = r[:, 0]
+    by = r[:, 1]
+    for th in ARM_ANGLES:
+        tip = pos + r @ (np.array([np.cos(th), np.sin(th), 0.0]) * ARM_LEN * scale)
+        ax.plot([pos[0], tip[0]], [pos[1], tip[1]], [pos[2], tip[2]],
+                color=ARM, lw=2.0, alpha=alpha, solid_capstyle="round")
+        ring = tip[None, :] + MOTOR_R * scale * (
+            np.cos(RING_T)[:, None] * bx[None, :] + np.sin(RING_T)[:, None] * by[None, :]
+        )
+        ax.plot(ring[:, 0], ring[:, 1], ring[:, 2], color=RING, lw=0.9, alpha=alpha)
+    hs = ARM_LEN * scale * 0.20
+    hx0 = pos + r @ np.array([-hs, 0, 0])
+    hx1 = pos + r @ np.array([hs, 0, 0])
+    hy0 = pos + r @ np.array([0, -hs, 0])
+    hy1 = pos + r @ np.array([0, hs, 0])
+    ax.plot([hx0[0], hx1[0]], [hx0[1], hx1[1]], [hx0[2], hx1[2]], color=ARM, lw=2.0, alpha=alpha)
+    ax.plot([hy0[0], hy1[0]], [hy0[1], hy1[1]], [hy0[2], hy1[2]], color=ARM, lw=2.0, alpha=alpha)
+    axis_len = 0.55 * scale
+    for color, axis in ((BX, 0), (BY, 1), (BZ, 2)):
+        end = pos + axis_len * r[:, axis]
+        ax.plot([pos[0], end[0]], [pos[1], end[1]], [pos[2], end[2]], color=color, lw=1.3, alpha=alpha)
+
+def style_3d(ax, title):
+    ax.set_facecolor(BG)
+    ax.grid(False)
+    for attr in ("xaxis", "yaxis", "zaxis"):
+        pane = getattr(ax, attr).pane
+        pane.fill = True
+        pane.set_facecolor(PANE)
+        pane.set_edgecolor(GRID)
+        getattr(ax, attr)._axinfo["grid"]["color"] = (0, 0, 0, 0)
+    ax.tick_params(colors=TEXT, labelsize=8)
+    for label in (ax.xaxis.label, ax.yaxis.label, ax.zaxis.label):
+        label.set_color(TEXT)
+        label.set_fontsize(9)
+    ax.set_title(title, color=TEXT, fontsize=11, fontweight="bold", pad=8)
+
+def draw_constraint(ax, mode: str, target_pos, v_axis=None, alpha=CONE_ALPHA):
+    rim_theta = np.linspace(0, 2 * np.pi, 80)
+    spoke_theta = np.linspace(0, 2 * np.pi, CONE_N, endpoint=False)
+    if mode == "bcone" and v_axis is not None:
+        apex = target_pos + BCONE_OFFSET * v_axis
+        rim, spokes = cone_wire(apex, -v_axis, BCONE_TAN, CONE_H, rim_theta, spoke_theta)
+    else:
+        apex = target_pos + np.array([0.0, 0.0, -GS_APEX_OFFSET])
+        rim, spokes = cone_wire(apex, np.array([0.0, 0.0, 1.0]), GS_TAN, CONE_H, rim_theta, spoke_theta)
+    ax.plot(rim[:, 0], rim[:, 1], rim[:, 2], color=CONE, lw=1.4, alpha=alpha)
+    for sp in spokes:
+        ax.plot(sp[:, 0], sp[:, 1], sp[:, 2], color=CONE, lw=0.65, alpha=alpha * 0.55)
+
+anim = sys.modules[__name__]
+
 
 mpl.rc("font", family="serif", serif=["Computer Modern Roman", "DejaVu Serif"])
 mpl.rcParams.update({
@@ -93,7 +320,7 @@ def resolve_result_dir(path: str) -> Path:
     base = Path(path)
     if base.exists():
         return base.resolve()
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[3]
     candidate = repo / base
     if candidate.exists():
         return candidate.resolve()

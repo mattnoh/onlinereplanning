@@ -104,5 +104,5 @@ and insufficient real-state staging headroom. The final checked campaign uses
 the corrected implementation; failed trials are not counted as successful runs.
 
 `direct_mpc_controls.csv` records nominal controls, applied feedback, output,
-limits, policy age and tracking errors. `scripts/analyze_direct_mpc.py` audits
+limits, policy age and tracking errors. `support/scripts/analyze_direct_mpc.py` audits
 command timing/slew and PX4 mode from those logs and the bag.

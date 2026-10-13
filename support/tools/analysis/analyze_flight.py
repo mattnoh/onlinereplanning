@@ -41,9 +41,9 @@ import bag_to_stc_csv  # noqa: E402
 # Where the planner node writes its run folders. Since the log_dir param was
 # added, planner_launch.launch points it here (CoManDO_planner/logs); older
 # runs (or nodes launched without the param) are under ~/.ros/logs.
-PLANNER_LOGS = [HERE.parents[1] / "logs", Path.home() / ".ros" / "logs"]
+PLANNER_LOGS = [HERE.parents[2] / "logs", Path.home() / ".ros" / "logs"]
 # Where runs are collected: this directory (CoManDO_planner/logs).
-OUT_ROOT = HERE.parents[1] / "logs"
+OUT_ROOT = HERE.parents[2] / "logs"
 
 
 def newest_planner_run(pattern: str) -> Path:
