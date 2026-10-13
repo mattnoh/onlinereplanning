@@ -95,9 +95,9 @@ int main(){try{
             applied=feedback.command.control;++ticks;
         }
         max_omega=std::max(max_omega,plant_state.segment<3>(10).norm());
-        std::this_thread::sleep_until(tick+std::chrono::milliseconds(20));
+        std::this_thread::sleep_until(tick+std::chrono::milliseconds(10));
     }
     moving.stop();std::cout<<"moving model: accepted="<<accepted<<" ticks="<<ticks<<" distance="<<plant_state.head(3).norm()<<" omega="<<max_omega<<'\n';
-    check(accepted>=3&&ticks>100&&plant_state.head(3).norm()<initial_distance,"moving-target closed loop");
+    check(accepted>=3&&ticks>200&&plant_state.head(3).norm()<initial_distance,"moving-target closed loop");
     std::cout<<"PASS dynamics="<<maxerr<<" ctcs="<<cerror<<" async DDP control delivery/expiry\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

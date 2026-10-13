@@ -99,6 +99,48 @@ planner_core::PlannerCoreInput inputAt(const Clock::time_point& now) {
 int main() {
     try {
         const auto t0 = Clock::now();
+        for(const char* name:{"landing_rh","stc_landing_noaug"}) {
+            auto cfg=hoverConfig();cfg.ocp_type=name;cfg.platform=planner_core::Platform::Mavros;cfg.ocp_dt=.1;cfg.n_replay=1;
+            planner_core::PlannerCore core;core.configure(cfg);
+            auto input=inputAt(t0);input.target_snapshot.position<<1,0,.2;
+            input.target_snapshot.velocity<<.4,0,0;input.target_snapshot.acceleration<<.1,0,0;
+            const auto desc=OCPRegistry::getDescriptor(name);auto model=desc.make_model(input.target_snapshot.acceleration);
+            auto initial=Eigen::VectorXd::Zero(model.nx).eval();initial(2)=2;initial(6)=1;initial(3)=-.4;
+            auto u=model.hover;u(4)=.1;
+            auto result=solved(t0,0);result.target_snapshot_acc=input.target_snapshot.acceleration;result.state_trajectory={initial};result.control_trajectory={u,u};
+            result.state_trajectory.push_back(model.flow(result.state_trajectory.back(),u,.1,false).x);
+            result.state_trajectory.push_back(model.flow(result.state_trajectory.back(),u,.1,false).x);
+            require(core.acceptSolvedResult(input,initial,result).solve_accepted,"reference plan acceptance");
+            auto now=t0+std::chrono::milliseconds(50);
+            auto original=core.sampleReplay(now,input.target_snapshot);
+            auto changed=input.target_snapshot;changed.position.x()+=10;changed.velocity.x()=-.4;
+            auto replay=core.sampleReplay(now,changed);
+            require((original.command.state-replay.command.state).norm()<1e-12,"live estimator changes must trigger replanning, not deform an active DDP reference");
+            require((replay.command.state.head(3)-Eigen::Vector3d(1,0,2.2)).norm()<1e-9,"world hover reference must retain its DDP origin");
+            require(replay.command.state.segment<3>(3).norm()<1e-9,"world hover reference velocity must remain consistent");
+            auto handoff=input;handoff.now=now;handoff.target_snapshot.position.x()=1+.4*.05+.5*.1*.05*.05+.02;
+            handoff.target_snapshot.velocity.x()=.4+.1*.05;
+            handoff.current_state=planner_core::prepareOcpState(desc,replay.command.state,handoff.target_snapshot);
+            planner_core::PlannerCoreStepResult diagnostics;
+            planner_core::PlannerCoreTestAccess::HandoffSchedule schedule;
+            require(planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,handoff,diagnostics,schedule),"target-update handoff scheduling");
+            double position_error=0,velocity_error=0;
+            auto seed=planner_core::PlannerCoreTestAccess::selectInitialState(core,handoff.current_state,handoff.target_snapshot,schedule,
+                &position_error,&velocity_error,diagnostics.x0_source,diagnostics);
+            const double ahead=schedule.activation_elapsed-schedule.active_elapsed_now;
+            auto next_target=handoff.target_snapshot;
+            next_target.position+=next_target.velocity*ahead+.5*next_target.acceleration*ahead*ahead;
+            next_target.velocity+=next_target.acceleration*ahead;
+            auto world_seed=planner_core::reconstructWorldState(desc,seed,next_target);
+            require(position_error<1e-9&&velocity_error<1e-9,"tracking error must compare references in the same target frame");
+            require((world_seed.head(3)-replay.command.state.head(3)).norm()<1e-9,"target estimate update must preserve the physical handoff state");
+
+            auto before=core.sampleReplay(now-std::chrono::microseconds(10),changed);
+            auto after=core.sampleReplay(now+std::chrono::microseconds(10),changed);
+            require(((after.command.state.head(3)-before.command.state.head(3))/2e-5-replay.command.state.segment<3>(3)).norm()<1e-6,
+                "world command velocity must differentiate its position");
+        }
+
 
         {
             planner_core::PlannerCore core;core.configure(hoverConfig());

@@ -3,7 +3,7 @@
 ///
 /// Key design: the replay timer and solver run on independent cadences.
 /// The replayer stores the latest trajectory and samples it by wall-clock
-/// time with linear interpolation. When a new solve arrives, the buffer
+/// time with OCP propagation when provided, otherwise linear interpolation. When a new solve arrives, the buffer
 /// is swapped atomically. The replay timer never "waits" for a solve.
 
 #pragma once
@@ -14,23 +14,27 @@
 #include <cmath>
 #include <chrono>
 #include <mutex>
+#include <functional>
 #include <optional>
 #include <vector>
 
 class TrajectoryReplayer {
 public:
+    using Propagate=std::function<Eigen::VectorXd(const Eigen::VectorXd&,const Eigen::VectorXd&,double)>;
     TrajectoryReplayer() = default;
 
     void clear() {
         std::lock_guard<std::mutex> lk(mutex_);
         state_trajectory_.clear();
         control_trajectory_.clear();
+        propagate_={};
         active_solve_num_ = -1;
         has_variable_dt_ = false;
         state_dim_ = 13;
         last_solve_wall_time_ = std::chrono::steady_clock::time_point{};
         pending_state_trajectory_.clear();
         pending_gains_.clear();
+        pending_propagate_={};
         pending_control_trajectory_.clear();
         pending_solve_num_ = -1;
         pending_has_variable_dt_ = false;
@@ -90,7 +94,8 @@ public:
                     int min_replay_before_swap,
                     bool is_variable_dt = false,
                     int state_dim = 13,
-                    const std::vector<Eigen::MatrixXd>& feedback_gains = {}) {
+                    const std::vector<Eigen::MatrixXd>& feedback_gains = {},
+                    Propagate propagate = {}) {
         std::lock_guard<std::mutex> lk(mutex_);
         min_replay_before_swap_ = std::max(1, min_replay_before_swap);
 
@@ -98,6 +103,7 @@ public:
         if (state_trajectory_.empty()) {
             state_trajectory_ = state_trajectory;
             control_trajectory_ = control_trajectory;
+            gains_=feedback_gains;propagate_=std::move(propagate);
             active_solve_num_ = solve_num;
             last_solve_wall_time_ = plan_origin_time;
             has_variable_dt_ = is_variable_dt;
@@ -108,6 +114,7 @@ public:
         // Keep only the freshest pending plan; swap-in decision happens in sample().
         pending_state_trajectory_ = state_trajectory;
         pending_gains_ = feedback_gains;
+        pending_propagate_=std::move(propagate);
         pending_control_trajectory_ = control_trajectory;
         pending_solve_num_ = solve_num;
         pending_solve_wall_time_ = plan_origin_time;
@@ -158,7 +165,7 @@ public:
             return false;
         }
         *out = makeSampleLocked(state_trajectory_, control_trajectory_, gains_, active_solve_num_,
-                                has_variable_dt_, state_dim_, elapsed, ocp_dt);
+                                has_variable_dt_, state_dim_, elapsed, ocp_dt,propagate_);
         return out->has_plan;
     }
 
@@ -203,7 +210,7 @@ public:
         s.elapsed = std::chrono::duration<double>(now - last_solve_wall_time_).count();
 
         return makeSampleLocked(state_trajectory_, control_trajectory_, gains_, active_solve_num_,
-                                has_variable_dt_, state_dim_, s.elapsed, ocp_dt);
+                                has_variable_dt_, state_dim_, s.elapsed, ocp_dt,propagate_);
     }
 
 private:
@@ -306,7 +313,7 @@ private:
                                   bool variable_dt,
                                   int state_dim,
                                   double elapsed,
-                                  double ocp_dt) const {
+                                  double ocp_dt,const Propagate& propagate) const {
         ReplaySample s;
         s.x_cmd = Eigen::VectorXd::Zero(state_dim);
         s.u_cmd = Eigen::VectorXd::Zero(4);
@@ -335,6 +342,17 @@ private:
         s.x_cmd = sampleStateFrom(states, variable_dt, state_dim, t_sample, ocp_dt);
         s.x_cmd_lookahead = sampleStateFrom(states, variable_dt, state_dim, t_lookahead, ocp_dt);
         s.u_cmd = sampleControlFrom(controls, states, variable_dt, state_dim, t_sample, ocp_dt);
+        if(propagate&&!controls.empty()) {
+            auto dense=[&](double time) {
+                const int node=findLowerNodeFrom(states,variable_dt,state_dim,time,N,ocp_dt);
+                if(node>=N)return states.back().head(state_dim).eval();
+                const double offset=time-nodeTimeFrom(states,variable_dt,state_dim,node,ocp_dt);
+                if(offset<=1e-12)return states[node].head(state_dim).eval();
+                return propagate(states[node],controls[std::min(node,static_cast<int>(controls.size())-1)],offset).head(state_dim).eval();
+            };
+            s.x_cmd=dense(t_sample);s.x_cmd_lookahead=dense(t_lookahead);
+        }
+
 
         // DDP feedback: gains are ZERO-ORDER HELD at the bracketing node. They
         // are not interpolated -- a gain matrix is a linear map, and blending two
@@ -373,12 +391,12 @@ private:
         const double new_elapsed = std::chrono::duration<double>(now - pending_solve_wall_time_).count();
         const auto old_sample = makeSampleLocked(state_trajectory_, control_trajectory_, gains_,
                                                  active_solve_num_, has_variable_dt_, state_dim_,
-                                                 old_elapsed, ocp_dt);
+                                                 old_elapsed, ocp_dt,propagate_);
         const auto new_sample = makeSampleLocked(pending_state_trajectory_,
                                                  pending_control_trajectory_, pending_gains_,
                                                  pending_solve_num_,
                                                  pending_has_variable_dt_, pending_state_dim_,
-                                                 new_elapsed, ocp_dt);
+                                                 new_elapsed, ocp_dt,pending_propagate_);
 
         HandoffDiagnostic diag;
         diag.swapped = true;
@@ -401,6 +419,7 @@ private:
         state_trajectory_ = pending_state_trajectory_;
         control_trajectory_ = pending_control_trajectory_;
         gains_ = pending_gains_;
+        propagate_=std::move(pending_propagate_);
         active_solve_num_ = pending_solve_num_;
         last_solve_wall_time_ = pending_solve_wall_time_;
         has_variable_dt_ = pending_has_variable_dt_;
@@ -408,6 +427,7 @@ private:
 
         pending_state_trajectory_.clear();
         pending_gains_.clear();
+        pending_propagate_={};
         pending_control_trajectory_.clear();
         pending_solve_num_ = -1;
         pending_has_variable_dt_ = false;
@@ -440,6 +460,7 @@ private:
     std::vector<Eigen::VectorXd> state_trajectory_;
     std::vector<Eigen::VectorXd> control_trajectory_;
     std::vector<Eigen::MatrixXd> gains_;
+    Propagate propagate_;
     int active_solve_num_ = -1;
     bool has_variable_dt_ = false;
     int state_dim_ = 13;  ///< Physical state dimension; DT slot lives at index state_dim_
@@ -448,6 +469,7 @@ private:
     std::vector<Eigen::VectorXd> pending_state_trajectory_;
     std::vector<Eigen::VectorXd> pending_control_trajectory_;
     std::vector<Eigen::MatrixXd> pending_gains_;
+    Propagate pending_propagate_;
     int pending_solve_num_ = -1;
     bool pending_has_variable_dt_ = false;
     int pending_state_dim_ = 13;

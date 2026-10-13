@@ -181,6 +181,7 @@ public:
 
     void reset() {
         replayer_.clear();
+        {std::lock_guard<std::mutex> lock(plan_targets_mutex_);plan_targets_.clear();}
         diagnostics_.clear();
         primed_ = false;
         terminal_freeze_ = false;
@@ -350,8 +351,26 @@ public:
             }
         }
         const auto earliest_activation_time = plan_origin_time;
+        const auto plan_target=predictTargetSnapshot(input.target_snapshot,
+            std::chrono::duration<double>(plan_origin_time-input.now).count());
+        {
+            std::lock_guard<std::mutex> lock(plan_targets_mutex_);
+            plan_targets_[solve_count_]={plan_target,plan_origin_time};
+            while(plan_targets_.size()>3)plan_targets_.erase(plan_targets_.begin());
+        }
+        result.target_snapshot_pos=plan_target.position;
+        result.target_snapshot_vel=plan_target.velocity;
+        result.target_snapshot_acc=plan_target.acceleration;
         out.solve_finish_late_by_sec =
             std::chrono::duration<double>(result.solve_finish_time - plan_origin_time).count();
+
+        TrajectoryReplayer::Propagate propagate;
+        if(desc_.make_model) {
+            auto model=desc_.make_model(plan_target.acceleration);
+            propagate=[model](const Eigen::VectorXd& state,const Eigen::VectorXd& control,double duration) {
+                return model.flow(state,control,duration,false).x;
+            };
+        }
 
         replayer_.updatePlan(result.state_trajectory,
                              result.control_trajectory,
@@ -363,7 +382,7 @@ public:
                              config_.n_replay,
                              desc_.variable_dt,
                              desc_.state_dim,
-                             result.feedback_gains);   // DDP gains reach the replayer
+                             result.feedback_gains,std::move(propagate));
 
         last_accepted_solve_timestamp_ = plan_origin_time;
         primed_ = true;
@@ -400,8 +419,9 @@ public:
         }
         out.has_replay_sample = true;
         out.solve_num = replay.active_solve_num;
+        const auto command_target=targetForPlan(replay.active_solve_num,now,target_snapshot);
         out.command = makePlannerCommand(config_.platform, desc_, replay.x_cmd, replay.u_cmd,
-                                         target_snapshot);
+                                         command_target);
         out.stale = replay.elapsed > replay.horizon_end + 0.2;
         if (out.stale) {
             addDiagnostic(out, DiagnosticSeverity::Warn, "trajectory_stale",
@@ -422,9 +442,9 @@ public:
                 {"control_jump_norm", diag->control_jump_norm},
             };
             const auto old_cmd = makePlannerCommand(config_.platform, desc_, diag->old_state_cmd,
-                                                    diag->old_control_cmd, target_snapshot);
+                                                    diag->old_control_cmd, targetForPlan(diag->previous_solve_num,now,target_snapshot));
             const auto new_cmd = makePlannerCommand(config_.platform, desc_, diag->new_state_cmd,
-                                                    diag->new_control_cmd, target_snapshot);
+                                                    diag->new_control_cmd, targetForPlan(diag->new_solve_num,now,target_snapshot));
             if (old_cmd.kind == CommandKind::Hover && new_cmd.kind == CommandKind::Hover) {
                 d.values["hover_z_jump"] = std::abs(new_cmd.hover(2) - old_cmd.hover(2));
             }
@@ -663,8 +683,8 @@ private:
             std::max(0.0, handoff.activation_elapsed - handoff.active_elapsed_now);
         const TargetSnapshot predicted_target = predictTargetSnapshot(target_snapshot, dt_to_activation);
         Eigen::VectorXd predicted_x0 = preparePredictedHandoffState(predicted.x_cmd,
-                                                                    predicted_target,
-                                                                    live_x0.size());
+            targetAtPlanElapsed(predicted.active_solve_num,handoff.activation_elapsed,predicted_target),
+            predicted_target,live_x0.size());
         // tracking_x0 is the ACTIVE plan sampled at *now*, so live_x0 -
         // tracking_x0 is the current tracking error. Without this sample there
         // is no error to measure and none to carry into the seed.
@@ -674,7 +694,9 @@ private:
         if (replayer_.sampleActiveAtElapsed(handoff.active_elapsed_now, config_.ocp_dt, &active_now) &&
             active_now.has_plan &&
             active_now.x_cmd.size() >= live_x0.size()) {
-            tracking_x0 = preparePredictedHandoffState(active_now.x_cmd, target_snapshot, live_x0.size());
+            tracking_x0 = preparePredictedHandoffState(active_now.x_cmd,
+                targetAtPlanElapsed(active_now.active_solve_num,handoff.active_elapsed_now,target_snapshot),
+                target_snapshot,live_x0.size());
             have_tracking_sample = true;
         } else {
             addDiagnostic(out, DiagnosticSeverity::Warn, "handoff_tracking_sample_missing",
@@ -762,8 +784,11 @@ private:
         return out;
     }
 
-    Eigen::VectorXd preparePredictedHandoffState(const Eigen::VectorXd& predicted_sample,const TargetSnapshot&,int live_size) const {
-        return predicted_sample.head(std::min(live_size,static_cast<int>(predicted_sample.size())));
+    Eigen::VectorXd preparePredictedHandoffState(const Eigen::VectorXd& predicted_sample,
+        const TargetSnapshot& old_target,const TargetSnapshot& new_target,int live_size) const {
+        auto world=reconstructWorldState(desc_,predicted_sample,old_target);
+        auto relative=prepareOcpState(desc_,world,new_target);
+        return relative.head(std::min(live_size,static_cast<int>(relative.size())));
     }
 
 
@@ -996,6 +1021,21 @@ private:
     }
 
     PlannerCoreConfig config_;
+    struct PlanTarget {TargetSnapshot snapshot;Clock::time_point origin;};
+    mutable std::mutex plan_targets_mutex_;
+    std::map<int,PlanTarget> plan_targets_;
+    TargetSnapshot targetAtPlanElapsed(int number,double elapsed,const TargetSnapshot& fallback) const {
+        std::lock_guard<std::mutex> lock(plan_targets_mutex_);
+        const auto found=plan_targets_.find(number);
+        return found==plan_targets_.end()?fallback:predictTargetSnapshot(found->second.snapshot,elapsed);
+    }
+    TargetSnapshot targetForPlan(int number,Clock::time_point now,const TargetSnapshot& fallback) const {
+        std::lock_guard<std::mutex> lock(plan_targets_mutex_);
+        const auto found=plan_targets_.find(number);
+        if(found==plan_targets_.end())return fallback;
+        return predictTargetSnapshot(found->second.snapshot,
+            std::chrono::duration<double>(now-found->second.origin).count());
+    }
     OCPDescriptor desc_;
     bool configured_ = false;
     std::atomic<bool> primed_{false};

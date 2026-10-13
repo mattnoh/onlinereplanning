@@ -1,4 +1,5 @@
 #include "trajectory_replayer.hpp"
+#include "planner_core/types.hpp"
 
 #include <Eigen/Dense>
 
@@ -130,6 +131,31 @@ void testJumpDiagnostics() {
     require(diag->control_jump_norm > 10.0, "jump diagnostics: control jump not measured");
 }
 
+void testDynamicsConsistentSampling() {
+    for(const char* name:{"landing_rh","stc_landing_noaug"}) {
+        auto descriptor=OCPRegistry::getDescriptor(name);
+        auto model=descriptor.make_model(Eigen::Vector3d(.05,-.03,0));
+        auto x=Eigen::VectorXd::Zero(model.nx).eval();x(2)=2;x(6)=1;x(10)=.01;
+        auto u=model.hover;u(0)=descriptor.default_mass_kg*(9.81+.3);u(4)=.1;
+        std::vector<Eigen::VectorXd> states={x};
+        states.push_back(model.flow(states.back(),u,.1,false).x);
+        states.push_back(model.flow(states.back(),u,.1,false).x);
+        TrajectoryReplayer replay;auto origin=Clock::now();
+        replay.updatePlan(states,{u,u},0,1,origin,origin,.1,1,true,13,{},
+            [model](const auto& state,const auto& input,double duration){return model.flow(state,input,duration,false).x;});
+        auto sample=replay.sample(origin+std::chrono::milliseconds(25),.1);
+        auto expected=model.flow(x,u,.025,false).x;
+        require((sample.x_cmd-expected.head(13)).norm()<1e-12,"dense reference must use DDP host dynamics");
+        auto linear=.75*states[0]+.25*states[1];
+        require((sample.x_cmd-linear.head(13)).norm()>1e-6,"acceleration test must distinguish linear interpolation");
+        TrajectoryReplayer::ReplaySample before,after;
+        replay.sampleActiveAtElapsed(.025-1e-5,.1,&before);replay.sampleActiveAtElapsed(.025+1e-5,.1,&after);
+        require(((after.x_cmd.head(3)-before.x_cmd.head(3))/(2e-5)-sample.x_cmd.segment<3>(3)).norm()<1e-6,
+            "sampled reference velocity must be the derivative of reference position");
+        require((sample.u_cmd-u.head(4)).norm()<1e-12,"dense sampling must not modify DDP control");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -139,6 +165,7 @@ int main() {
         testLatePendingPlanSamplesFromActivationOrigin();
         testVariableDtUsesStateDtSlot();
         testJumpDiagnostics();
+        testDynamicsConsistentSampling();
     } catch (const std::exception& e) {
         std::cerr << "TrajectoryReplayer test failed: " << e.what() << "\n";
         return 1;

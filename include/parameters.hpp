@@ -30,6 +30,7 @@ struct VehicleParameters {
 };
 
 struct HorizonParameters {
+    static constexpr double command_dt = .01;
     int horizon = 30;
     int nex = 7;
     double th0 = 0.07;

@@ -35,8 +35,8 @@ PlannerCoreStepResult Controller::trySolve(const PlannerCoreInput& in){
 PlannerCoreStepResult Controller::solveOpenLoop(const PlannerCoreInput& in){std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);std::lock_guard<std::mutex> solve(impl_->solver);if(impl_->mode==ExecutionMode::DirectMpc){PlannerCoreStepResult out;out.rejection_reason="direct_mpc_requires_feedback";return out;}return impl_->rh.solveOpenLoop(in);}
 PlannerCoreStepResult Controller::sample(const PlannerCoreInput& in){std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);if(!impl_->configured)return {};return impl_->mode==ExecutionMode::DirectMpc?impl_->direct.sample(in.now,in.current_state,in.target_snapshot):impl_->rh.sampleReplay(in.now,in.target_snapshot);}
 ExecutionMode Controller::executionMode() const {std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);return impl_->mode;}
-double Controller::commandPeriod() const {std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);return impl_->mode==ExecutionMode::DirectMpc?.02:impl_->config.ocp_dt;}
-double Controller::solvePollPeriod() const {return isDirect()?.1:.001;}
+double Controller::commandPeriod() const {return comando_parameters::HorizonParameters::command_dt;}
+double Controller::solvePollPeriod() const {return .001;}
 int Controller::solveCount() const {std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);std::lock_guard<std::mutex> solve(impl_->solver);return impl_->accepted;}
 void Controller::openControlLog(const std::string& path){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);if(impl_->mode==ExecutionMode::DirectMpc)impl_->direct.openControlLog(path);}
 }

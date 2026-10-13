@@ -458,14 +458,14 @@ private:
     void createModeTimers() {
         if (mode_ == "mpc") {
             if (solver_timer_.isValid()) solver_timer_.setPeriod(ros::Duration(0.001));
-            if (mpc_replay_timer_.isValid()) mpc_replay_timer_.setPeriod(ros::Duration(planner_core_.isDirect() ? 0.02 : ocp_dt_));
+            if (mpc_replay_timer_.isValid()) mpc_replay_timer_.setPeriod(ros::Duration(planner_core_.commandPeriod()));
             if (!solver_timer_.isValid()) {
                 solver_timer_ = nh_.createTimer(
                     ros::Duration(0.001), &PlannerNode::solverLoop, this);
             }
             if (!mpc_replay_timer_.isValid() && ocp_dt_ > 0) {
                 mpc_replay_timer_ = nh_.createTimer(
-                    ros::Duration(planner_core_.isDirect() ? 0.02 : ocp_dt_), &PlannerNode::mpcReplayTick, this);
+                    ros::Duration(planner_core_.commandPeriod()), &PlannerNode::mpcReplayTick, this);
                 ROS_INFO("MPC replay timer created (ocp_dt=%.3f valid=%d)",
                          ocp_dt_, mpc_replay_timer_.isValid() ? 1 : 0);
             }
