@@ -601,19 +601,19 @@ public:
 };
 class Bounds : public StageConstraintBase<double> {
 public:
-    Bounds(){constraint_type=ConstraintType::NO;dim_c=2*NU+1;}
+    explicit Bounds(bool include_floor=true){constraint_type=ConstraintType::NO;dim_c=2*NU+(include_floor?1:0);}
     Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
         Eigen::VectorXd v(dim_c);v(0)=Ref::FMIN/Ref::MASS-u(0);v(1)=u(0)-thrustMax();
-        for(int i=1;i<NU;++i){v(2*i)=u(i)-rateLimit();v(2*i+1)=-u(i)-rateLimit();}v(8)=-x(2);return v;
+        for(int i=1;i<NU;++i){v(2*i)=u(i)-rateLimit();v(2*i+1)=-u(i)-rateLimit();}if(dim_c>2*NU)v(8)=-x(2);return v;
     }
-    Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {Eigen::MatrixXd a=Eigen::MatrixXd::Zero(dim_c,NX);a(8,2)=-1;return a;}
+    Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {Eigen::MatrixXd a=Eigen::MatrixXd::Zero(dim_c,NX);if(dim_c>2*NU)a(8,2)=-1;return a;}
     Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {Eigen::MatrixXd b=Eigen::MatrixXd::Zero(dim_c,NU);b(0,0)=-1;b(1,0)=1;for(int i=1;i<NU;++i){b(2*i,i)=1;b(2*i+1,i)=-1;}return b;}
 };
 ;
 inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs& args) {
     auto pred=std::make_shared<Ref::ConstantAccelPredictor>();pred->a=args.target_accel;
     auto dyn=std::make_shared<Dynamics>(pred);auto problem=std::make_shared<OptimalControlProblem<double>>(N);
-    auto cost=std::make_shared<Cost>();auto bounds=std::make_shared<Bounds>();
+    auto cost=std::make_shared<Cost>();auto bounds=std::make_shared<Bounds>();auto initial_bounds=std::make_shared<Bounds>(false);
     auto limits=Ref::landingRows(NX,NU);
     Eigen::VectorXd x=Dynamics::initialState(args.current_state,hover());x(13)=0.;
     for(int k=0;k<N;++k){
@@ -642,7 +642,10 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
             if(Ref::defaults.mpc.native_px4)u.tail<3>()-=x.segment<3>(INTEGRAL);
         }
         problem->setInitialControl(k,u);problem->setStageDynamics(k,dyn);problem->setStageCost(k,cost);
-        problem->addStageConstraint(k,bounds);for(size_t j=1;j<limits.size();++j)problem->addStageConstraint(k,limits[j]);x=dyn->f(x,u);
+        // x0 is measured data, not a decision variable. Keep input bounds
+        // at k=0; constrain every future state and the terminal state.
+        problem->addStageConstraint(k,k==0?initial_bounds:bounds);
+        if(k>0)for(size_t j=1;j<limits.size();++j)problem->addStageConstraint(k,limits[j]);x=dyn->f(x,u);
     }
     if(static_cast<int>(args.prev_X.size())==N+1&&args.prev_X[N].size()==NX) {
         x=args.prev_X[N];x(13)=N*DT;x.tail(NU)=problem->getInitialControl(N-1);

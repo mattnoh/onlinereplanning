@@ -52,6 +52,10 @@ int main(){try{
     check((speed.c(x,u)-legacy_speed.c(x.head(14),u)).norm()<1e-12,"speed cone convention");
     OCPCreateArgs args;args.current_state=x;args.target_accel=pred->a;auto problem=O::create(args);
     check(problem->getInitialControl(0).size()==4,"MPC control layout");
+    check(problem->getStageConstraints(0,ConstraintType::NO).size()==2,
+          "input bounds and CTCS must constrain the first predicted interval");
+    check(problem->getStageConstraints(1,ConstraintType::SOC).size()==1,
+          "CTCS MPC future speed bound must remain enforced");
     check(std::abs(dyn->f(x,u)(13)-x(13)-O::DT)<1e-12,"fixed time grid");
     check(O::descriptor().command_mode==OCPDescriptor::CommandMode::CmdBodyRate,"direct command type");
     if(comando_parameters::defaults.mpc.native_px4) {
@@ -122,15 +126,18 @@ int main(){try{
     }
     const double initial_distance=plant_state.head(3).norm();
     auto begin=std::chrono::steady_clock::now(),previous=begin;
-    Eigen::VectorXd applied=O::hover();int accepted=0,ticks=0;double max_omega=0,max_warm_ms=0;
+    Eigen::VectorXd applied=O::hover();int accepted=0,ticks=0,recovery_updates=0;bool disturbed=false;double max_omega=0,max_warm_ms=0;
     std::map<int,std::vector<Eigen::VectorXd>> policies;
     while(std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count()<5) {
         auto tick=std::chrono::steady_clock::now();double dt=std::chrono::duration<double>(tick-previous).count();previous=tick;
         plant_state=plant.flow(plant_state,applied,dt,false).x;
         double elapsed=std::chrono::duration<double>(tick-begin).count();input.now=tick;
+        if(type=="landing_mpc"&&!disturbed&&elapsed>=1.) {
+            plant_state(10)=.03;disturbed=true;
+        }
         input.target_snapshot.velocity=target_velocity;input.target_snapshot.position=target_velocity*elapsed+Eigen::Vector3d(0,0,.2);
         input.current_state=plant_state.head(13);input.current_state.head(3)+=input.target_snapshot.position;input.current_state.segment<3>(3)+=target_velocity;
-        auto solve=moving.trySolve(input);if(solve.solve_accepted){++accepted;if(accepted>1)max_warm_ms=std::max(max_warm_ms,solve.solve_result.solve_time_ms);policies[solve.solve_num]=solve.solve_result.control_trajectory;
+        auto solve=moving.trySolve(input);if(solve.solve_accepted){++accepted;if(disturbed)++recovery_updates;if(accepted>1)max_warm_ms=std::max(max_warm_ms,solve.solve_result.solve_time_ms);policies[solve.solve_num]=solve.solve_result.control_trajectory;
 }
         auto feedback=moving.sample(tick,input.current_state,input.target_snapshot);
         if(solve.solve_attempted&&!solve.solve_accepted)
@@ -148,6 +155,7 @@ int main(){try{
         std::this_thread::sleep_until(tick+std::chrono::milliseconds(10));
     }
     moving.stop();std::cout<<type<<" moving model: accepted="<<accepted<<" ticks="<<ticks<<" distance="<<plant_state.head(3).norm()<<" omega="<<max_omega<<" max_warm_ms="<<max_warm_ms<<'\n';
+    if(type=="landing_mpc")check(disturbed&&recovery_updates>=30,"measured rate excursion must not stop MPC updates");
     check(accepted>=30&&ticks>200&&plant_state.head(3).norm()<initial_distance,"moving-target closed loop");
     }
     std::cout<<"PASS dynamics="<<maxerr<<" ctcs="<<cerror<<" measured-state first-input DDP MPC, CTCS and ordinary moving targets\n";return 0;

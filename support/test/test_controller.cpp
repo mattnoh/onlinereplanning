@@ -78,7 +78,7 @@ int main(){try{
   const auto analytic=limits->cx(x,model.hover);Eigen::MatrixXd numeric(6,model.nx);
   for(int j=0;j<model.nx;++j){auto plus=x,minus=x;plus(j)+=1e-7;minus(j)-=1e-7;numeric.col(j)=(limits->c(plus,model.hover)-limits->c(minus,model.hover))/(2e-7);}
   check((analytic-numeric).cwiseAbs().maxCoeff()<2e-5,"ordinary constraint Jacobian mismatch");
-  for(const auto& row:problem->getStageConstraints(0,ConstraintType::SOC)){
+  for(const auto& row:problem->getStageConstraints(1,ConstraintType::SOC)){
    const auto gradient=row->cx(x,model.hover);Eigen::MatrixXd differences(row->getDimC(),model.nx);
    for(int j=0;j<model.nx;++j){auto plus=x,minus=x;plus(j)+=1e-7;minus(j)-=1e-7;differences.col(j)=(row->c(plus,model.hover)-row->c(minus,model.hover))/(2e-7);}
    check((gradient-differences).cwiseAbs().maxCoeff()<2e-5,"native cone Jacobian mismatch");
@@ -91,6 +91,16 @@ int main(){try{
   double violation=0;for(const auto& state:result.state_trajectory)violation=std::max(violation,limits->c(state,model.hover).maxCoeff());
   std::cout<<type<<" residual="<<result.constraint_error<<" max_node_constraint="<<violation<<" ms="<<result.solve_time_ms<<"\n";
   check(violation<1e-3,"ordinary cold solve violates node constraints");
+  if(type=="landing_mpc") {
+   check(problem->getStageConstraints(0,ConstraintType::SOC).empty(),"fixed measured state must not make MPC recovery infeasible");
+   check(problem->getStageConstraints(1,ConstraintType::SOC).size()==5,"MPC future state constraints must remain enforced");
+   auto disturbed=x;disturbed(10)=.03;
+   OcpSolver recovery_solver(solver_config);auto recovered=recovery_solver.solve(disturbed);
+   check(recovered.success&&recovered.constraint_error<1e-3,"MPC must solve from a recoverable measured rate violation");
+   check((recovered.state_trajectory.front().head(13)-disturbed.head(13)).norm()<1e-12,"recovery must preserve actual measured state");
+   for(size_t k=1;k<recovered.state_trajectory.size();++k)
+    check(limits->c(recovered.state_trajectory[k],model.hover).maxCoeff()<1e-3,"recovery must preserve future constraints");
+  }
   // Measured moving-target activation that exposed the scalar-row cold-start failure.
   Eigen::VectorXd moving(13);moving<<-.07320069131,-.04604300079,1.832031775,.07864153001,-.004976944706,.008655228599,.999980267207,-.004416340294,.003462269278,-.00282379661,.01105888095,.001028963132,-.002000458539;
   moving.segment<4>(6).normalize();
