@@ -1106,11 +1106,19 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
     auto cost=std::make_shared<Cost>();auto bounds=std::make_shared<Bounds>();auto speed=std::make_shared<SpeedBound>();
     auto stc=Ref::makeCtcsConstraint<double>(dyn,Ref::CTCS_STEP_EPS/Ref::CTCS_Y_SCALE,-1,DT,substeps());
     Eigen::VectorXd x=Dynamics::initialState(args.current_state,hover());x(13)=0.;
-    for(int k=0;k<N;++k){problem->setInitialState(k,x);Eigen::VectorXd u=hover();
+    for(int k=0;k<N;++k){
+        if(k>0&&k<static_cast<int>(args.prev_X.size())&&args.prev_X[k].size()==NX) {
+            x=args.prev_X[k];x(13)=k*DT;
+            x.tail(NU)=problem->getInitialControl(k-1);
+        }
+        problem->setInitialState(k,x);Eigen::VectorXd u=hover();
         if(k<static_cast<int>(args.prev_U.size())&&args.prev_U[k].size()==NU)u=bounded(args.prev_U[k]);
         else if(Ref::defaults.mpc.native_px4)u.tail<3>()=-x.segment<3>(INTEGRAL);
         problem->setInitialControl(k,u);problem->setStageDynamics(k,dyn);problem->setStageCost(k,cost);
         problem->addStageConstraint(k,bounds);problem->addStageConstraint(k,speed);problem->addStageConstraint(k,stc);x=dyn->f(x,u);
+    }
+    if(static_cast<int>(args.prev_X.size())==N+1&&args.prev_X[N].size()==NX) {
+        x=args.prev_X[N];x(13)=N*DT;x.tail(NU)=problem->getInitialControl(N-1);
     }
     problem->setInitialState(N,x);problem->setTerminalCost(std::make_shared<Terminal>());return problem;
 }
@@ -1130,6 +1138,6 @@ inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=tru
     d.post_process_result=[](SolverResult& r,const TargetSnapshot& t){r.is_relative_plan=t.valid;r.target_snapshot_pos=t.position;r.target_snapshot_vel=t.velocity;r.target_snapshot_acc=t.acceleration;};
     d.validate_target=[](const TargetSnapshot& t,double now,double max_age){return t.valid&&t.odom_stamp_sec>0&&now-t.odom_stamp_sec>=0&&now-t.odom_stamp_sec<=max_age;};
     d.sanitize_warm_control=[](Eigen::VectorXd& u){u=bounded(u);};d.create=create;
-    d.getSolverParams=[](){auto p=Ref::getSolverParams();p.max_iter=Ref::defaults.mpc.max_iter;p.use_feasibility_ms=true;p.reg1_min=1e-4;p.reg2_min=1e-2;return p;};return d;
+    d.getSolverParams=[](){auto p=Ref::getSolverParams();p.max_iter=Ref::defaults.mpc.max_iter;p.use_feasibility_ms=true;p.feasibility_ms_exact_rows={13,NX-4,NX-3,NX-2,NX-1};p.reg1_min=1e-4;p.reg2_min=1e-2;return p;};return d;
 }
 }

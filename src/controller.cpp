@@ -153,7 +153,7 @@ std::vector<Eigen::MatrixXd> OcpSolver::makeKshifted(int n_shift) const {
 
 void OcpSolver::setupProblem(const OCPCreateArgs& args) {
     try {
-        solver_.reset();
+        if (!config_.reuse_solver) solver_.reset();
         problem_ = OCPRegistry::create(config_.ocp_type, args);
     } catch (const std::runtime_error& e) {
         std::cerr << "ERROR: " << e.what() << "\n";
@@ -220,8 +220,11 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
 
         setupProblem(args);
 
-        solver_ = make_shared<ALIPDDP<double>>(*problem_);
-        solver_->init(solver_params_);
+        if (config_.reuse_solver && solver_) solver_->updateProblem(*problem_, comando_parameters::defaults.mpc.warm_iterations);
+        else {
+            solver_ = make_shared<ALIPDDP<double>>(*problem_);
+            solver_->init(solver_params_);
+        }
         solver_->solve();
 
         auto X_result = solver_->getResX();

@@ -616,7 +616,12 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
     auto cost=std::make_shared<Cost>();auto bounds=std::make_shared<Bounds>();
     auto limits=Ref::landingRows(NX,NU);
     Eigen::VectorXd x=Dynamics::initialState(args.current_state,hover());x(13)=0.;
-    for(int k=0;k<N;++k){problem->setInitialState(k,x);Eigen::VectorXd u=hover();
+    for(int k=0;k<N;++k){
+        if(k>0&&k<static_cast<int>(args.prev_X.size())&&args.prev_X[k].size()==NX) {
+            x=args.prev_X[k];x(13)=k*DT;
+            x.tail(NU)=problem->getInitialControl(k-1);
+        }
+        problem->setInitialState(k,x);Eigen::VectorXd u=hover();
         if(k<static_cast<int>(args.prev_U.size())&&args.prev_U[k].size()==NU)u=bounded(args.prev_U[k]);
         else {
             // Feasible descent seed: brake before the floor and stay below the speed limit.
@@ -638,6 +643,9 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
         }
         problem->setInitialControl(k,u);problem->setStageDynamics(k,dyn);problem->setStageCost(k,cost);
         problem->addStageConstraint(k,bounds);for(size_t j=1;j<limits.size();++j)problem->addStageConstraint(k,limits[j]);x=dyn->f(x,u);
+    }
+    if(static_cast<int>(args.prev_X.size())==N+1&&args.prev_X[N].size()==NX) {
+        x=args.prev_X[N];x(13)=N*DT;x.tail(NU)=problem->getInitialControl(N-1);
     }
     problem->setInitialState(N,x);problem->setTerminalCost(std::make_shared<Terminal>());for(const auto& row:limits)problem->addTerminalConstraint(std::make_shared<Ref::TerminalRow>(row,NU));return problem;
 }
@@ -661,6 +669,6 @@ inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=tru
         if(x.size()<13||!x.allFinite()||x.segment<4>(6).norm()<1e-8)return false;
         return Ref::LandingLimits(18,4).c(x,Eigen::VectorXd::Zero(4)).maxCoeff()<=0;
     };
-    d.getSolverParams=[](){auto p=Ref::getSolverParams();p.max_iter=Ref::defaults.mpc.max_iter;p.use_feasibility_ms=true;p.reg1_min=1e-4;p.reg2_min=1e-2;return p;};return d;
+    d.getSolverParams=[](){auto p=Ref::getSolverParams();p.max_iter=Ref::defaults.mpc.max_iter;p.use_feasibility_ms=true;p.feasibility_ms_exact_rows={13,NX-4,NX-3,NX-2,NX-1};p.reg1_min=1e-4;p.reg2_min=1e-2;return p;};return d;
 }
 }

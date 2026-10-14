@@ -114,6 +114,7 @@ struct MpcParameters {
     double slew_thrust_weight = 0.1;
     double slew_rate_weight = 2.0;
     int max_iter = 60;
+    int warm_iterations = 8;
     bool native_px4 = false;
 };
 // Native PX4 position-controller coefficients, not planner feedback gains.
@@ -219,6 +220,7 @@ inline Parameters fromEnvironment() {
     p.solver.max_iter=envOrInt("SZMUK_MAX_ITER",p.solver.max_iter);
     p.solver.verbose=envOrInt("SZMUK_SOLVER_VERBOSE",0)!=0;
     p.mpc.rate_tau=envOrQ("MPC_RATE_TAU",p.mpc.rate_tau);p.mpc.rate_limit=envOrQ("MPC_RATE_LIMIT",p.mpc.rate_limit);
+    p.mpc.warm_iterations=envOrInt("MPC_WARM_ITER",p.mpc.warm_iterations);
     p.mpc.native_px4=envOrInt("MPC_NATIVE_PX4",0)!=0;
     p.mpc.hover_thrust=envOrQ("MPC_HOVER_THRUST",p.mpc.hover_thrust);
     p.mpc.motor_thrust_exponent=envOrQ("MPC_MOTOR_THRUST_EXPONENT",p.mpc.motor_thrust_exponent);

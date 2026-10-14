@@ -108,13 +108,21 @@ int main(){try{
     check(controller.sample(now+std::chrono::seconds(5),input.current_state,input.target_snapshot).stale,"expired policy");
     controller.stop();
     // Each measured-state DDP solve supplies only its first input to PX4.
+    for(const std::string type:{"stc_landing_mpc","landing_mpc"}) {
+    cfg.ocp_type=type;
     planner_core::DirectMpcController moving;moving.configure(cfg);
     auto moving_pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();O::Dynamics plant(moving_pred);
     Eigen::VectorXd plant_state=O::Dynamics::initialState(Eigen::VectorXd::Zero(13),O::hover());plant_state(0)=-.6;plant_state(1)=-2;plant_state(2)=StcLandingNoAugOCP::Z_STAGE+.1;plant_state(6)=1;plant_state.tail(4)=O::hover();
     const Eigen::Vector3d target_velocity(.134,.435,0);plant_state.segment<3>(3)=-target_velocity;
+    if(type=="landing_mpc") {
+        // Viable cone start: match the moving target's velocity before
+        // engaging the ordinary all-time constraints, as in SITL staging.
+        plant_state.head<3>()<<.04,.03,1.85;
+        plant_state.segment<3>(3).setZero();
+    }
     const double initial_distance=plant_state.head(3).norm();
     auto begin=std::chrono::steady_clock::now(),previous=begin;
-    Eigen::VectorXd applied=O::hover();int accepted=0,ticks=0;double max_omega=0;
+    Eigen::VectorXd applied=O::hover();int accepted=0,ticks=0;double max_omega=0,max_warm_ms=0;
     std::map<int,std::vector<Eigen::VectorXd>> policies;
     while(std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count()<5) {
         auto tick=std::chrono::steady_clock::now();double dt=std::chrono::duration<double>(tick-previous).count();previous=tick;
@@ -122,7 +130,8 @@ int main(){try{
         double elapsed=std::chrono::duration<double>(tick-begin).count();input.now=tick;
         input.target_snapshot.velocity=target_velocity;input.target_snapshot.position=target_velocity*elapsed+Eigen::Vector3d(0,0,.2);
         input.current_state=plant_state.head(13);input.current_state.head(3)+=input.target_snapshot.position;input.current_state.segment<3>(3)+=target_velocity;
-        auto solve=moving.trySolve(input);if(solve.solve_accepted){++accepted;policies[solve.solve_num]=solve.solve_result.control_trajectory;}
+        auto solve=moving.trySolve(input);if(solve.solve_accepted){++accepted;if(accepted>1)max_warm_ms=std::max(max_warm_ms,solve.solve_result.solve_time_ms);policies[solve.solve_num]=solve.solve_result.control_trajectory;
+}
         auto feedback=moving.sample(tick,input.current_state,input.target_snapshot);
         if(solve.solve_attempted&&!solve.solve_accepted)
             std::cout<<"DDP rejected: error="<<solve.solve_result.constraint_error<<" reason="<<solve.rejection_reason<<'\n';
@@ -138,7 +147,8 @@ int main(){try{
         max_omega=std::max(max_omega,plant_state.segment<3>(10).norm());
         std::this_thread::sleep_until(tick+std::chrono::milliseconds(10));
     }
-    moving.stop();std::cout<<"moving model: accepted="<<accepted<<" ticks="<<ticks<<" distance="<<plant_state.head(3).norm()<<" omega="<<max_omega<<'\n';
-    check(accepted>=3&&ticks>200&&plant_state.head(3).norm()<initial_distance,"moving-target closed loop");
-    std::cout<<"PASS dynamics="<<maxerr<<" ctcs="<<cerror<<" async DDP control delivery/expiry\n";return 0;
+    moving.stop();std::cout<<type<<" moving model: accepted="<<accepted<<" ticks="<<ticks<<" distance="<<plant_state.head(3).norm()<<" omega="<<max_omega<<" max_warm_ms="<<max_warm_ms<<'\n';
+    check(accepted>=30&&ticks>200&&plant_state.head(3).norm()<initial_distance,"moving-target closed loop");
+    }
+    std::cout<<"PASS dynamics="<<maxerr<<" ctcs="<<cerror<<" measured-state first-input DDP MPC, CTCS and ordinary moving targets\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

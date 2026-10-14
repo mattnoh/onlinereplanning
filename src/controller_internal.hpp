@@ -46,6 +46,7 @@ public:
 
         // Warm-start shift count (PlannerNode sets this from replay settings).
         int n_shift = 1;
+        bool reuse_solver = false;
 
         Config() {
             terminal_state = Eigen::VectorXd::Zero(13);
@@ -1057,6 +1058,7 @@ class DirectMpcController {
     struct Policy {
         OcpSolver::Result result;
         Clock::time_point origin;
+        Clock::time_point measured_at;
         int number=0;
         Eigen::Vector3d acceleration=Eigen::Vector3d::Zero();
     };
@@ -1081,7 +1083,7 @@ class DirectMpcController {
     }
 
     void run() {
-        OcpSolver::Config cfg;cfg.ocp_type=config_.ocp_type;cfg.n_shift=0;OcpSolver solver(cfg);
+        OcpSolver::Config cfg;cfg.ocp_type=config_.ocp_type;cfg.n_shift=0;cfg.reuse_solver=true;OcpSolver solver(cfg);
         for(;;) {
             PlannerCoreInput input;Eigen::VectorXd applied;int number;std::optional<Policy> prior;
             {
@@ -1107,7 +1109,11 @@ class DirectMpcController {
                 for(int k=0;k<dyn.horizon;++k){
                     double s=age/dyn.dt+k;int i=std::min(static_cast<int>(s),dyn.horizon-1);
                     warm.prev_U.push_back(old.control_trajectory[i]);
+                    auto state=old.state_trajectory[i];state(13)=k*dyn.dt;
+                    warm.prev_X.push_back(state);
                 }
+                auto terminal=old.state_trajectory.back();terminal(13)=dyn.horizon*dyn.dt;
+                warm.prev_X.push_back(terminal);
                 // Factory rolls out these resampled controls from the live x0.
                 solver.restoreWarmStart(warm);solver.setNextWarmStartShift(0);
             }
@@ -1136,7 +1142,7 @@ class DirectMpcController {
             if(!valid)solver.restoreWarmStart(snapshot);
             {
                 std::lock_guard<std::mutex> lock(mutex_);if(stop_)return;
-                if(valid){pending_=Policy{raw,Clock::now(),number,input.target_snapshot.acceleration};++count_;}
+                if(valid){pending_=Policy{raw,Clock::now(),input.now,number,input.target_snapshot.acceleration};++count_;}
                 completed_=std::move(out);busy_=false;
             }
             } catch(const std::exception& e) {
@@ -1171,7 +1177,7 @@ public:
     }
     PlannerCoreStepResult sample(Clock::time_point now,const Eigen::VectorXd& measured,const TargetSnapshot& target){
         std::lock_guard<std::mutex> lock(mutex_);PlannerCoreStepResult out;
-        if(pending_){policy_=std::move(pending_);pending_.reset();}
+        if(pending_&&now>=pending_->origin){policy_=std::move(pending_);pending_.reset();}
         if(!policy_)return out;out.has_replay_sample=true;out.solve_num=policy_->number;
         auto dyn=desc_.make_model(policy_->acceleration);
         const double age=seconds(now,policy_->origin);
