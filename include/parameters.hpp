@@ -114,6 +114,7 @@ struct MpcParameters {
     double slew_thrust_weight = 0.1;
     double slew_rate_weight = 2.0;
     int max_iter = 60;
+    bool native_px4 = false;
 };
 // Native PX4 position-controller coefficients, not planner feedback gains.
 // They must match MPC_ACC_DECOUPLE and MPC_XY/Z_VEL_D_ACC on the FCU.
@@ -121,6 +122,23 @@ struct Px4TrackingParameters {
     bool decouple_acceleration = true;
     double velocity_d_xy = .2;
     double velocity_d_z = 0.;
+    // x500 native plant defaults. Physical rotor geometry differs from the
+    // FCU allocation geometry; keep both as data rather than fitted gains.
+    double mass = 2.0643076923076915;
+    double gravity = 9.8;
+    Eigen::Vector3d inertia{.02383948067755798,.023942405487905428,.04399995371400395};
+    double motor_constant = 8.54858e-6, moment_ratio = .016;
+    double motor_min = 150., motor_max = 1000.;
+    double motor_tau_up = .0125, motor_tau_down = .025;
+    double gyro_cutoff_hz = 40., derivative_cutoff_hz = 20.;
+    Eigen::Vector3d rate_p{.15,.15,.2}, rate_i{.2,.2,.1}, rate_d{.003,.003,0.};
+    Eigen::Matrix<double,4,2> rotor_position_frd =
+        (Eigen::Matrix<double,4,2>()<<.174,.174,-.174,-.174,.174,-.174,-.174,.174).finished();
+    Eigen::Matrix<double,4,3> mixer_frd =
+        (Eigen::Matrix<double,4,3>()<<-.4377327513863796,.7071067811865471,.9090909275634227,
+          .43773275138637974,-.707106781186547,1.,
+          .43773275138637924,.7071067811865477,-.9090909275634222,
+          -.4377327513863796,-.7071067811865482,-1.).finished();
 };
 inline Param solverDefaults() {
     Param p;p.reg1_min=1e-3;p.reg2_min=0.1;p.mu_mul=0.1;
@@ -201,6 +219,7 @@ inline Parameters fromEnvironment() {
     p.solver.max_iter=envOrInt("SZMUK_MAX_ITER",p.solver.max_iter);
     p.solver.verbose=envOrInt("SZMUK_SOLVER_VERBOSE",0)!=0;
     p.mpc.rate_tau=envOrQ("MPC_RATE_TAU",p.mpc.rate_tau);p.mpc.rate_limit=envOrQ("MPC_RATE_LIMIT",p.mpc.rate_limit);
+    p.mpc.native_px4=envOrInt("MPC_NATIVE_PX4",0)!=0;
     p.mpc.hover_thrust=envOrQ("MPC_HOVER_THRUST",p.mpc.hover_thrust);
     p.mpc.motor_thrust_exponent=envOrQ("MPC_MOTOR_THRUST_EXPONENT",p.mpc.motor_thrust_exponent);
     p.mpc.motor_speed_offset=envOrQ("MPC_MOTOR_SPEED_OFFSET",p.mpc.motor_speed_offset);

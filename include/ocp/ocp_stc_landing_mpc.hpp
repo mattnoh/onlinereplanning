@@ -873,61 +873,158 @@ inline Param getSolverParams() { return defaults.solver; }
 
 namespace StcLandingMpcOCP {
 namespace Ref = Formulation;
-constexpr int NX = 18; // physical 13, time, previous four applied controls
+inline const int NX = Ref::defaults.mpc.native_px4 ? 34 : 18; // physical, native plant, command memory
 constexpr int NU = 4;
-constexpr int MEMORY = 14;
+inline const int MEMORY = NX-4;
+constexpr int ROTOR=14, INTEGRAL=18, GYRO=21, GYRO_RATE=24, DERIVATIVE=27;
 constexpr double DT = comando_parameters::MpcParameters::dt;
 constexpr int N = comando_parameters::MpcParameters::horizon;
 
+inline double nativeGravity(){return Ref::defaults.mpc.native_px4?Ref::defaults.px4.gravity:9.81;}
 inline double rateTau() { return std::max(0.02, Ref::defaults.mpc.rate_tau); }
-inline int substeps() { return std::max(2,static_cast<int>(std::ceil(DT/(0.65*rateTau())))); }
+inline int substeps() { return Ref::defaults.mpc.native_px4 ? std::max(2,static_cast<int>(std::ceil(DT*4*M_PI*Ref::defaults.px4.gyro_cutoff_hz))) : std::max(2,static_cast<int>(std::ceil(DT/(0.65*rateTau())))); }
 inline double rateLimit() { return Ref::defaults.mpc.rate_limit; }
-inline double thrustMax() { return std::min(Ref::FMAX/Ref::MASS,9.81*std::pow((1+Ref::defaults.mpc.motor_speed_offset)/std::max(.1,Ref::defaults.mpc.hover_thrust+Ref::defaults.mpc.motor_speed_offset),Ref::defaults.mpc.motor_thrust_exponent)); }
+inline double thrustMax() { return std::min(Ref::FMAX/Ref::MASS,nativeGravity()*std::pow((1+Ref::defaults.mpc.motor_speed_offset)/std::max(.1,Ref::defaults.mpc.hover_thrust+Ref::defaults.mpc.motor_speed_offset),Ref::defaults.mpc.motor_thrust_exponent)); }
 inline Eigen::VectorXd bounded(Eigen::VectorXd u) {
     if(u.size()!=NU || !u.allFinite()) throw std::runtime_error("invalid MPC control");
     u(0)=std::clamp(u(0), Ref::FMIN/Ref::MASS, thrustMax());
     for(int i=1;i<NU;++i) u(i)=std::clamp(u(i),-rateLimit(),rateLimit());
     return u;
 }
-inline Eigen::VectorXd hover() { Eigen::VectorXd u=Eigen::VectorXd::Zero(NU);u(0)=9.81;return u; }
+inline Eigen::VectorXd hover() { Eigen::VectorXd u=Eigen::VectorXd::Zero(NU);u(0)=nativeGravity();return u; }
 
 class Dynamics : public Ref::Quad6DOFVarTimeRelativePred<double> {
 public:
     explicit Dynamics(std::shared_ptr<Ref::ConstantAccelPredictor> pred)
         : Ref::Quad6DOFVarTimeRelativePred<double>(std::move(pred)) {
-        setMass(1.0);setGravity(Ref::GRAVITY);setJb(Eigen::Matrix3d::Identity());
+        setMass(1.0);setGravity(Ref::GRAVITY);
+        if(Ref::defaults.mpc.native_px4){setJb(Ref::defaults.px4.inertia.asDiagonal());setGravity(Eigen::Vector3d(0,0,-nativeGravity()));}else setJb(Eigen::Matrix3d::Identity());
         dim_x=NX;dim_u=NU;
     }
-    Eigen::VectorXd intervalRates(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const {
-        Eigen::VectorXd v=Eigen::VectorXd::Zero(NX);
-        v.head(14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRates(x.head(14),u);
-        v.segment<3>(10)=(u.tail<3>()-x.segment<3>(10))/rateTau();return v;
+    struct Rates {Eigen::VectorXd v;Eigen::MatrixXd a,b;};
+    static double rotorHover() {
+        const auto& p=Ref::defaults.px4;
+        return std::sqrt(p.mass*p.gravity/(4*p.motor_constant));
     }
-    Eigen::MatrixXd intervalRatesX(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const {
-        Eigen::MatrixXd a=Eigen::MatrixXd::Zero(NX,NX);
-        a.topLeftCorner(14,14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRatesX(x.head(14),u);
-        a.block(10,0,3,NX).setZero();a.block<3,3>(10,10)=-Eigen::Matrix3d::Identity()/rateTau();return a;
+    static Eigen::VectorXd initialState(const Eigen::VectorXd& physical,const Eigen::VectorXd& applied) {
+        if(physical.size()==NX)return physical;
+        Eigen::VectorXd x=Eigen::VectorXd::Zero(NX);x.head(13)=physical.head(13);x.tail(NU)=applied;
+        if(Ref::defaults.mpc.native_px4) {
+            const auto& p=Ref::defaults.px4;
+            x.segment<4>(ROTOR).setConstant((p.motor_min+(p.motor_max-p.motor_min)*collectiveSignal(applied(0)))/rotorHover());
+            x.segment<3>(GYRO)=physical.segment<3>(10);
+        }
+        return x;
     }
-    Eigen::MatrixXd intervalRatesU(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const {
-        Eigen::MatrixXd b=Eigen::MatrixXd::Zero(NX,NU);
-        b.topRows(14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRatesU(x.head(14),u).leftCols(NU);
-        b.block(10,0,3,NU).setZero();b.block<3,3>(10,1)=Eigen::Matrix3d::Identity()/rateTau();return b;
+    static Eigen::Matrix<double,4,3> nativeMixer() {
+        return Ref::defaults.px4.mixer_frd*Eigen::Vector3d(1,-1,-1).asDiagonal();
     }
+    static Eigen::Matrix<double,3,4> nativeMoments() {
+        const auto& p=Ref::defaults.px4;Eigen::Matrix<double,3,4> result;
+        result.row(0)=-p.rotor_position_frd.col(1).transpose();
+        result.row(1)=-p.rotor_position_frd.col(0).transpose();
+        result.row(2)<<-p.moment_ratio,-p.moment_ratio,p.moment_ratio,p.moment_ratio;
+        return result;
+    }
+    static double collectiveSignal(double acceleration) {
+        const auto& p=Ref::defaults.mpc;
+        return (p.hover_thrust+p.motor_speed_offset)*std::pow(std::max(1e-9,acceleration)/nativeGravity(),1/p.motor_thrust_exponent)-p.motor_speed_offset;
+    }
+    // Native controller states: normalized rotor speeds, I/P in rate units,
+    // gyro low-pass output and derivative/frequency, and D-filter alpha/frequency.
+    // The native PID is a predicted plant subsystem, never a second control law.
+    Rates rates(const Eigen::VectorXd& x,const Eigen::VectorXd& u,bool jac) const {
+        Rates out{Eigen::VectorXd::Zero(NX),Eigen::MatrixXd{},Eigen::MatrixXd{}};
+        if(jac){out.a=Eigen::MatrixXd::Zero(NX,NX);out.b=Eigen::MatrixXd::Zero(NX,NU);}
+        if(!Ref::defaults.mpc.native_px4) {
+            out.v.head(14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRates(x.head(14),u);
+            out.v.segment<3>(10)=(u.tail<3>()-x.segment<3>(10))/rateTau();
+            if(jac) {
+                out.a.topLeftCorner(14,14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRatesX(x.head(14),u);
+                out.a.block(10,0,3,NX).setZero();out.a.block<3,3>(10,10)=-Eigen::Matrix3d::Identity()/rateTau();
+                out.b.topRows(14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRatesU(x.head(14),u).leftCols(NU);
+                out.b.block(10,0,3,NU).setZero();out.b.block<3,3>(10,1)=Eigen::Matrix3d::Identity()/rateTau();
+            }
+            return out;
+        }
+        const auto& p=Ref::defaults.px4;
+        const double wh=rotorHover(),force_scale=p.motor_constant*wh*wh;
+        const Eigen::Vector4d rotor=x.segment<4>(ROTOR);
+        const Eigen::Vector4d forces=force_scale*rotor.array().square().matrix();
+        Eigen::Vector4d physical;physical(0)=forces.sum()/p.mass;physical.tail<3>()=nativeMoments()*forces;
+        out.v.head(14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRates(x.head(14),physical);
+        if(jac) {
+            out.a.topLeftCorner(14,14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRatesX(x.head(14),physical);
+            Eigen::Matrix4d df;df.row(0).setConstant(1/p.mass);df.bottomRows<3>()=nativeMoments();
+            df*= (2*force_scale*rotor).asDiagonal();
+            out.a.block(0,ROTOR,14,4)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRatesU(x.head(14),physical).leftCols(4)*df;
+        }
+        const double wg=2*M_PI*p.gyro_cutoff_hz,wd=2*M_PI*p.derivative_cutoff_hz;
+        const Eigen::Vector3d error=u.tail<3>()-x.segment<3>(GYRO);
+        const Eigen::Vector3d torque=p.rate_p.cwiseProduct(error+x.segment<3>(INTEGRAL))-
+            p.rate_d.cwiseProduct(wd*x.segment<3>(DERIVATIVE));
+        const Eigen::Matrix<double,4,3> mix=nativeMixer();
+        const Eigen::Vector4d raw_signal=Eigen::Vector4d::Constant(collectiveSignal(u(0)))+mix*torque;
+        for(int i=0;i<4;++i) {
+            // Model actuator saturation here; do not change the DDP command.
+            const double signal=std::clamp(raw_signal(i),0.,1.);
+            const double goal=(p.motor_min+(p.motor_max-p.motor_min)*signal)/wh;
+            const double tau=goal>rotor(i)?p.motor_tau_up:p.motor_tau_down;
+            out.v(ROTOR+i)=(goal-rotor(i))/tau;
+            if(jac) {
+                out.a(ROTOR+i,ROTOR+i)=-1/tau;
+                const double gain=raw_signal(i)>0&&raw_signal(i)<1 ? (p.motor_max-p.motor_min)/(wh*tau):0.;
+                out.a.block<1,3>(ROTOR+i,GYRO)=-gain*mix.row(i)*p.rate_p.asDiagonal();
+                out.a.block<1,3>(ROTOR+i,INTEGRAL)=gain*mix.row(i)*p.rate_p.asDiagonal();
+                out.a.block<1,3>(ROTOR+i,DERIVATIVE)=-gain*wd*mix.row(i)*p.rate_d.asDiagonal();
+                out.b.block<1,3>(ROTOR+i,1)=gain*mix.row(i)*p.rate_p.asDiagonal();
+                const auto& mp=Ref::defaults.mpc;
+                const double base=std::max(1e-9,u(0))/nativeGravity();
+                out.b(ROTOR+i,0)=gain*(mp.hover_thrust+mp.motor_speed_offset)/
+                    (nativeGravity()*mp.motor_thrust_exponent)*std::pow(base,1/mp.motor_thrust_exponent-1);
+            }
+        }
+        const double error_scale=400*M_PI/180;
+        for(int i=0;i<3;++i) {
+            const double e=error(i),factor=std::max(0.,1-e*e/(error_scale*error_scale));
+            const double gain=p.rate_i(i)/p.rate_p(i);
+            out.v(INTEGRAL+i)=gain*factor*e;
+            if(jac) {
+                const double derivative=factor>0?gain*(1-3*e*e/(error_scale*error_scale)):0.;
+                out.a(INTEGRAL+i,GYRO+i)=-derivative;out.b(INTEGRAL+i,1+i)=derivative;
+            }
+        }
+        out.v.segment<3>(GYRO)=wg*x.segment<3>(GYRO_RATE);
+        out.v.segment<3>(GYRO_RATE)=wg*(x.segment<3>(10)-x.segment<3>(GYRO)-std::sqrt(2.)*x.segment<3>(GYRO_RATE));
+        out.v.segment<3>(DERIVATIVE)=out.v.segment<3>(10)-wd*x.segment<3>(DERIVATIVE);
+        if(jac) {
+            out.a.block<3,3>(GYRO,GYRO_RATE)=wg*Eigen::Matrix3d::Identity();
+            out.a.block<3,3>(GYRO_RATE,10)=wg*Eigen::Matrix3d::Identity();
+            out.a.block<3,3>(GYRO_RATE,GYRO)=-wg*Eigen::Matrix3d::Identity();
+            out.a.block<3,3>(GYRO_RATE,GYRO_RATE)=-std::sqrt(2.)*wg*Eigen::Matrix3d::Identity();
+            out.a.middleRows(DERIVATIVE,3)=out.a.middleRows(10,3);
+            out.a.block<3,3>(DERIVATIVE,DERIVATIVE)=-wd*Eigen::Matrix3d::Identity();
+        }
+        return out;
+    }
+    Eigen::VectorXd intervalRates(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const {return rates(x,u,false).v;}
+    Eigen::MatrixXd intervalRatesX(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const {return rates(x,u,true).a;}
+    Eigen::MatrixXd intervalRatesU(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const {return rates(x,u,true).b;}
     struct Flow {Eigen::VectorXd x;Eigen::MatrixXd a,b;};
     Flow flow(Eigen::VectorXd x,const Eigen::VectorXd& u,double duration,bool jac=true) const {
         Eigen::MatrixXd a=Eigen::MatrixXd::Identity(NX,NX),b=Eigen::MatrixXd::Zero(NX,NU);
         const int steps=std::max(1,static_cast<int>(std::ceil(duration/(DT/substeps()))));
         const double h=duration/steps;
         for(int j=0;j<steps;++j) {
-            auto k1=intervalRates(x,u);Eigen::VectorXd p2=x+h/2*k1;
-            auto k2=intervalRates(p2,u);Eigen::VectorXd p3=x+h/2*k2;
-            auto k3=intervalRates(p3,u);Eigen::VectorXd p4=x+h*k3;
-            auto k4=intervalRates(p4,u);
+            auto r1=rates(x,u,jac);const auto& k1=r1.v;Eigen::VectorXd p2=x+h/2*k1;
+            auto r2=rates(p2,u,jac);const auto& k2=r2.v;Eigen::VectorXd p3=x+h/2*k2;
+            auto r3=rates(p3,u,jac);const auto& k3=r3.v;Eigen::VectorXd p4=x+h*k3;
+            auto r4=rates(p4,u,jac);const auto& k4=r4.v;
             if(jac) {
-                Eigen::MatrixXd a1=intervalRatesX(x,u)*a,b1=intervalRatesX(x,u)*b+intervalRatesU(x,u);
-                Eigen::MatrixXd a2=intervalRatesX(p2,u)*(a+h/2*a1),b2=intervalRatesX(p2,u)*(b+h/2*b1)+intervalRatesU(p2,u);
-                Eigen::MatrixXd a3=intervalRatesX(p3,u)*(a+h/2*a2),b3=intervalRatesX(p3,u)*(b+h/2*b2)+intervalRatesU(p3,u);
-                Eigen::MatrixXd a4=intervalRatesX(p4,u)*(a+h*a3),b4=intervalRatesX(p4,u)*(b+h*b3)+intervalRatesU(p4,u);
+                Eigen::MatrixXd a1=r1.a*a,b1=r1.a*b+r1.b;
+                Eigen::MatrixXd a2=r2.a*(a+h/2*a1),b2=r2.a*(b+h/2*b1)+r2.b;
+                Eigen::MatrixXd a3=r3.a*(a+h/2*a2),b3=r3.a*(b+h/2*b2)+r3.b;
+                Eigen::MatrixXd a4=r4.a*(a+h*a3),b4=r4.a*(b+h*b3)+r4.b;
                 a+=h/6*(a1+2*a2+2*a3+a4);b+=h/6*(b1+2*b2+2*b3+b4);
             }
             x+=h/6*(k1+2*k2+2*k3+k4);
@@ -1008,10 +1105,10 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
     auto dyn=std::make_shared<Dynamics>(pred);auto problem=std::make_shared<OptimalControlProblem<double>>(N);
     auto cost=std::make_shared<Cost>();auto bounds=std::make_shared<Bounds>();auto speed=std::make_shared<SpeedBound>();
     auto stc=Ref::makeCtcsConstraint<double>(dyn,Ref::CTCS_STEP_EPS/Ref::CTCS_Y_SCALE,-1,DT,substeps());
-    Eigen::VectorXd x=Eigen::VectorXd::Zero(NX);x.head(13)=args.current_state.head(13);
-    x.tail(NU)=args.current_state.size()==NX ? args.current_state.tail(NU).eval() : hover();
+    Eigen::VectorXd x=Dynamics::initialState(args.current_state,hover());x(13)=0.;
     for(int k=0;k<N;++k){problem->setInitialState(k,x);Eigen::VectorXd u=hover();
         if(k<static_cast<int>(args.prev_U.size())&&args.prev_U[k].size()==NU)u=bounded(args.prev_U[k]);
+        else if(Ref::defaults.mpc.native_px4)u.tail<3>()=-x.segment<3>(INTEGRAL);
         problem->setInitialControl(k,u);problem->setStageDynamics(k,dyn);problem->setStageCost(k,cost);
         problem->addStageConstraint(k,bounds);problem->addStageConstraint(k,speed);problem->addStageConstraint(k,stc);x=dyn->f(x,u);
     }
@@ -1022,7 +1119,7 @@ inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=tru
         auto pred=std::make_shared<Ref::ConstantAccelPredictor>(); pred->a=accel;
         auto dynamics=std::make_shared<Dynamics>(pred);
         OCPDescriptor::Model model; model.nx=NX;model.nu=NU;model.horizon=N;model.dt=DT;
-        model.hover=hover();model.bounded=bounded;
+        model.hover=hover();model.bounded=bounded;model.initial_state=Dynamics::initialState;
         model.flow=[dynamics](const Eigen::VectorXd& x,const Eigen::VectorXd& u,double t,bool jac) {
             auto f=dynamics->flow(x,u,t,jac);return OCPDescriptor::Flow{f.x,f.a,f.b};
         };return model;

@@ -1,4 +1,5 @@
 #include "ocp/ocp_stc_landing_mpc.hpp"
+#include "ocp/ocp_landing_mpc.hpp"
 #include "ocp/ocp_stc_landing_noaug.hpp"
 #include "controller_internal.hpp"
 #include "planner_core/adapters.hpp"
@@ -11,7 +12,8 @@ int main(){try{
     namespace O=StcLandingMpcOCP;
     auto pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();pred->a<<.1,-.1,0;
     auto dyn=std::make_shared<O::Dynamics>(pred);
-    Eigen::VectorXd x=Eigen::VectorXd::Zero(O::NX);x<<.4,-.3,1.3,.2,.1,-.1,.99,.02,-.03,.01,.05,-.04,.02,.4,9.81,0,0,0;
+    Eigen::VectorXd physical(13);physical<<.4,-.3,1.3,.2,.1,-.1,.99,.02,-.03,.01,.05,-.04,.02;
+    Eigen::VectorXd x=O::Dynamics::initialState(physical,O::hover());x(13)=.4;
     x.segment<4>(6).normalize();auto u=O::hover();u.tail(3)<<.08,-.06,.02;
     auto model=OCPRegistry::getDescriptor("stc_landing_mpc").make_model(pred->a);
     auto direct=dyn->flow(x,u,O::DT,true);auto through_interface=model.flow(x,u,O::DT,true);
@@ -46,6 +48,30 @@ int main(){try{
     check(problem->getInitialControl(0).size()==4,"MPC control layout");
     check(std::abs(dyn->f(x,u)(13)-x(13)-O::DT)<1e-12,"fixed time grid");
     check(O::descriptor().command_mode==OCPDescriptor::CommandMode::CmdBodyRate,"direct command type");
+    if(comando_parameters::defaults.mpc.native_px4) {
+        const auto ordinary=OCPRegistry::getDescriptor("landing_mpc").make_model(pred->a);
+        check((ordinary.flow(x,u,.1,true).x-dyn->flow(x,u,.1,true).x).norm()<1e-12,"ordinary and CTCS must predict the same native plant");
+        Eigen::VectorXd physical=Eigen::VectorXd::Zero(13);physical(6)=1;
+        auto hover_state=O::Dynamics::initialState(physical,O::hover());
+        auto hover_pred=std::make_shared<O::Ref::ConstantAccelPredictor>();O::Dynamics native(hover_pred);
+        const auto stationary=native.flow(hover_state,O::hover(),.5,false).x;
+        check(stationary.head(13).isApprox(physical,1e-8),"source-derived native hover equilibrium must conserve physical state");
+        hover_state.segment<3>(O::INTEGRAL)<<.006,-.004,.002;
+        auto native_rates=native.intervalRates(hover_state,O::hover());
+        check(native_rates.segment<4>(O::ROTOR).norm()>.01,"native integrator must affect actuator prediction");
+        auto cancelling=O::hover();cancelling.tail<3>()=-hover_state.segment<3>(O::INTEGRAL);
+        check(native.intervalRates(hover_state,cancelling).segment<4>(O::ROTOR).norm()<1e-10,"native integral state must enter the same PID equations used by PX4");
+        check(native.flow(hover_state,O::hover(),.1,false).x.segment<3>(10).norm()>1e-3,"first-order zero-rate projection must not erase native integrator drift");
+        OcpSolver::Config config;config.ocp_type="landing_mpc";OcpSolver solver(config);
+        hover_state(2)=1.85;
+        const auto solved=solver.solve(hover_state);
+        check(solved.success,"native DDP solve must return a trajectory");
+        const LandingMpcOCP::Ref::LandingLimits limits(O::NX,O::NU);
+        double excess=0.;for(const auto& state:solved.state_trajectory)excess=std::max(excess,limits.c(state,O::hover()).maxCoeff());
+        std::cout<<"native cold solve: error="<<solved.constraint_error<<" physical_excess="<<excess<<" ms="<<solved.solve_time_ms<<'\n';
+        check(excess<1e-4,"native DDP must predict feasible physical states with nonzero rate integral");
+        std::cout<<"PASS native dynamics="<<maxerr<<" ctcs="<<cerror<<'\n';return 0;
+    }
     planner_core::PlannerCoreConfig cfg;cfg.ocp_type="stc_landing_mpc";cfg.platform=planner_core::Platform::Mavros;cfg.enable_terminal_freeze=false;
     planner_core::DirectMpcController controller;controller.configure(cfg);
     planner_core::PlannerCoreInput input;input.current_state=Eigen::VectorXd::Zero(13);input.current_state<<1.98,0,StcLandingNoAugOCP::Z_STAGE+0.3,0,0,0,1,0,0,0,0,0,0;
@@ -68,7 +94,7 @@ int main(){try{
     // DDP ZOH controls, without a separate tracking law or command shaping.
     planner_core::DirectMpcController moving;moving.configure(cfg);
     auto moving_pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();O::Dynamics plant(moving_pred);
-    Eigen::VectorXd plant_state=Eigen::VectorXd::Zero(O::NX);plant_state(0)=-.6;plant_state(1)=-2;plant_state(2)=StcLandingNoAugOCP::Z_STAGE+.1;plant_state(6)=1;plant_state.tail(4)=O::hover();
+    Eigen::VectorXd plant_state=O::Dynamics::initialState(Eigen::VectorXd::Zero(13),O::hover());plant_state(0)=-.6;plant_state(1)=-2;plant_state(2)=StcLandingNoAugOCP::Z_STAGE+.1;plant_state(6)=1;plant_state.tail(4)=O::hover();
     const Eigen::Vector3d target_velocity(.134,.435,0);plant_state.segment<3>(3)=-target_velocity;
     const double initial_distance=plant_state.head(3).norm();
     auto begin=std::chrono::steady_clock::now(),previous=begin;

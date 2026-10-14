@@ -118,7 +118,8 @@ inline void publishAttitudeTargetMsg(Handles& h, const Eigen::VectorXd& u) {
     msg.thrust = u.size() > 0
         ? float(planner_core::normalizedThrust(u(0), h.hover_thrust,
             comando_parameters::defaults.mpc.motor_thrust_exponent,
-            comando_parameters::defaults.mpc.motor_speed_offset))
+            comando_parameters::defaults.mpc.motor_speed_offset,
+            comando_parameters::defaults.mpc.native_px4?comando_parameters::defaults.px4.gravity:9.81))
         : 0.0f;
     h.att_pub.publish(msg);
 }

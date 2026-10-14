@@ -292,6 +292,7 @@ struct OCPDescriptor {
         double dt = 0.1;
         std::function<Flow(const Eigen::VectorXd&, const Eigen::VectorXd&, double, bool)> flow;
         std::function<Eigen::VectorXd(Eigen::VectorXd)> bounded;
+        std::function<Eigen::VectorXd(const Eigen::VectorXd&,const Eigen::VectorXd&)> initial_state;
         Eigen::VectorXd hover;
     };
     std::function<Model(const Eigen::Vector3d&)> make_model;

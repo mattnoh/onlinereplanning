@@ -1075,7 +1075,11 @@ class DirectMpcController {
     int count_=0;
     AsyncCsvWriter controls_;
     static double seconds(Clock::time_point a,Clock::time_point b){return std::chrono::duration<double>(a-b).count();}
-    Eigen::VectorXd relative(const Eigen::VectorXd& x,const TargetSnapshot& t) const {return prepareOcpState(desc_,x.head(13),t);}
+    Eigen::VectorXd relative(const Eigen::VectorXd& x,const TargetSnapshot& t) const {
+        Eigen::VectorXd state=x;
+        state.head(13)=prepareOcpState(desc_,x.head(13),t);
+        return state;
+    }
 
     void run() {
         OcpSolver::Config cfg;cfg.ocp_type=config_.ocp_type;cfg.n_shift=0;OcpSolver solver(cfg);
@@ -1088,7 +1092,10 @@ class DirectMpcController {
             try {
             const auto origin=input.now+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(lead));
             auto dyn=desc_.make_model(input.target_snapshot.acceleration);
-            Eigen::VectorXd x=Eigen::VectorXd::Zero(dyn.nx);x.head(13)=relative(input.current_state,input.target_snapshot);x.tail(4)=applied;
+            const auto physical=relative(input.current_state,input.target_snapshot);
+            Eigen::VectorXd x;
+            if(dyn.initial_state)x=dyn.initial_state(physical,applied);
+            else {x=Eigen::VectorXd::Zero(dyn.nx);x.head(13)=physical;x.tail(4)=applied;}
 
             // Predict through exactly the DDP ZOH controls sent to PX4.
             // Split at optimizer node boundaries: no secondary feedback,
@@ -1190,7 +1197,7 @@ public:
 
         Eigen::VectorXd reference=dyn.flow(r.state_trajectory[i],nominal,age-i*dyn.dt,false).x;
         reference.tail(4)=r.state_trajectory[i].tail(4);
-        Eigen::VectorXd live=reference;live.head(13)=relative(measured,target);
+        Eigen::VectorXd live=reference;live.head(13)=relative(measured,target).head(13);
         if(live.segment<4>(6).dot(reference.segment<4>(6))<0)live.segment<4>(6)*=-1;
         Eigen::VectorXd delta=live-reference;
         const Eigen::VectorXd feedback=Eigen::VectorXd::Zero(4);
