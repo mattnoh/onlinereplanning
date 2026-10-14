@@ -22,7 +22,13 @@ int main(){try{
     for(int j=0;j<O::NX+O::NU;++j){auto xp=x,xm=x,up=u,um=u;
         if(j<O::NX){xp(j)+=h;xm(j)-=h;}else{up(j-O::NX)+=h;um(j-O::NX)-=h;}
         Eigen::VectorXd fd=(dyn->f(xp,up)-dyn->f(xm,um))/(2*h);
-        Eigen::VectorXd analytic=j<O::NX? a.col(j).eval():b.col(j-O::NX).eval();maxerr=std::max(maxerr,(fd-analytic).norm());
+        Eigen::VectorXd analytic=j<O::NX? a.col(j).eval():b.col(j-O::NX).eval();
+        const double error=(fd-analytic).norm();
+        if(error>maxerr&&error>1e-5) {
+            Eigen::Index row;const double peak=(fd-analytic).cwiseAbs().maxCoeff(&row);
+            std::cerr<<"Jacobian column="<<j<<" row="<<row<<" error="<<peak<<" finite="<<fd(row)<<" analytic="<<analytic(row)<<'\n';
+        }
+        maxerr=std::max(maxerr,error);
     }
     check(maxerr<1e-5,"dynamics Jacobians");
     x(2)=.45; x.segment<3>(3)<<.6,.4,-.5;
