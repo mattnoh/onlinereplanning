@@ -88,16 +88,26 @@ int main(){try{
     for(int i=0;i<2500;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));input.now=std::chrono::steady_clock::now();auto attempt=controller.trySolve(input);if(attempt.solve_attempted)solved=attempt;if(solved.solve_accepted)break;}
     std::cout<<"cold solve: accepted="<<solved.solve_accepted<<" error="<<solved.solve_result.constraint_error<<" ms="<<solved.solve_result.solve_time_ms<<'\n';
     check(solved.solve_accepted,"cold direct MPC solve rejected");
+    check(solved.x0_source=="measured","MPC must use measured initial state");
+    Eigen::VectorXd expected=input.current_state;
+    expected.head<3>()-=input.target_snapshot.position;
+    expected.segment<3>(3)-=input.target_snapshot.velocity;
+    check((solved.solve_result.state_trajectory.front().head(13)-expected).norm()<1e-10,
+          "DDP root must equal measured state, without future projection");
     auto now=std::chrono::steady_clock::now();auto sample=controller.sample(now,input.current_state,input.target_snapshot);
     for(int i=0;i<500&&!sample.has_replay_sample;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));now=std::chrono::steady_clock::now();sample=controller.sample(now,input.current_state,input.target_snapshot);}
     check(sample.has_replay_sample&&!sample.stale&&sample.command.control.allFinite(),"DDP command sample");
-    check(sample.solve_num==solved.solve_num,"scheduled first DDP policy must not be overwritten before handoff");
+    check(sample.solve_num==solved.solve_num,"first DDP result must be applied before the next solve");
+    check((sample.command.control-solved.solve_result.control_trajectory.front()).norm()<1e-12,
+          "MPC must apply first optimized input");
+    auto held=controller.sample(now+std::chrono::milliseconds(250),input.current_state,input.target_snapshot);
+    check((held.command.control-sample.command.control).norm()<1e-12,
+          "publication must not advance through optimized trajectory");
     input.current_state.segment<4>(6)*=-1;auto flipped=controller.sample(now,input.current_state,input.target_snapshot);
     check((sample.command.control-flipped.command.control).norm()<1e-10,"quaternion sign must not alter DDP control");
     check(controller.sample(now+std::chrono::seconds(5),input.current_state,input.target_snapshot).stale,"expired policy");
     controller.stop();
-    // Replanning closes the measured-state loop; PX4 receives the exact
-    // DDP ZOH controls, without a separate tracking law or command shaping.
+    // Each measured-state DDP solve supplies only its first input to PX4.
     planner_core::DirectMpcController moving;moving.configure(cfg);
     auto moving_pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();O::Dynamics plant(moving_pred);
     Eigen::VectorXd plant_state=O::Dynamics::initialState(Eigen::VectorXd::Zero(13),O::hover());plant_state(0)=-.6;plant_state(1)=-2;plant_state(2)=StcLandingNoAugOCP::Z_STAGE+.1;plant_state(6)=1;plant_state.tail(4)=O::hover();
@@ -121,9 +131,8 @@ int main(){try{
         if(feedback.has_replay_sample){
             auto found=policies.find(feedback.solve_num);
             check(found!=policies.end(),"applied policy must come from a DDP solve");
-            bool exact=false;
-            for(const auto& nominal:found->second)exact=exact||(feedback.command.control-nominal).norm()<1e-12;
-            check(exact,"published control must equal an optimized DDP control");
+            check((feedback.command.control-found->second.front()).norm()<1e-12,
+                  "published control must equal the first optimized DDP control");
             applied=feedback.command.control;++ticks;
         }
         max_omega=std::max(max_omega,plant_state.segment<3>(10).norm());
