@@ -208,6 +208,9 @@ struct SolverResult {
     std::vector<Eigen::MatrixXd> feedback_gains;
     double solve_time_ms = 0.0;
     double constraint_error = 0.0;
+    double primal_constraint_violation = 0.0;
+    double dynamics_error = 0.0;
+    std::string solver_termination;
     int solve_iters = 0;
     std::chrono::steady_clock::time_point solve_start_time;
     std::chrono::steady_clock::time_point solve_finish_time;

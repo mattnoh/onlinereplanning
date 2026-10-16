@@ -29,6 +29,50 @@
 #include <thread>
 #include <vector>
 
+// Evaluate the returned primal directly, independently of IPM slacks and
+// termination labels. This certifies the transcribed OCP, including its CTCS
+// epsilon allowance; it is not a certificate of unrelaxed physical STCs.
+struct PrimalAudit {
+    double constraints=0, dynamics=0;
+    bool feasible(double tolerance) const {
+        return std::isfinite(constraints)&&std::isfinite(dynamics)&&
+               constraints<=tolerance&&dynamics<=tolerance;
+    }
+};
+inline PrimalAudit auditPrimal(const OptimalControlProblem<double>& problem,
+    const std::vector<Eigen::VectorXd>& x,const std::vector<Eigen::VectorXd>& u,
+    const Param& parameters) {
+    const double invalid=std::numeric_limits<double>::infinity();
+    if(x.size()!=problem.getHorizon()+1||u.size()!=problem.getHorizon())return {invalid,invalid};
+    for(const auto& v:x)if(!v.allFinite())return {invalid,invalid};
+    for(const auto& v:u)if(!v.allFinite())return {invalid,invalid};
+    PrimalAudit result;
+    const auto residual=[](const Eigen::VectorXd& c,ConstraintType type){
+        if(!c.allFinite())return std::numeric_limits<double>::infinity();
+        if(c.size()==0)return 0.;
+        if(type==ConstraintType::SOC)return std::max(0.,c(0)+c.tail(c.size()-1).norm());
+        return type==ConstraintType::EQ?c.cwiseAbs().maxCoeff():std::max(0.,c.maxCoeff());
+    };
+    for(int k=0;k<problem.getHorizon();++k){
+        if(x[k].size()!=problem.getInitialState(k).size()||u[k].size()!=problem.getInitialControl(k).size())return {invalid,invalid};
+        auto next=problem.getDynamics(k)->f(x[k],u[k]);
+        if(next.size()!=x[k+1].size()||!next.allFinite())return {invalid,invalid};
+        if(parameters.is_quaternion_in_state){
+            const int q=parameters.quaternion_idx;
+            if(next.segment(q,4).dot(x[k+1].segment(q,4))<0)next.segment(q,4)*=-1;
+        }
+        result.dynamics=std::max(result.dynamics,(next-x[k+1]).lpNorm<Eigen::Infinity>());
+        for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
+            for(const auto& row:problem.getStageConstraints(k,type))
+                result.constraints=std::max(result.constraints,residual(row->c(x[k],u[k]),type));
+    }
+    for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
+        for(const auto& row:problem.getTerminalConstraints(type))
+            result.constraints=std::max(result.constraints,residual(row->cT(x.back()),type));
+    result.dynamics=std::max(result.dynamics,(x.front()-problem.getInitialState(0)).lpNorm<Eigen::Infinity>());
+    return result;
+}
+
 class OcpSolver {
 public:
     struct WarmStartSnapshot {
@@ -63,6 +107,8 @@ public:
         std::vector<Eigen::MatrixXd>  feedback_gains;
         double                        solve_time_ms = 0.0;
         double                        constraint_error = 0.0;
+        PrimalAudit primal;
+        std::string termination;
         int                           solve_iters   = 0;
         std::chrono::steady_clock::time_point solve_start_time;
         std::chrono::steady_clock::time_point solve_finish_time;
@@ -319,6 +365,8 @@ public:
             const auto rel_stats = relativeTrajectoryStats(result.state_trajectory);
             addDiagnostic(out, DiagnosticSeverity::Warn, "solve_rejected", out.rejection_reason,
                           {{"constraint_error", result.constraint_error},
+                           {"primal_constraint_violation", result.primal_constraint_violation},
+                           {"dynamics_error", result.dynamics_error},
                            {"solve_time_ms", result.solve_time_ms},
                            {"active_elapsed_now", out.active_elapsed_now_sec},
                            {"activation_elapsed", out.activation_elapsed_sec},
@@ -577,6 +625,9 @@ private:
         result.control_trajectory = r.control_trajectory;
         result.solve_time_ms = r.solve_time_ms;
         result.constraint_error = r.constraint_error;
+        result.primal_constraint_violation = r.primal.constraints;
+        result.dynamics_error = r.primal.dynamics;
+        result.solver_termination = r.termination;
         result.solve_iters = r.solve_iters;
         result.solve_start_time = r.solve_start_time;
         result.solve_finish_time = r.solve_finish_time;
@@ -1134,7 +1185,7 @@ class DirectMpcController {
             out.solve_result.success=raw.success;out.solve_result.state_trajectory=raw.state_trajectory;
             out.solve_result.control_trajectory=raw.control_trajectory;out.solve_result.feedback_gains=raw.feedback_gains;
             out.solve_result.solve_time_ms=raw.solve_time_ms;out.solve_result.solve_iters=raw.solve_iters;
-            out.solve_result.constraint_error=raw.constraint_error;out.solve_result.solve_start_time=raw.solve_start_time;out.solve_result.solve_finish_time=raw.solve_finish_time;
+            out.solve_result.constraint_error=raw.constraint_error;out.solve_result.primal_constraint_violation=raw.primal.constraints;out.solve_result.dynamics_error=raw.primal.dynamics;out.solve_result.solver_termination=raw.termination;out.solve_result.solve_start_time=raw.solve_start_time;out.solve_result.solve_finish_time=raw.solve_finish_time;
             out.solve_result.is_relative_plan=true;out.solve_result.target_snapshot_pos=input.target_snapshot.position;
             out.solve_result.target_snapshot_vel=input.target_snapshot.velocity;out.solve_result.target_snapshot_acc=input.target_snapshot.acceleration;
             bool valid=raw.success&&std::isfinite(raw.constraint_error)&&raw.constraint_error<=config_.max_constraint_error&&
@@ -1143,7 +1194,7 @@ class DirectMpcController {
             for(const auto& v:raw.control_trajectory)valid=valid&&v.size()==4&&v.allFinite();
             for(const auto& k:raw.feedback_gains)valid=valid&&k.rows()==4&&k.cols()==dyn.nx&&k.allFinite();
             valid=valid&&seconds(Clock::now(),origin)<0.5;
-            out.solve_accepted=valid;out.rejection_reason=valid ? "" : "direct_mpc_invalid_or_stale";
+            out.solve_accepted=valid;out.rejection_reason=valid ? "" : (!raw.success ? "direct_mpc_primal_infeasible" : "direct_mpc_invalid_or_stale");
             out.solve_log.ocp_dt=dyn.dt;out.solve_log.coord_mode="relative";
             out.solve_log.solve_num=number;out.solve_log.is_relative_plan=true;
             out.solve_log.target_snapshot_pos=input.target_snapshot.position;out.solve_log.target_snapshot_vel=input.target_snapshot.velocity;out.solve_log.target_snapshot_acc=input.target_snapshot.acceleration;

@@ -9,6 +9,27 @@
 #include <map>
 static void check(bool b,const char* message){if(!b)throw std::runtime_error(message);}
 int main(){try{
+    // A zero slack residual/returned trajectory must not certify an infeasible
+    // primal. Check every cone type, terminal rows and exact-memory dynamics.
+    {
+        OptimalControlProblem<double> problem(1);Param parameters;
+        problem.setInitialState(0,Eigen::VectorXd::Zero(1));
+        problem.setInitialState(1,Eigen::VectorXd::Zero(1));
+        problem.setInitialControl(0,Eigen::VectorXd::Zero(1));
+        problem.setStageDynamics(std::make_shared<LinearDiscreteDynamics<double>>(Eigen::MatrixXd::Identity(1,1),Eigen::MatrixXd::Identity(1,1)));
+        std::vector<Eigen::VectorXd> states(2,Eigen::VectorXd::Zero(1)),controls(1,Eigen::VectorXd::Zero(1));
+        check(auditPrimal(problem,states,controls,parameters).feasible(1e-7),"feasible primal rejected");
+        states[1](0)=.1;parameters.feasibility_ms_exact_rows={0};
+        check(!auditPrimal(problem,states,controls,parameters).feasible(1e-7),"dynamics gap hidden by exact-row setting");
+        states[1](0)=0;
+        for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ}){
+            auto p=problem;Eigen::VectorXd offset=Eigen::VectorXd::Constant(type==ConstraintType::SOC?2:1,.1);
+            p.addStageConstraint(std::make_shared<LinearStageConstraint<double>>(Eigen::MatrixXd::Zero(offset.size(),1),Eigen::MatrixXd::Zero(offset.size(),1),offset,type));
+            check(!auditPrimal(p,states,controls,parameters).feasible(1e-7),"stage constraint violation accepted");
+            auto terminal=problem;terminal.addTerminalConstraint(std::make_shared<LinearTerminalConstraint<double>>(Eigen::MatrixXd::Zero(offset.size(),1),offset,type));
+            check(!auditPrimal(terminal,states,controls,parameters).feasible(1e-7),"terminal constraint violation accepted");
+        }
+    }
     namespace O=StcLandingMpcOCP;
     auto pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();pred->a<<.1,-.1,0;
     auto dyn=std::make_shared<O::Dynamics>(pred);
@@ -71,10 +92,13 @@ int main(){try{
     {
         OCPCreateArgs hover_args;hover_args.current_state=Eigen::VectorXd::Zero(13);
         hover_args.current_state(2)=O::Ref::Z_STAGE+.3;hover_args.current_state(6)=1;
-        auto feasible=O::create(hover_args);ALIPDDP<double> seeded(*feasible);
-        auto parameters=O::descriptor().getSolverParams();parameters.mu=parameters.muT=1e-6;
-        seeded.init(parameters);
-        check(seeded.error<1e-7,"recentring feasible CTCS must not inject a fixed slack residual");
+        auto feasible=O::create(hover_args);
+        for(double mu:{1.,.01,1e-6}){
+            ALIPDDP<double> seeded(*feasible);
+            auto parameters=O::descriptor().getSolverParams();parameters.mu=parameters.muT=mu;
+            seeded.init(parameters);
+            check(seeded.error<1e-7,"recentring feasible CTCS must not inject a barrier-dependent slack residual");
+        }
     }
     if(comando_parameters::defaults.mpc.native_px4) {
         const auto ordinary=OCPRegistry::getDescriptor("landing_mpc").make_model(pred->a);

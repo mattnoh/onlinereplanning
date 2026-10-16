@@ -36,3 +36,62 @@ Next data action: one ordinary MPC circle diagnostic with native SDLOG_PROFILE=1
 The high-rate MPC circle diagnostic is finalized LANDED/CLEAN (92 seconds) but failed rate/tilt/glideslope constraints; first controlled rate was already 0.03154 rad/s. Eight accepted horizons, 100 Hz exact DDP input publication, and full-rate native PID/actuator evidence are now saved with a copied ULog in logs/ddp_native_model_identification_landing_mpc/circle__zero__t0. The native mixing matrix is validated to RMS 4.25e-5 normalized motor signal. The logged mode-switch delay is 188 ms and varies from prior 148 ms; rate integral is nonzero.
 
 Next required implementation: replace the first-order/instantaneous-handoff prediction with validated native PID + rotor/controller-state dynamics in the complete MPC OCPs. First-plan projection currently assumes hover body-rate tracking while the actual PX4 position/attitude cascade remains active. Account for that phase mathematically and initialize native controller/actuator states from an estimator, rather than inserting post-solve correction or altering acceptance. Validate native dynamics/derivatives and closed-loop rollout against the full-rate dataset before another flight. Then address the RH physical/reference tracking-state model, forecast epochs/reversals, terminal nominal excess and warm-start cadence. Keep all physical limits and required formulations/motions intact.
+
+
+## Enforcement-first investigation, 2026-10-16
+
+The current priority is actual offline feasibility before additional SITL or
+plant-model work. The earlier native-model next actions above are superseded
+until this passes. No SITL was launched during this investigation.
+
+Confirmed defects and changes:
+
+- A one-step scalar barrier problem returned u=0 with zero reported primal
+  error although its barrier gradient was 1. The correct minimizer is
+  (1-sqrt(5))/2. The stage control step omitted the current multiplier
+  gradient. Corrected it, the condensed value recursion, terminal
+  complementarity sign and terminal curvature in ALIPDDP (`237d29e3`).
+- SOC L(s)^-1 L(y) omitted the y_tail/s0 term in its lower first column.
+  The focused solver regression compares every entry with a dense Jordan
+  matrix solve. Scalar NO/SOC stage/terminal tests, equality tests, gapped
+  FDDP seeds and repeated measured-root LQR updates also pass. The LQR
+  reference uses independent dense Newton equations; control discrepancy
+  is below 2.4e-11.
+- Feasible small slacks must not be replaced by a barrier-dependent floor.
+  Preserve S=-C for interior scalar/SOC rows; retain positive interior
+  initialization for violated rows. Check CTCS initialization at mu=1,
+  0.01 and 1e-6.
+- Optimal termination includes primal/gap residuals and active barriers;
+  equality convergence no longer waits on inactive barriers. At final
+  continuation limits, inner stationarity is checked at solver tolerance.
+  Failed line-search logging no longer indexes beyond the attempted steps.
+- Shared OcpSolver now independently audits every returned NO/SOC/EQ stage
+  and terminal row, root and full discrete dynamics. This applies to RH
+  and MPC, including descriptors that skip broader trajectory heuristics.
+  It does not claim unrelaxed physical STC or robust tracking guarantees.
+
+Validation and remaining failures:
+
+- Focused generic solver regression passes. Offline MPC lifecycle/moving
+  model tests pass with the new primal gate; existing core/controller
+  checks also passed before the latest slack-initialization correction.
+- The historical RH test forces 30 iterations. Its staging-hover cold
+  solve now fails the stricter primal check, previously hidden by the
+  aggregate gate. Do not loosen the audit or rewrite this as success.
+- Replay of solve 3 from the retained repeat-circle flight, reconstructed
+  from its saved states/controls and target acceleration, still fails:
+  largest scalar CTCS residual about 6.98e-5 versus tolerance 1e-6, despite
+  essentially closed dynamics (max component gap about 5.4e-15) and a
+  1000-iteration cap. It stalls at the continuation floor, not convergence.
+  Command-memory reconstruction is approximate, so this is a reproduction
+  from the saved physical horizon, not an exact internal solver snapshot.
+- Longer line searches, dimensionless per-implication experimental rows
+  and removing discontinuous trigger floors did not resolve the replay.
+  These experiments remain under /tmp; production OCP/tuning is unchanged.
+- Next: resolve actual quadrotor/RH primal feasibility and physical CTCS
+  allowance/scaling, then strengthen complete offline measured-state loops
+  before any sequential SITL validation. No new controller corrections.
+
+Intermediate tuning logs are archived with verified SHA-256 manifest;
+208.29 MiB was reclaimed. Baseline, final circle runs and representative
+straight/figure-eight failures remain accessible under logs/.

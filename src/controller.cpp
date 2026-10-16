@@ -230,6 +230,8 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
         auto X_result = solver_->getResX();
         auto U_result = solver_->getResU();
         auto K_result = solver_->getResK();
+        result.primal = auditPrimal(*problem_,X_result,U_result,solver_params_);
+        result.termination = solver_->getTerminationReason();
 
         const auto t_finish = chrono::steady_clock::now();
         result.solve_finish_time = t_finish;
@@ -252,7 +254,10 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
             result.state_trajectory = X_result;
             result.control_trajectory = U_result;
             result.feedback_gains = K_result;
-            result.success = true;
+            result.success = result.primal.feasible(solver_params_.tolerance);
+            if(!result.success)std::cerr<<"[MPC] infeasible returned primal: constraints="
+                <<result.primal.constraints<<" dynamics="<<result.primal.dynamics
+                <<" termination="<<result.termination<<"\n";
 
             prev_X_ = X_result;
             prev_U_ = U_result;
