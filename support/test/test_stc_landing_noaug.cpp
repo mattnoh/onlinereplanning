@@ -145,6 +145,17 @@ int main(int argc, char** argv) {
                     "const-accel predictor must hold snapshot acceleration");
         }
 
+        {
+            Eigen::VectorXd state=Eigen::VectorXd::Zero(13);state(6)=1;
+            for(double vertical_acceleration:{-.2,.2}){
+                OCPCreateArgs args;args.current_state=state;args.target_accel.z()=vertical_acceleration;
+                const auto problem=desc.create(args);
+                const double expected=StcLandingNoAugOCP::MASS*(9.81+vertical_acceleration);
+                require(std::abs(problem->getInitialControl(0)(0)-expected)<1e-10,
+                    "relative seed thrust must add target acceleration to requested relative acceleration");
+            }
+        }
+
         // ── 2. SITL-like activation cold start ──────────────────────────────
         // The landing profile is applied from a settled hover at staging
         // altitude with a general lateral offset (never from directly above

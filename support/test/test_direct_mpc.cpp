@@ -69,6 +69,26 @@ int main(){try{
             check(std::abs(fd-analytic)/(1+std::abs(fd))<1e-5,"landing rate-cost gradient");
         }
     }
+    {
+        // The touchdown residual has a product of altitude and velocity.
+        // Check GN curvature against its independent residual Jacobian.
+        using R=StcLandingNoAugOCP::CTcSTCStageCost<double>;
+        const double weight=StcLandingNoAugOCP::W_TOUCH_VEL;
+        R full(1.,0.,0.,0.,Eigen::Vector3d::Zero());
+        Eigen::VectorXd state=Eigen::VectorXd::Zero(StcLandingNoAugOCP::NX_SS);
+        state(2)=.1;state(3)=.6;state(4)=-.3;state(5)=-.4;state(6)=1;
+        const auto input=Eigen::VectorXd::Zero(StcLandingNoAugOCP::NU_SS);
+        const double touch=(StcLandingNoAugOCP::TOUCH_ALT-state(2))/StcLandingNoAugOCP::TOUCH_SCALE;
+        Eigen::MatrixXd j=Eigen::MatrixXd::Zero(3,state.size());
+        j.block<3,1>(0,2)=-state.segment<3>(3)/StcLandingNoAugOCP::TOUCH_SCALE;
+        j.block<3,3>(0,3)=touch*Eigen::Matrix3d::Identity();
+        Eigen::MatrixXd expected=2*weight*j.transpose()*j;
+        expected.block<3,3>(3,3).diagonal().array()+=2;
+        expected.block<3,3>(10,10).diagonal().array()+=2;
+        check((full.qxx(state,input)-expected).norm()<1e-10,"RH touchdown GN curvature must match residual Jacobian");
+        auto model_state=O::Dynamics::initialState(state,O::hover());O::Cost mpc_cost;
+        check(Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd>(mpc_cost.qxx(model_state,O::hover())).eigenvalues().minCoeff()>-1e-8,"MPC GN curvature must remain positive semidefinite at touchdown");
+    }
     Eigen::VectorXd odom=Eigen::VectorXd::Zero(13);odom(3)=1;odom(6)=std::sqrt(.5);odom(9)=std::sqrt(.5);odom(10)=.2;
     auto world=planner_core::bodyOdometryToWorld(odom);check(std::abs(world(4)-1)<1e-12&&std::abs(world(3))<1e-12&&world(10)==.2,"odometry frame conversion");
     check(std::abs(planner_core::normalizedThrust(9.81,.7)-.7)<1e-12&&planner_core::normalizedThrust(30,.7)==1,"thrust normalization");

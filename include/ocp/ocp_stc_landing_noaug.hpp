@@ -656,8 +656,10 @@ public:
         for (int i = 3;  i < 6;  ++i) {
             H(i,i) = Scalar(2)*eps_ + Scalar(2)*sd*w_vel_
                    + Scalar(2)*Scalar(W_TOUCH_VEL)*touch*touch;
-            H(2,i) += Scalar(4)*Scalar(W_TOUCH_VEL)*touch*dtouch_dz*x(i);
-            H(i,2) += Scalar(4)*Scalar(W_TOUCH_VEL)*touch*dtouch_dz*x(i);
+            // Gauss-Newton curvature of sqrt(W_TOUCH_VEL)*touch(z)*v.
+            // Its mixed block is 2*w*touch*dtouch*v, matching both diagonals.
+            H(2,i) += Scalar(2)*Scalar(W_TOUCH_VEL)*touch*dtouch_dz*x(i);
+            H(i,2) += Scalar(2)*Scalar(W_TOUCH_VEL)*touch*dtouch_dz*x(i);
         }
         H(2,2) += Scalar(2)*Scalar(W_TOUCH_VEL)*dtouch_dz*dtouch_dz*v2;
         for (int i = 10; i < 13; ++i) H(i,i) = Scalar(2)*eps_;
@@ -1161,7 +1163,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
             a_req.z() = std::max(a_req.z(), (-VZ_LAND_MAX - v0.z()) / T_g);
             const double tabs_ws = sim14(IDX_DT);
             const Eigen::Vector3d a_tgt_ws = predictor->predictAccel(tabs_ws);
-            const Eigen::Vector3d fw = MASS * (a_req - a_tgt_ws - GRAVITY);
+            const Eigen::Vector3d fw = MASS * (a_req + a_tgt_ws - GRAVITY);
             uk(0) = fw.norm();
             uk(IDX_THETA) = TH0;
         }
