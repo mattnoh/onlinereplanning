@@ -95,3 +95,47 @@ Validation and remaining failures:
 Intermediate tuning logs are archived with verified SHA-256 manifest;
 208.29 MiB was reclaimed. Baseline, final circle runs and representative
 straight/figure-eight failures remain accessible under logs/.
+
+
+## MPC feedback scope correction and warm-start validation
+
+The user reconfirmed that the validated standalone CTCS solver, including
+between-node constraints, is the reference. The requested correction is the
+added closed-loop MPC/RH integration. Do not introduce further SOC formulation
+changes or treat new planner-probe failures as evidence against those original
+standalone results. The uncommitted Nesterov–Todd experiment was checkpointed
+and removed in solver commits 9cbaffac / 4d68a48b. No SOC scaling experiment
+remains in the worktree.
+
+Planner checkpoint b52a74d corrects two warm-seed paths: generic horizon shifting
+propagates terminal extension instead of repeating the terminal state; direct
+MPC measures seed age from the previous measured root and converts old relative
+position/velocity into the new target forecast while preserving the nominal
+world trajectory. The direct conversion is now one internal helper used by the
+controller and independently exercised in the existing test_direct_mpc test.
+It also tests a sub-grid age and terminal extension. These are seed corrections;
+x0 remains measured and publication still holds exactly the first DDP input.
+
+Validation: sequential standalone build of test_direct_mpc and execution with
+MPC_MAX_ITER=120 MPC_WARM_ITER=24 pass, including the new forecast/epoch tests,
+dynamics/CTCS derivatives, first-input hold and both moving-target lifecycle
+cases. Output: /tmp/comando-warm-shift-check.log. This lifecycle test does not
+prove complete physical constraint satisfaction during landing.
+
+The temporary deterministic full landing probe still fails the physical audit.
+Default planner CTCS budget is 1.6e-3 versus 1e-5 in the standalone source; the
+saved SITL preset overrides it to 1e-5. Neither the default nor a temporary
+original-budget run is a clean constraint baseline: even the first open-loop
+trajectory from this added MPC OCP has physical excess. At the original budget,
+the complete straight-target probe accepted 90 solves but still exceeded rate,
+glideslope, LOS and staging constraints. Increasing the iteration cap alone did
+not make the first horizon physically clean. These probes use the added MPC
+OCP/model and are not the user's validated standalone example. Do not conflate
+them. The aligned curved-target probe also still fails after its first solve,
+with both reused and fresh solver instances.
+
+No production CTCS budget, physical limit, model, extra controller or acceptance
+criterion changed in this continuation. No SITL launched. Next: establish an
+identical, physically clean open-loop reference for the actual deployed MPC
+OCP, then isolate the first feedback transition that diverges from it. Complete
+RH/MPC enforcement remains unverified; keep the goal active.

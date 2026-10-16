@@ -37,6 +37,31 @@ int main(){try{
     Eigen::VectorXd x=O::Dynamics::initialState(physical,O::hover());x(13)=.4;
     x.segment<4>(6).normalize();auto u=O::hover();u.tail(3)<<.08,-.06,.02;
     auto model=OCPRegistry::getDescriptor("stc_landing_mpc").make_model(pred->a);
+    {
+        // A changed forecast must not move the old nominal world trajectory.
+        // Include an off-grid age and extension beyond the old terminal node.
+        OcpSolver::Result old;old.state_trajectory.push_back(x);
+        for(int k=0;k<model.horizon;++k){
+            old.control_trajectory.push_back(u);
+            old.state_trajectory.push_back(model.flow(old.state_trajectory.back(),u,model.dt,false).x);
+        }
+        TargetSnapshot before,after;before.position<<1,2,.2;before.velocity<<.3,-.2,0;
+        before.acceleration=pred->a;after.position<<1.1,1.8,.3;after.velocity<<.4,-.1,.02;
+        after.acceleration<<-.2,.3,0;
+        const double age=.037;
+        const auto warm=planner_core::shiftMpcSeed(old,model,before,after,age);
+        for(int k=0;k<=model.horizon;++k){
+            const double time=age+k*model.dt,next=k*model.dt;
+            const int i=std::min(static_cast<int>(time/model.dt),model.horizon);
+            const auto previous=model.flow(old.state_trajectory[i],u,time-i*model.dt,false).x;
+            const Eigen::Vector3d world_p=previous.head<3>()+before.position+before.velocity*time+.5*before.acceleration*time*time;
+            const Eigen::Vector3d world_v=previous.segment<3>(3)+before.velocity+before.acceleration*time;
+            check((warm.prev_X[k].head<3>()+after.position+after.velocity*next+.5*after.acceleration*next*next-world_p).norm()<1e-10,"MPC warm shift must preserve nominal world position");
+            check((warm.prev_X[k].segment<3>(3)+after.velocity+after.acceleration*next-world_v).norm()<1e-10,"MPC warm shift must preserve nominal world velocity");
+            check(std::abs(warm.prev_X[k](13)-next)<1e-12,"MPC warm clock must start at the new measurement epoch");
+        }
+        check((warm.prev_X.back().head(13)-old.state_trajectory.back().head(13)).norm()>1e-4,"MPC terminal warm state must advance beyond the old horizon");
+    }
     auto direct=dyn->flow(x,u,O::DT,true);auto through_interface=model.flow(x,u,O::DT,true);
     check((direct.x-through_interface.x).norm()<1e-12 && (direct.a-through_interface.a).norm()<1e-12 && (direct.b-through_interface.b).norm()<1e-12,"MPC model interface must preserve dynamics and Jacobians");
     const auto a=dyn->fx(x,u), b=dyn->fu(x,u);double maxerr=0;double h=1e-6;

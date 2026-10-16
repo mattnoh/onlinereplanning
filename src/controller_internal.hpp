@@ -1104,6 +1104,36 @@ private:
 }  // namespace planner_core
 
 namespace planner_core {
+// Align only the nominal warm seed; the new OCP root remains measured.
+inline OcpSolver::WarmStartSnapshot shiftMpcSeed(
+    const OcpSolver::Result& old, const OCPDescriptor::Model& old_model,
+    const TargetSnapshot& before, const TargetSnapshot& after, double age) {
+    OcpSolver::WarmStartSnapshot warm;
+    age=std::max(0.0,age);
+    for(int k=0;k<=old_model.horizon;++k){
+        const double time=age+k*old_model.dt;
+        const int i=std::min(static_cast<int>(time/old_model.dt),old_model.horizon);
+        const int control=std::min(i,old_model.horizon-1);
+        const double remainder=std::max(0.0,time-i*old_model.dt);
+        auto state=old.state_trajectory[i];
+        if(remainder>1e-9)state=old_model.flow(state,old.control_trajectory[control],remainder,false).x;
+        const double next_time=k*old_model.dt;
+        // Preserve world position/velocity under the new target forecast.
+        state.head<3>()+=before.position+before.velocity*time+.5*before.acceleration*time*time-
+            (after.position+after.velocity*next_time+.5*after.acceleration*next_time*next_time);
+        state.segment<3>(3)+=before.velocity+before.acceleration*time-
+            (after.velocity+after.acceleration*next_time);
+        state(13)=next_time;
+        warm.prev_X.push_back(state);
+        if(k<old_model.horizon){
+            const double fraction=std::min(1.0,remainder/old_model.dt);
+            const int next=std::min(control+1,old_model.horizon-1);
+            warm.prev_U.push_back((1-fraction)*old.control_trajectory[control]+
+                                  fraction*old.control_trajectory[next]);
+        }
+    }
+    return warm;
+}
 class DirectMpcController {
     using Clock=std::chrono::steady_clock;
     struct Policy {
@@ -1154,39 +1184,11 @@ class DirectMpcController {
             // it is not a fictitious control used to project the initial state.
             x(13)=0;
             if(prior){
-                OcpSolver::WarmStartSnapshot warm;
-                const auto& old=prior->result;
                 const auto old_model=desc_.make_model(prior->target.acceleration);
-                // The trajectory starts at the previous measured-state timestamp,
+                // The previous trajectory starts at its measurement timestamp,
                 // before its solve completed and u0 began publication.
-                const double age=std::max(0.0,seconds(origin,prior->measured_at));
-                for(int k=0;k<=dyn.horizon;++k){
-                    const double s=age/dyn.dt+k;
-                    const int i=std::min(static_cast<int>(s),dyn.horizon);
-                    const int control=std::min(i,dyn.horizon-1);
-                    const double remainder=(s-i)*dyn.dt;
-                    // Align the nominal seed at sub-grid update times. This
-                    // advances only the old prediction; x0 stays measured.
-                    auto state=old.state_trajectory[i];
-                    if(remainder>1e-9)state=old_model.flow(state,old.control_trajectory[control],remainder,false).x;
-                    // The old relative state used the previous target forecast.
-                    // Preserve its world prediction when changing forecast origin.
-                    const double old_time=age+k*dyn.dt,new_time=k*dyn.dt;
-                    const auto& before=prior->target;const auto& after=input.target_snapshot;
-                    state.head<3>()+=before.position+before.velocity*old_time+
-                        .5*before.acceleration*old_time*old_time-
-                        (after.position+after.velocity*new_time+.5*after.acceleration*new_time*new_time);
-                    state.segment<3>(3)+=before.velocity+before.acceleration*old_time-
-                        (after.velocity+after.acceleration*new_time);
-                    state(13)=k*dyn.dt;
-                    warm.prev_X.push_back(state);
-                    if(k<dyn.horizon){
-                        const double fraction=std::min(1.0,remainder/dyn.dt);
-                        const int next=std::min(control+1,dyn.horizon-1);
-                        warm.prev_U.push_back((1-fraction)*old.control_trajectory[control]+
-                                              fraction*old.control_trajectory[next]);
-                    }
-                }
+                const double age=seconds(origin,prior->measured_at);
+                auto warm=shiftMpcSeed(prior->result,old_model,prior->target,input.target_snapshot,age);
                 // Factory fixes the root, clock and command memory, leaving
                 // FDDP to close the remaining measured/predicted state gaps.
                 solver.restoreWarmStart(warm);solver.setNextWarmStartShift(0);
