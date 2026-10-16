@@ -351,3 +351,23 @@ retained from these checks. Evidence: /tmp/comando-mpc-constraint-stress.cpp,
 /tmp/comando-stress-openloop-stage-extended.log,
 /tmp/comando-stress-openloop-ctcs-extended.log,
 /tmp/comando-stress-ctcs-longlinesearch-los16.log.
+
+## Actuator integration correction
+
+Ordinary MPC and its CTCS transcription now resolve the first-order rate
+response with RK substeps no longer than 0.1 * rate_tau (previously 0.65 *
+rate_tau). At defaults, this changes two steps per interval to thirteen.
+The independent analytic response at .019 rad/s shows endpoint error falling
+from 1.46301e-5 to 5.25194e-9 rad/s. A test at the command bound and at an
+off-grid warm-shift duration checks the continuous response, independently
+of the discrete-map Jacobian FD test. Native PX4 integration is unchanged.
+
+Existing test_direct_mpc passes with max120/warm24, including both moving
+cases and measured-rate recovery. Ordinary moving case: 49 accepted updates,
+max warm solve 96.8079 ms. Evidence: /tmp/comando-rate-integration-test.log.
+This improves model propagation accuracy, not the complete stressed MPC loop:
+the temporary tighter case still fails its first warm update. Its dynamics
+gap drops to 2.01732e-9, but the extended terminal interval has CTCS residual
+1.145e6. The warm horizon tail must be investigated separately; do not
+describe this numerical accuracy fix as completed constraint enforcement.
+Evidence: /tmp/comando-stress-ctcs-accurate-los16.log.

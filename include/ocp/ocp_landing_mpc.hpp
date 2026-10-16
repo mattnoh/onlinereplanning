@@ -399,7 +399,10 @@ constexpr int N = comando_parameters::MpcParameters::horizon;
 
 inline double nativeGravity(){return Ref::defaults.mpc.native_px4?Ref::defaults.px4.gravity:9.81;}
 inline double rateTau() { return std::max(0.02, Ref::defaults.mpc.rate_tau); }
-inline int substeps() { return Ref::defaults.mpc.native_px4 ? std::max(2,static_cast<int>(std::ceil(DT*4*M_PI*Ref::defaults.px4.gyro_cutoff_hz))) : std::max(2,static_cast<int>(std::ceil(DT/(0.65*rateTau())))); }
+// Resolve the rate transient, not just RK stability. Coarse propagation can
+// seed the next measured-root solve outside a tight physical constraint.
+// The folded interval uses this same subdivision through its dynamics adapter.
+inline int substeps() { return Ref::defaults.mpc.native_px4 ? std::max(2,static_cast<int>(std::ceil(DT*4*M_PI*Ref::defaults.px4.gyro_cutoff_hz))) : std::max(2,static_cast<int>(std::ceil(DT/(0.1*rateTau())))); }
 inline double rateLimit() { return Ref::defaults.mpc.rate_limit; }
 inline double thrustMax() { return std::min(Ref::FMAX/Ref::MASS,nativeGravity()*std::pow((1+Ref::defaults.mpc.motor_speed_offset)/std::max(.1,Ref::defaults.mpc.hover_thrust+Ref::defaults.mpc.motor_speed_offset),Ref::defaults.mpc.motor_thrust_exponent)); }
 inline Eigen::VectorXd bounded(Eigen::VectorXd u) {

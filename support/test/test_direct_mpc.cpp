@@ -37,6 +37,19 @@ int main(){try{
         namespace L=LandingMpcOCP;
         auto prediction=std::make_shared<L::Ref::ConstantAccelPredictor>();
         auto dynamics=std::make_shared<L::Dynamics>(prediction);
+        if(!comando_parameters::defaults.mpc.native_px4){
+            // Independent continuous-time reference for the actuator state.
+            // This catches integration error that an FD Jacobian test cannot:
+            // differentiating an inaccurate discrete map can still pass FD.
+            Eigen::VectorXd physical=Eigen::VectorXd::Zero(13);physical(6)=1;
+            const auto root=L::Dynamics::initialState(physical,L::hover());
+            auto command=L::hover();command.tail<3>().setConstant(L::rateLimit()/std::sqrt(3.));
+            for(double duration:{L::DT,.037}){
+                const auto propagated=dynamics->flow(root,command,duration,false).x;
+                const Eigen::Vector3d exact=(1-std::exp(-duration/L::rateTau()))*command.tail<3>();
+                check((propagated.segment<3>(10)-exact).norm()<1e-6,"ordinary MPC rate propagation must match the continuous actuator response");
+            }
+        }
         Eigen::VectorXd physical=Eigen::VectorXd::Zero(13);
         physical(0)=.04;physical(1)=.03;physical(2)=1.85;physical(6)=1;physical(10)=.03;
         auto state=L::Dynamics::initialState(physical,L::hover());auto control=L::hover();control(1)=.03;
