@@ -45,7 +45,7 @@ int main(){try{
         check(folded->c(state,control)(0)>0,"always-active CTCS must detect an angular-rate violation above the STC trigger altitude");
         const auto& parameters=comando_parameters::defaults.constraints;
         const double rate_residual=.03/parameters.omega_stc_max-1.;
-        const double expected=(L::DT*rate_residual*rate_residual-parameters.ctcs_step_eps)/parameters.ctcs_y_scale;
+        const double expected=L::DT*rate_residual*rate_residual/parameters.ctcs_step_eps-1.;
         check(std::abs(folded->c(state,control)(0)-expected)<1e-10,"folded CTCS must integrate the physical residual with the declared budget and scale");
         const auto cx=folded->cx(state,control),cu=folded->cu(state,control);
         for(int j=0;j<state.size()+control.size();++j){
@@ -54,6 +54,29 @@ int main(){try{
             const double fd=(folded->c(xp,up)(0)-folded->c(xm,um)(0))/(2*h);
             const double analytic=j<state.size()?cx(0,j):cu(0,j-state.size());
             check(std::abs(fd-analytic)/(1+std::abs(fd))<1e-5,"ordinary folded CTCS interval Jacobian");
+        }
+        if(!comando_parameters::defaults.mpc.native_px4){
+            // Rate dynamics are linear here, so these Hessian blocks have
+            // an independent FD reference, including tangential norm curvature.
+            auto curved_state=state;curved_state.segment<3>(10)<<.03,.015,.005;
+            auto curved_control=control;curved_control.tail<3>()=curved_state.segment<3>(10);
+            const auto hessian=folded->lagrangianHessian(curved_state,curved_control,Eigen::VectorXd::Ones(1));
+            const std::vector<int> indices={10,11,12,L::NX+1,L::NX+2,L::NX+3};
+            auto gradient=[&](const auto& x,const auto& u){
+                Eigen::VectorXd g(L::NX+L::NU);g.head(L::NX)=folded->cx(x,u).row(0).transpose();
+                g.tail(L::NU)=folded->cu(x,u).row(0).transpose();return g;
+            };
+            for(int column:indices){
+                auto xp=curved_state,xm=curved_state,up=curved_control,um=curved_control;const double h=1e-7;
+                if(column<L::NX){xp(column)+=h;xm(column)-=h;}else{up(column-L::NX)+=h;um(column-L::NX)-=h;}
+                const Eigen::VectorXd fd=(gradient(xp,up)-gradient(xm,um))/(2*h);
+                for(int row:indices)check(std::abs(fd(row)-hessian(row,column))/(1+std::abs(fd(row)))<1e-5,"folded CTCS norm curvature");
+            }
+            check(Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd>(hessian).eigenvalues().minCoeff()/(1+hessian.norm())>-1e-12,"folded CTCS convex curvature must remain positive semidefinite");
+            curved_state(0)=.4;curved_state(2)=.6;curved_state(3)=.9;curved_state(7)=.03;curved_state.segment<4>(6).normalize();
+            const auto full=folded->lagrangianHessian(curved_state,curved_control,Eigen::VectorXd::Ones(1));
+            const auto gn=folded->StcStageConstraint<double>::lagrangianHessian(curved_state,curved_control,Eigen::VectorXd::Ones(1));
+            check(Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd>((full-gn).eval()).eigenvalues().minCoeff()/(1+full.norm()+gn.norm())>-1e-12,"one-pass CTCS curvature must preserve all original residual GN terms");
         }
         OCPCreateArgs args;args.current_state=state;
         auto problem=OCPRegistry::create("landing_mpc_ctcs",args);

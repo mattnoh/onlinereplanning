@@ -315,17 +315,36 @@ constraints are replaced by one folded CTCS interval-density row through
 the existing interface, with constant activation; there are no STC triggers
 or additional nodal/terminal path constraints. Speed, rate and tilt use
 the ordinary normalized cone residuals; geometric distances use a one-metre
-reference. `SZMUK_CTCS_STEP_EPS` sets the raw integral budget and
-`SZMUK_CTCS_Y_SCALE` scales both the density and budget. A positive budget
-is a relaxation, not a guarantee of zero pointwise excess.
+reference. `SZMUK_CTCS_STEP_EPS` sets the raw integral budget. This variant
+now divides the entire row by that budget, so solver feasibility tolerance
+is relative to the allowance; `SZMUK_CTCS_Y_SCALE` remains a setting for the
+STC formulations and is not needed here. A positive budget is a relaxation,
+not a guarantee of zero pointwise excess.
 
-Offline circle comparison (saved seed 8570001, 100 Hz publication, cold/warm
-iteration limits 120/24): ordinary MPC landed with 320 accepted/3 rejected
-solves and 0.000316 rad/s maximum measured angular-rate excess. Folded CTCS
-at the existing raw budget 1.6e-3 landed with 316 accepted/3 rejected solves
-and 0.006014 rad/s measured excess (dense predicted excess 0.005756 rad/s).
-Both had zero excess in the other audited physical limits. Reducing only
-the CTCS budget to 1e-5 produced no accepted initial plan, so it is a cold
-convergence failure, not a successful tighter-constraint run. These cases
-isolate folded CTCS from state triggers; they do not alter the shared
-solver or establish a regression in the original standalone CTCS example.
+The CTCS-only OCP now includes tangential curvature of the speed/rate norms
+in addition to residual Gauss-Newton curvature, evaluated in one RK pass.
+Its initial barrier is 1e-5; the objective, path limits and first-input
+control delivery are unchanged. Finite differences validate the linear-rate
+Hessian blocks to 1.7e-10 relative error. Existing direct-MPC checks pass.
+At the inherited default budget 1.6e-3, the updated wall-clock circle landed
+with 484 accepted solves and zero rejections; maximum measured rate excess
+was 0.004231 rad/s, with other physical excesses zero. The initial comparison
+before these corrections had 316 accepted/3 rejected and 0.006014 rad/s
+rate excess. The larger allowance still permits physical excursions.
+
+With a raw budget of 1e-6, the wall-clock constant-velocity model landing
+completed 665 accepted solves, zero rejected solves, and zero measured or
+dense predicted excess. The wall-clock circle still failed after three
+accepted plans; its remaining execution/warm-update issue is unresolved.
+Separately, synchronous fixed-step offline circle MPC at raw budget 1e-8
+completed 100 successive measured-root solves, zero failures, and landed.
+The plant was integrated in 1 ms steps under the first optimized input for
+each 0.1 s MPC interval; simulation time did not advance during optimization.
+Maximum measured rate excess was 1.003e-5 rad/s and dense predicted excess
+was 1.004e-5 rad/s, below the 1e-4 audit tolerance; other physical excesses
+were zero. The rate bound was exercised (peak 0.01901 against 0.019 rad/s).
+Ordinary synchronous MPC also landed with zero measured excess, so this
+case demonstrates tight CTCS feasibility, not superiority over nodal MPC.
+The inherited default raw budget remains 1.6e-3; the tighter results require
+`SZMUK_CTCS_STEP_EPS=1e-8` and used cold/warm iteration limits 120/24. Neither
+the original shared solver nor the active STC formulation was changed.

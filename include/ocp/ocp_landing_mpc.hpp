@@ -613,12 +613,64 @@ public:
 // The same six ordinary limits, always active. SOC membership c0+|ctail|<=0
 // becomes a scalar consequence; there are no altitude/radius/settling triggers.
 // Speed, rate and tilt already use dimensionless relative-limit residuals.
-// Floor and cone distances use a one-metre reference. Unit density weights
-// are divided by y_scale together with epsilon, preserving the raw budget.
+// Floor and cone distances use a one-metre reference. Normalize the row by
+// its integral budget so feasibility tolerance is relative to that budget.
+// Retain the convex norm curvature inside the squared violation residual.
+// No changes to constraint values, Jacobians, budgets or DDP control delivery.
+class FoldedNormCurvature : public StcStageConstraint<double> {
+    std::shared_ptr<Dynamics> dynamics_;
+public:
+    FoldedNormCurvature(std::shared_ptr<Dynamics> dynamics,double epsilon)
+        :StcStageConstraint<double>(StcForm::Density,epsilon),dynamics_(std::move(dynamics)){}
+    Eigen::MatrixXd lagrangianHessian(const Eigen::VectorXd& x,const Eigen::VectorXd& u,
+        const Eigen::VectorXd& multiplier) const override {
+        Eigen::MatrixXd result=Eigen::MatrixXd::Zero(NX+NU,NX+NU);
+        Eigen::VectorXd state=x;
+        Eigen::MatrixXd sensitivity=Eigen::MatrixXd::Zero(NX,NX+NU);sensitivity.leftCols(NX).setIdentity();
+        const double h=DT/substeps();
+        auto add=[&](const Eigen::VectorXd& point,const Eigen::MatrixXd& derivative,double weight){
+            // Compute the ordinary residual GN terms in this same RK pass,
+            // avoiding a second integration solely for the norm correction.
+            for(int i=0;i<numImplications();++i){
+                const auto& term=implication(i);
+                if(term.scale*term.consequence(point,u)<=0.)continue;
+                const Eigen::VectorXd jacobian=derivative.transpose()*(term.scale*term.consequence_dx(point,u));
+                result.noalias()+=(2*multiplier(0)*h*weight*term.weight)*(jacobian*jacobian.transpose());
+            }
+            for(const auto& entry:{std::pair<int,double>{3,Ref::SPEED_MAX},{10,Ref::OMEGA_MAX}}){
+                const auto v=point.segment<3>(entry.first).eval();const double norm=v.norm();
+                const double residual=norm/entry.second-1.;if(residual<=0.)continue;
+                const Eigen::Matrix3d curvature=(Eigen::Matrix3d::Identity()-v*v.transpose()/(norm*norm))/(norm*entry.second);
+                const auto jacobian=derivative.middleRows(entry.first,3).eval();
+                result.noalias()+=(2*multiplier(0)*h*weight*residual*implication(entry.first==3?1:2).weight)*
+                    (jacobian.transpose()*curvature*jacobian);
+            }
+        };
+        auto rates=[&](const Eigen::VectorXd& point,const Eigen::MatrixXd& derivative){
+            Eigen::VectorXd velocity=dynamics_->intervalRates(point,u);
+            Eigen::MatrixXd tangent=dynamics_->intervalRatesX(point,u)*derivative;
+            tangent.rightCols(NU)+=dynamics_->intervalRatesU(point,u);
+            return std::make_pair(velocity,tangent);
+        };
+        for(int i=0;i<substeps();++i){
+            add(state,sensitivity,1./6);const auto first=rates(state,sensitivity);
+            auto p2=(state+h/2*first.first).eval();auto s2=(sensitivity+h/2*first.second).eval();
+            add(p2,s2,1./3);const auto second=rates(p2,s2);
+            auto p3=(state+h/2*second.first).eval();auto s3=(sensitivity+h/2*second.second).eval();
+            add(p3,s3,1./3);const auto third=rates(p3,s3);
+            auto p4=(state+h*third.first).eval();auto s4=(sensitivity+h*third.second).eval();
+            add(p4,s4,1./6);const auto fourth=rates(p4,s4);
+            state+=h/6*(first.first+2*second.first+2*third.first+fourth.first);
+            sensitivity+=h/6*(first.second+2*second.second+2*third.second+fourth.second);
+        }
+        return result;
+    }
+};
 inline std::shared_ptr<StcStageConstraint<double>> foldedLimits(std::shared_ptr<Dynamics> dynamics) {
     const auto& parameters=Ref::defaults.constraints;
-    auto folded=std::make_shared<StcStageConstraint<double>>(StcForm::Density,
-        parameters.ctcs_step_eps/parameters.ctcs_y_scale);
+    const double budget=parameters.ctcs_step_eps;
+    if(!(budget>0.)||!std::isfinite(budget))throw std::invalid_argument("landing_mpc_ctcs requires a finite positive CTCS_STEP_EPS");
+    auto folded=std::make_shared<FoldedNormCurvature>(dynamics,1.);
     const auto limits=Ref::landingRows(NX,NU);
     const char* names[]={"floor","speed","angular_rate","glideslope","tilt","los"};
     for(size_t i=0;i<limits.size();++i){
@@ -641,7 +693,7 @@ inline std::shared_ptr<StcStageConstraint<double>> foldedLimits(std::shared_ptr<
                     return gradient;
                 },
                 [](const Eigen::VectorXd&,const Eigen::VectorXd& u){return Eigen::VectorXd::Zero(u.size()).eval();})
-            .weight(1./parameters.ctcs_y_scale);
+            .weight(1./budget);
     }
     StcIntervalDynamics<double> interval;interval.idx_theta=-1;interval.dt=DT;interval.substeps=substeps();
     interval.xdot=[dynamics](const auto& x,const auto& u,double){return dynamics->intervalRates(x,u);};
@@ -720,6 +772,10 @@ inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=tru
 }
 inline OCPDescriptor ctcsDescriptor(){
     auto d=descriptor();d.name="landing_mpc_ctcs";
+    // Small folded budgets need a lower initial barrier and warm-update floor.
+    // This changes continuation, not the objective or integral allowance.
+    const auto original=d.getSolverParams;
+    d.getSolverParams=[original](){auto p=original();p.mu=p.muT=1e-5;return p;};
     d.create=[](const OCPCreateArgs& args){return create(args,true);};return d;
 }
 }

@@ -248,3 +248,55 @@ recovery checks pass with max120, RH N40 / THH .16. Output:
 /tmp/comando-startup-controller-check.log. A temporary gapped-capture cold seed
 for the normalized conservative prototype also failed (zero accepted plans);
 it remains outside the branch and must not be reported as a successful run.
+
+## CTCS-only MPC numerical improvements (2026-10-17)
+
+The user requested isolating ordinary folded CTCS before returning to STC.
+`landing_mpc_ctcs` retains the ordinary physical limits, costs and dynamics;
+all six path limits use a single always-active interval row. No additional
+physical inequalities, safety controller, shared-solver changes, or SITL.
+
+- Added local generalized GN curvature for the speed/rate norm consequences.
+  The original residual GN terms remain; their calculation and the positive
+  tangential norm correction share one RK sensitivity pass. Independent FD
+  of the linear rate state/control blocks: relative error 1.73437e-10 (the
+  residual-only approximation differed by 0.858866 on this diagnostic).
+- CTCS-only initial barrier is 1e-5. It permits a tight cold solve inside
+  120 iterations instead of exhausting the budget at mu=1e-3. Lowering the
+  barrier alone did not restore reliable successive solves; retain the
+  curvature improvement as well. Shared ALIPDDP remains at 4d68a48b.
+- Normalize the CTCS row as I/epsilon-1, with the same raw integral budget.
+  This fixes numerical acceptance being dominated by an absolute residual
+  tolerance after dividing tiny budgets by legacy y_scale=10. Y_SCALE is
+  no longer needed for this comparison. Positive finite epsilon required.
+- Existing test_direct_mpc passes with max120/warm24, including new analytic
+  integral, interval-Jacobian, tangential-curvature and PSD checks.
+- Wall-clock constant target: epsilon=1e-6, 665 accepted / 0 rejected,
+  landed, all measured and 1-ms dense predicted excess zero. Evidence:
+  /tmp/comando-ctcs-final-constant.log.
+- Wall-clock circle: same epsilon, 3 accepted then failed warm solves and
+  policy expiry. Do not report it as a safe flight. Evidence:
+  /tmp/comando-ctcs-onepass-relativebudget-circle.log.
+- Synchronous fixed-step circle: epsilon=1e-8, 100 accepted measured-root
+  solves, no failures, landed; 1-ms world-plant integration, exact u0 held
+  for each 0.1-second interval, time frozen during solve. Max measured rate
+  excess 1.00267e-5 rad/s; dense future excess 1.0038e-5, other limits zero.
+  Peak actual rate .01901 against .019 exercises the constraint. Evidence:
+  /tmp/comando-ctcs-final-synchronous-circle.log.
+- Matched synchronous ordinary MPC also lands in 100 solves, measured excess
+  zero and future rate excess 4.78031e-7. These runs establish useful tight
+  CTCS feasibility, not superiority of CTCS on this particular path.
+- Application-age warm-seed retiming and control-only single-shooting seed
+  experiments did not fix the strict wall-clock circle; neither is retained.
+
+Next: reconcile the wall-clock measured-root solve / delayed application and
+held input with the tight CTCS prediction before SITL or STC claims. Keep
+explicitly distinguishing the successful synchronous offline MPC reference
+from the still-failing asynchronous circle. The goal remains incomplete.
+
+Final default-budget wall-clock circle verification: 484 accepted, zero
+rejected, landed; measured rate excess .0042305 rad/s, other excesses zero.
+This improves over the initial comparison (316/3 and .0060141 rad/s), but
+is not the tight-constraint completion gate. Evidence:
+/tmp/comando-ctcs-final-default-circle.log. Final direct-MPC test passes in
+/tmp/comando-ctcs-final-test.log. No shared solver files were changed.
