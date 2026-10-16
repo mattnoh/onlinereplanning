@@ -1052,7 +1052,9 @@ public:
 };
 
 class Cost : public StageCostBase<double> {
-    Ref::CTcSTCStageCost<double> ref_{1.0,0.0,0.0,0.0,Eigen::Vector3d(0,0,Ref::Z_STAGE)};
+    Ref::CTcSTCStageCost<double> ref_{1.0,Ref::defaults.cost.w_stage_target_xy,
+        Ref::defaults.cost.w_stage_target_z,Ref::defaults.cost.w_stage_target_vel,
+        Eigen::Vector3d(0,0,Ref::Z_STAGE)};
     Eigen::Vector4d r_,s_;
     Eigen::VectorXd oldU(const Eigen::VectorXd& u) const {Eigen::VectorXd v=Eigen::VectorXd::Zero(5);v(0)=u(0)*Ref::MASS;v(4)=DT;return v;}
     // Penalize landing angular motion without slowing the high-altitude
