@@ -169,6 +169,21 @@ int main(){try{
         check(excess<1e-4,"native DDP must predict feasible physical states with nonzero rate integral");
         std::cout<<"PASS native dynamics="<<maxerr<<" ctcs="<<cerror<<'\n';return 0;
     }
+    {
+        // A failed initial solve must not seed the next measured-state problem
+        // or switch it to the shorter warm iteration budget.
+        const auto model=OCPRegistry::getDescriptor("landing_mpc").make_model(Eigen::Vector3d::Zero());
+        Eigen::VectorXd physical=Eigen::VectorXd::Zero(13);
+        physical(0)=.04;physical(2)=1.85;
+        physical(6)=std::cos(M_PI/8);physical(8)=std::sin(M_PI/8);
+        OcpSolver::Config config;config.ocp_type="landing_mpc";config.reuse_solver=true;
+        OcpSolver startup(config);
+        check(!startup.solve(model.initial_state(physical,model.hover)).success,"infeasible first measured state must fail");
+        const auto failed_cache=startup.snapshotWarmStart();
+        check(failed_cache.prev_X.empty()&&failed_cache.prev_U.empty()&&failed_cache.prev_K.empty(),"failed primal must not enter the warm-start cache");
+        physical(6)=1;physical(8)=0;
+        check(startup.solve(model.initial_state(physical,model.hover)).success,"valid state after failed startup must receive a full initial solve");
+    }
     planner_core::PlannerCoreConfig cfg;cfg.ocp_type="stc_landing_mpc";cfg.platform=planner_core::Platform::Mavros;cfg.enable_terminal_freeze=false;
     planner_core::DirectMpcController controller;controller.configure(cfg);
     planner_core::PlannerCoreInput input;input.current_state=Eigen::VectorXd::Zero(13);input.current_state<<1.98,0,StcLandingNoAugOCP::Z_STAGE+0.3,0,0,0,1,0,0,0,0,0,0;

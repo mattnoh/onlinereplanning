@@ -209,3 +209,34 @@ Next: correct the added MPC problem's physical enforcement while preserving
 measured-root warm DDP, unchanged first-input publication, fixed grid and the
 CTCS interface. Verify complete predicted and executed constraints on the saved
 three motions, then RH as required. Do not report the current goal complete.
+
+
+## Failed-startup cache correction
+
+A reproducible planner bookkeeping defect is corrected without changing the
+solver algorithm, OCP or control publication. OcpSolver cached failed X/U/K
+and reused the optimizer merely because its object existed. With an infeasible
+45-degree initial tilt in ordinary MPC, the next valid upright measured root
+therefore received failed state/control seeds and the short warm-update path.
+Before: 41 failed states / 40 controls cached; next solve failed with constraint
+residual 235.689 and dynamics gap 1.30372. After: failed cache stays empty; next
+call initializes a fresh solve and succeeds in 20 iterations with both residuals
+zero. Successful prior solutions still populate and reuse the warm cache. No
+within-call retry/cold-rebuild mechanism is added. The existing test_direct_mpc
+now checks this regression and the full executable passes with max120/warm24
+(including both existing moving-target cases). Evidence:
+/tmp/comando-startup-warm-state-before.log,
+/tmp/comando-startup-warm-state-after.log,
+/tmp/comando-startup-warm-state-fix-check.log.
+
+Separate CTCS normalization experiments remain exclusively under /tmp. A
+fractional-density budget derived from interval * solver_tolerance^2 produced
+severely ill-conditioned cold iterates. An equivalent logarithmic row bounded
+the row magnitudes but did not restore feasibility. The existing conservative
+line-search option, tested with a tolerance floor for error comparisons, kept
+accepted predictions/execution within audited physical limits but fell behind
+the target and expired (11 accepted / 22 rejected); this is a failure, not a
+constraint-enforcement pass. None of these OCP/solver experiments is in the
+branch. Further work must solve both useful motion/landing progress and actual
+physical enforcement; do not substitute feasible hover or zero measured samples
+for completion.

@@ -221,7 +221,7 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
 
         setupProblem(args);
 
-        if (config_.reuse_solver && solver_) solver_->updateProblem(*problem_, comando_parameters::defaults.mpc.warm_iterations);
+        if (config_.reuse_solver && solver_ && !warm_u.empty()) solver_->updateProblem(*problem_, comando_parameters::defaults.mpc.warm_iterations);
         else {
             solver_ = make_shared<ALIPDDP<double>>(*problem_);
             solver_->init(solver_params_);
@@ -260,9 +260,13 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
                 <<result.primal.constraints<<" dynamics="<<result.primal.dynamics
                 <<" termination="<<result.termination<<"\n";
 
-            prev_X_ = X_result;
-            prev_U_ = U_result;
-            prev_K_ = K_result;
+            // A failed iterate is not a previous solution. In particular, a
+            // failed first solve must not enable the short warm-update budget.
+            if(result.success){
+                prev_X_ = X_result;
+                prev_U_ = U_result;
+                prev_K_ = K_result;
+            }
             next_warm_start_unshifted_ = false;
             next_warm_start_shift_ = -1;
 
