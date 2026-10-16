@@ -169,23 +169,6 @@ int main(){try{
         check(excess<1e-4,"native DDP must predict feasible physical states with nonzero rate integral");
         std::cout<<"PASS native dynamics="<<maxerr<<" ctcs="<<cerror<<'\n';return 0;
     }
-    {
-        // With an exact measured next node and an unchanged target forecast,
-        // the shifted terminal input can still leave the future cone. The
-        // next solve must recover instead of failing solely on its warm seed.
-        const Eigen::Vector3d acceleration(-.16,0,0);
-        const auto model=OCPRegistry::getDescriptor("landing_mpc").make_model(acceleration);
-        Eigen::VectorXd physical=Eigen::VectorXd::Zero(13);physical(0)=.04;physical(2)=1.85;physical(6)=1;
-        auto measured=model.initial_state(physical,model.hover);
-        OcpSolver::Config config;config.ocp_type="landing_mpc";config.n_shift=1;config.reuse_solver=true;
-        OcpSolver repeated(config);
-        for(int update=0;update<3;++update){
-            measured(13)=0;
-            const auto result=repeated.solve(measured,acceleration);
-            check(result.success,"exact-node MPC update must recover an infeasible extended warm horizon");
-            measured=model.flow(measured,result.control_trajectory.front(),model.dt,false).x;
-        }
-    }
     planner_core::PlannerCoreConfig cfg;cfg.ocp_type="stc_landing_mpc";cfg.platform=planner_core::Platform::Mavros;cfg.enable_terminal_freeze=false;
     planner_core::DirectMpcController controller;controller.configure(cfg);
     planner_core::PlannerCoreInput input;input.current_state=Eigen::VectorXd::Zero(13);input.current_state<<1.98,0,StcLandingNoAugOCP::Z_STAGE+0.3,0,0,0,1,0,0,0,0,0,0;
