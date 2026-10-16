@@ -31,6 +31,42 @@ int main(){try{
         }
     }
     namespace O=StcLandingMpcOCP;
+    {
+        // Isolate CTCS from triggers and changed dynamics/costs. Six ordinary
+        // path limits fold into one interval row; no nodal cones remain.
+        namespace L=LandingMpcOCP;
+        auto prediction=std::make_shared<L::Ref::ConstantAccelPredictor>();
+        auto dynamics=std::make_shared<L::Dynamics>(prediction);
+        Eigen::VectorXd physical=Eigen::VectorXd::Zero(13);
+        physical(0)=.04;physical(1)=.03;physical(2)=1.85;physical(6)=1;physical(10)=.03;
+        auto state=L::Dynamics::initialState(physical,L::hover());auto control=L::hover();control(1)=.03;
+        auto folded=L::foldedLimits(dynamics);
+        check(folded->getDimC()==1&&folded->numImplications()==6,"ordinary CTCS must fold all six limits into one row");
+        check(folded->c(state,control)(0)>0,"always-active CTCS must detect an angular-rate violation above the STC trigger altitude");
+        const auto& parameters=comando_parameters::defaults.constraints;
+        const double rate_residual=.03/parameters.omega_stc_max-1.;
+        const double expected=(L::DT*rate_residual*rate_residual-parameters.ctcs_step_eps)/parameters.ctcs_y_scale;
+        check(std::abs(folded->c(state,control)(0)-expected)<1e-10,"folded CTCS must integrate the physical residual with the declared budget and scale");
+        const auto cx=folded->cx(state,control),cu=folded->cu(state,control);
+        for(int j=0;j<state.size()+control.size();++j){
+            auto xp=state,xm=state,up=control,um=control;const double h=1e-7;
+            if(j<state.size()){xp(j)+=h;xm(j)-=h;}else{up(j-state.size())+=h;um(j-state.size())-=h;}
+            const double fd=(folded->c(xp,up)(0)-folded->c(xm,um)(0))/(2*h);
+            const double analytic=j<state.size()?cx(0,j):cu(0,j-state.size());
+            check(std::abs(fd-analytic)/(1+std::abs(fd))<1e-5,"ordinary folded CTCS interval Jacobian");
+        }
+        OCPCreateArgs args;args.current_state=state;
+        auto problem=OCPRegistry::create("landing_mpc_ctcs",args);
+        for(int k=0;k<L::N;++k){
+            const auto rows=problem->getStageConstraints(k,ConstraintType::NO);
+            check(rows.size()==2&&rows[0]->getDimC()==8&&rows[1]->getDimC()==1,"CTCS variant must retain only input bounds and one folded path row");
+            check(problem->getStageConstraints(k,ConstraintType::SOC).empty(),"nodal SOC constraints must not conceal CTCS behavior");
+        }
+        check(problem->getTerminalConstraints(ConstraintType::NO).empty()&&problem->getTerminalConstraints(ConstraintType::SOC).empty(),"terminal path limits must also be supplied by the final CTCS interval");
+        L::Cost cost;L::Terminal terminal;
+        check(problem->getStageCost(0)->q(state,control)==cost.q(state,control),"CTCS comparison must preserve the ordinary stage cost");
+        check(problem->getTerminalCost()->p(state)==terminal.p(state),"CTCS comparison must preserve the ordinary terminal cost");
+    }
     auto pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();pred->a<<.1,-.1,0;
     auto dyn=std::make_shared<O::Dynamics>(pred);
     Eigen::VectorXd physical(13);physical<<.4,-.3,1.3,.2,.1,-.1,.99,.02,-.03,.01,.05,-.04,.02;

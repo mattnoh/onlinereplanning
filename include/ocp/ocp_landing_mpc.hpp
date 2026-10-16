@@ -1,9 +1,10 @@
 #pragma once
-// Complete ordinary constrained landing OCP: no CTCS integration or state triggers.
+// Complete ordinary landing MPC, with nodal or folded CTCS path constraints.
 #include "parameters.hpp"
 #include "target/predictor.hpp"
 #include "planner_core/types.hpp"
 #include "dynamics/quad_6dof_dynamics_aug.h"
+#include "constraint/stc_stage_constraint.h"
 #include <Eigen/Geometry>
 #include <algorithm>
 #include <cmath>
@@ -609,12 +610,51 @@ public:
     Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {Eigen::MatrixXd a=Eigen::MatrixXd::Zero(dim_c,NX);if(dim_c>2*NU)a(8,2)=-1;return a;}
     Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {Eigen::MatrixXd b=Eigen::MatrixXd::Zero(dim_c,NU);b(0,0)=-1;b(1,0)=1;for(int i=1;i<NU;++i){b(2*i,i)=1;b(2*i+1,i)=-1;}return b;}
 };
-;
-inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs& args) {
+// The same six ordinary limits, always active. SOC membership c0+|ctail|<=0
+// becomes a scalar consequence; there are no altitude/radius/settling triggers.
+// Speed, rate and tilt already use dimensionless relative-limit residuals.
+// Floor and cone distances use a one-metre reference. Unit density weights
+// are divided by y_scale together with epsilon, preserving the raw budget.
+inline std::shared_ptr<StcStageConstraint<double>> foldedLimits(std::shared_ptr<Dynamics> dynamics) {
+    const auto& parameters=Ref::defaults.constraints;
+    auto folded=std::make_shared<StcStageConstraint<double>>(StcForm::Density,
+        parameters.ctcs_step_eps/parameters.ctcs_y_scale);
+    const auto limits=Ref::landingRows(NX,NU);
+    const char* names[]={"floor","speed","angular_rate","glideslope","tilt","los"};
+    for(size_t i=0;i<limits.size();++i){
+        const auto row=limits[i];
+        folded->add(names[i]).triggerWhenNegative(
+            [](const Eigen::VectorXd&){return -1.;},
+            [](const Eigen::VectorXd& x){return Eigen::VectorXd::Zero(x.size()).eval();})
+            .consequence(
+                [row](const Eigen::VectorXd& x,const Eigen::VectorXd& u){
+                    const auto c=row->c(x,u);
+                    return c(0)+(row->getConstraintType()==ConstraintType::SOC?c.tail(c.size()-1).norm():0.);
+                },
+                [row](const Eigen::VectorXd& x,const Eigen::VectorXd& u){
+                    const auto c=row->c(x,u);const auto jacobian=row->cx(x,u);
+                    Eigen::VectorXd gradient=jacobian.row(0).transpose();
+                    if(row->getConstraintType()==ConstraintType::SOC){
+                        const double norm=c.tail(c.size()-1).norm();
+                        if(norm>1e-12)gradient+=jacobian.bottomRows(c.size()-1).transpose()*c.tail(c.size()-1)/norm;
+                    }
+                    return gradient;
+                },
+                [](const Eigen::VectorXd&,const Eigen::VectorXd& u){return Eigen::VectorXd::Zero(u.size()).eval();})
+            .weight(1./parameters.ctcs_y_scale);
+    }
+    StcIntervalDynamics<double> interval;interval.idx_theta=-1;interval.dt=DT;interval.substeps=substeps();
+    interval.xdot=[dynamics](const auto& x,const auto& u,double){return dynamics->intervalRates(x,u);};
+    interval.fx=[dynamics](const auto& x,const auto& u,double){return dynamics->intervalRatesX(x,u);};
+    interval.fu=[dynamics](const auto& x,const auto& u,double){return dynamics->intervalRatesU(x,u);};
+    folded->setIntervalDynamics(std::move(interval));return folded;
+}
+inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs& args,bool ctcs=false) {
     auto pred=std::make_shared<Ref::ConstantAccelPredictor>();pred->a=args.target_accel;
     auto dyn=std::make_shared<Dynamics>(pred);auto problem=std::make_shared<OptimalControlProblem<double>>(N);
     auto cost=std::make_shared<Cost>();auto bounds=std::make_shared<Bounds>();auto initial_bounds=std::make_shared<Bounds>(false);
     auto limits=Ref::landingRows(NX,NU);
+    auto folded=ctcs?foldedLimits(dyn):nullptr;
     Eigen::VectorXd x=Dynamics::initialState(args.current_state,hover());x(13)=0.;
     for(int k=0;k<N;++k){
         if(k>0&&k<static_cast<int>(args.prev_X.size())&&args.prev_X[k].size()==NX) {
@@ -644,13 +684,17 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
         problem->setInitialControl(k,u);problem->setStageDynamics(k,dyn);problem->setStageCost(k,cost);
         // x0 is measured data, not a decision variable. Keep input bounds
         // at k=0; constrain every future state and the terminal state.
-        problem->addStageConstraint(k,k==0?initial_bounds:bounds);
-        if(k>0)for(size_t j=1;j<limits.size();++j)problem->addStageConstraint(k,limits[j]);x=dyn->f(x,u);
+        problem->addStageConstraint(k,ctcs||k==0?initial_bounds:bounds);
+        if(ctcs)problem->addStageConstraint(k,folded);
+        else if(k>0)for(size_t j=1;j<limits.size();++j)problem->addStageConstraint(k,limits[j]);
+        x=dyn->f(x,u);
     }
     if(static_cast<int>(args.prev_X.size())==N+1&&args.prev_X[N].size()==NX) {
         x=args.prev_X[N];x(13)=N*DT;x.tail(NU)=problem->getInitialControl(N-1);
     }
-    problem->setInitialState(N,x);problem->setTerminalCost(std::make_shared<Terminal>());for(const auto& row:limits)problem->addTerminalConstraint(std::make_shared<Ref::TerminalRow>(row,NU));return problem;
+    problem->setInitialState(N,x);problem->setTerminalCost(std::make_shared<Terminal>());
+    if(!ctcs)for(const auto& row:limits)problem->addTerminalConstraint(std::make_shared<Ref::TerminalRow>(row,NU));
+    return problem;
 }
 inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=true; d.state_dim=13; d.control_dim=4; d.skip_altitude_validation=true; d.skip_trajectory_validation=true; d.coordinates=OCPDescriptor::Coordinates::TargetRelative; d.log_state_headers=OCPLoggerDefaults::getStateHeaders13D(); d.state_names=OCPLoggerDefaults::getStateNames13D(); d.extract_actual_state_row=OCPLoggerDefaults::getActualStateRow13D; d.make_hover_state=OCPLoggerDefaults::makeHoverState13D;d.name="landing_mpc";d.execution_mode=planner_core::ExecutionMode::DirectMpc;d.dt=DT;d.variable_dt=false;
     d.make_model=[](const Eigen::Vector3d& accel) {
@@ -667,11 +711,15 @@ inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=tru
     d.control_names={"thrust_accel","roll_rate","pitch_rate","yaw_rate"};d.use_predicted_handoff_state=false;
     d.post_process_result=[](SolverResult& r,const TargetSnapshot& t){r.is_relative_plan=t.valid;r.target_snapshot_pos=t.position;r.target_snapshot_vel=t.velocity;r.target_snapshot_acc=t.acceleration;};
     d.validate_target=[](const TargetSnapshot& t,double now,double max_age){return t.valid&&t.odom_stamp_sec>0&&now-t.odom_stamp_sec>=0&&now-t.odom_stamp_sec<=max_age;};
-    d.sanitize_warm_control=[](Eigen::VectorXd& u){u=bounded(u);};d.create=create;
+    d.sanitize_warm_control=[](Eigen::VectorXd& u){u=bounded(u);};d.create=[](const OCPCreateArgs& args){return create(args);};
     d.feasible_start=[](const Eigen::VectorXd& x) {
         if(x.size()<13||!x.allFinite()||x.segment<4>(6).norm()<1e-8)return false;
         return Ref::LandingLimits(18,4).c(x,Eigen::VectorXd::Zero(4)).maxCoeff()<=0;
     };
     d.getSolverParams=[](){auto p=Ref::getSolverParams();p.max_iter=Ref::defaults.mpc.max_iter;p.use_feasibility_ms=true;p.feasibility_ms_exact_rows={13,NX-4,NX-3,NX-2,NX-1};p.reg1_min=1e-4;p.reg2_min=1e-2;return p;};return d;
+}
+inline OCPDescriptor ctcsDescriptor(){
+    auto d=descriptor();d.name="landing_mpc_ctcs";
+    d.create=[](const OCPCreateArgs& args){return create(args,true);};return d;
 }
 }

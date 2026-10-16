@@ -307,3 +307,25 @@ still satisfy the programmed CTCS integral allowance (about 4.7e-5 against
 1.6e-3). These results concern the added MPC formulation, not the validated
 standalone/internal RH reference. Complete three-motion physical enforcement
 and future-interior validation remain outstanding; no new SITL was run.
+
+`landing_mpc_ctcs` is the controlled, non-STC comparison for `landing_mpc`.
+It uses the same complete OCP file, dynamics, costs, input bounds, initial
+guess, measured-state warm-start loop and physical limits. The six path
+constraints are replaced by one folded CTCS interval-density row through
+the existing interface, with constant activation; there are no STC triggers
+or additional nodal/terminal path constraints. Speed, rate and tilt use
+the ordinary normalized cone residuals; geometric distances use a one-metre
+reference. `SZMUK_CTCS_STEP_EPS` sets the raw integral budget and
+`SZMUK_CTCS_Y_SCALE` scales both the density and budget. A positive budget
+is a relaxation, not a guarantee of zero pointwise excess.
+
+Offline circle comparison (saved seed 8570001, 100 Hz publication, cold/warm
+iteration limits 120/24): ordinary MPC landed with 320 accepted/3 rejected
+solves and 0.000316 rad/s maximum measured angular-rate excess. Folded CTCS
+at the existing raw budget 1.6e-3 landed with 316 accepted/3 rejected solves
+and 0.006014 rad/s measured excess (dense predicted excess 0.005756 rad/s).
+Both had zero excess in the other audited physical limits. Reducing only
+the CTCS budget to 1e-5 produced no accepted initial plan, so it is a cold
+convergence failure, not a successful tighter-constraint run. These cases
+isolate folded CTCS from state triggers; they do not alter the shared
+solver or establish a regression in the original standalone CTCS example.

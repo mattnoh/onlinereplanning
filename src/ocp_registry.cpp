@@ -13,6 +13,7 @@ const std::map<std::string, OCPDescriptor>& getTable() {
         {"hover", HoverOCP::descriptor()},
         {"landing_rh", LandingRhOCP::descriptor()},
         {"landing_mpc", LandingMpcOCP::descriptor()},
+        {"landing_mpc_ctcs", LandingMpcOCP::ctcsDescriptor()},
         {"stc_landing_noaug", StcLandingNoAugOCP::descriptor()},
         {"stc_landing_mpc", StcLandingMpcOCP::descriptor()},
     };
