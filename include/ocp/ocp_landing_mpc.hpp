@@ -719,8 +719,14 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
         problem->setInitialState(k,x);Eigen::VectorXd u=hover();
         if(k<static_cast<int>(args.prev_U.size())&&args.prev_U[k].size()==NU)u=bounded(args.prev_U[k]);
         else {
-            // Feasible descent seed: brake before the floor and stay below the speed limit.
-            const double vertical_speed=-std::min(.5,std::sqrt(std::max(0.,x(2)-.1)));
+            // Initial guess only: reserve clearance from both cones before
+            // descending, and honor the configured speed rather than a fixed
+            // 0.5 m/s seed. The LOS clearance allows the full permitted tilt.
+            const double radius=x.head<2>().norm();
+            const double los_slope=std::tan(std::max(.1,Ref::LOS_CONE_HALF_ANGLE_DEG-
+                Ref::TILT_SCALE*Ref::TILT_MAX_DEG)*M_PI/180);
+            const double cone_height=std::max({0.,radius/Ref::GS_CONE_TAN-Ref::GS_APEX_OFFSET,radius/los_slope});
+            const double vertical_speed=-std::min({.5,.9*Ref::SPEED_MAX,std::sqrt(std::max(0.,x(2)-cone_height-.1))});
             const double acceleration=std::clamp(2*(vertical_speed-x(5)),-.5,.5);
             const double remaining=std::max(DT,(N-k)*DT);
             Eigen::Vector3d force;force.head<2>()=args.target_accel.head<2>()-2*(x.head<2>()+x.segment<2>(3)*remaining)/(remaining*remaining);

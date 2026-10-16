@@ -371,3 +371,21 @@ gap drops to 2.01732e-9, but the extended terminal interval has CTCS residual
 1.145e6. The warm horizon tail must be investigated separately; do not
 describe this numerical accuracy fix as completed constraint enforcement.
 Evidence: /tmp/comando-stress-ctcs-accurate-los16.log.
+
+The cold descent initialization now respects configured speed and reserves
+height for the GS/LOS cones. The earlier fixed .5 m/s seed could violate the
+.25 m/s stress bound before DDP started. Existing test_direct_mpc now exposes
+an optional --initial-guess landing_mpc|landing_mpc_ctcs diagnostic, using the
+same near-cone state and a 1-ms audit. Both strict-case seeds return zero
+primal/dynamics/dense residual and distance 1.92115 -> 1.6621. This changes
+initialization only, not optimized controls, constraints, objective or budget.
+Full direct-MPC checks pass after the change (ordinary moving: 50 accepted,
+max warm 96.3276 ms): /tmp/comando-seed-constraints-test.log.
+
+Rejected tail experiments remain temporary: extending with the last DDP gain
+made the terminal violation worse; keeping old feasible nominal states left
+a .158292 dynamics gap and did not restore convergence. Neither is in the
+branch. The stressed CTCS terminal state is almost at its tilt cap with
+outward angular velocity, so holding the last command is not a feasible
+extension. Evidence: /tmp/comando-stress-ctcs-feedback-tail.log and
+/tmp/comando-stress-ctcs-feasible-states.log. The main goal remains active.

@@ -8,7 +8,40 @@
 #include <stdexcept>
 #include <map>
 static void check(bool b,const char* message){if(!b)throw std::runtime_error(message);}
-int main(){try{
+int main(int argc,char** argv){try{
+    if(argc==3&&std::string(argv[1])=="--initial-guess"){
+        // Reproduce a feasible near-cone start with tightened limits, without
+        // conflating an inadmissible seed with a failed optimizer iteration.
+        const std::string type=argv[2];
+        check(type=="landing_mpc"||type=="landing_mpc_ctcs","initial-guess audit requires ordinary MPC or its CTCS transcription");
+        const auto& descriptor=OCPRegistry::getDescriptor(type);
+        OCPCreateArgs args;args.current_state=Eigen::VectorXd::Zero(13);
+        args.current_state(0)=.518;args.current_state(2)=1.85;args.current_state(6)=1;
+        auto problem=descriptor.create(args);const auto model=descriptor.make_model(Eigen::Vector3d::Zero());
+        std::vector<Eigen::VectorXd> states,controls;
+        for(int k=0;k<=model.horizon;++k)states.push_back(problem->getInitialState(k));
+        for(int k=0;k<model.horizon;++k)controls.push_back(problem->getInitialControl(k));
+        const auto audit=auditPrimal(*problem,states,controls,descriptor.getSolverParams());
+        double dense_excess=0;
+        const auto rows=LandingMpcOCP::Ref::landingRows(model.nx,model.nu);
+        for(int k=0;k<model.horizon;++k){
+            auto point=states[k];
+            for(int j=0;j<100;++j){
+                point=model.flow(point,controls[k],model.dt/100,false).x;
+                for(const auto& row:rows){
+                    const auto c=row->c(point,controls[k]);
+                    const double residual=c(0)+(row->getConstraintType()==ConstraintType::SOC?c.tail(c.size()-1).norm():0.);
+                    dense_excess=std::max(dense_excess,residual);
+                }
+            }
+        }
+        std::cout<<type<<" initial-guess constraints="<<audit.constraints<<" dynamics="<<audit.dynamics
+            <<" dense_excess="<<dense_excess<<" distance="<<states.front().head<3>().norm()<<" -> "<<states.back().head<3>().norm()<<'\n';
+        check(audit.feasible(1e-6)&&dense_excess<=1e-6,"near-cone cold seed must obey the configured physical limits");
+        check(states.back().head<3>().norm()<states.front().head<3>().norm()-.05,"feasible initial guess must make nontrivial landing progress");
+        return 0;
+    }
+    check(argc==1,"usage: test_direct_mpc [--initial-guess landing_mpc|landing_mpc_ctcs]");
     // A zero slack residual/returned trajectory must not certify an infeasible
     // primal. Check every cone type, terminal rows and exact-memory dynamics.
     {
