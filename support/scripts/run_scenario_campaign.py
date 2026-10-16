@@ -120,7 +120,7 @@ def bearing_probe():
         return None, None
 
 
-def await_bearing(alpha, tol, budget):
+def await_bearing(alpha, tol, budget, straight=False):
     """Time the landing trigger so the staging bearing is `alpha` AT ACTIVATION.
 
     Two latencies defeated the earlier attempts and both are compensated here:
@@ -141,8 +141,15 @@ def await_bearing(alpha, tol, budget):
     beta, rate = bearing_probe()
     if beta is None:
         return None, time.time() - t0
-    if rate is None or abs(rate) < 1e-3:
-        return beta, time.time() - t0        # not rotating; waiting cannot help
+    if straight or rate is None or abs(rate) < 1e-3:
+        # A folded straight target has constant bearing between reversals.
+        # Its next reversal can align the requested approach; firing now at
+        # beta=pi silently tests the opposite side of the saved scenario.
+        while abs(wrap_pi(alpha-beta)) > tol and time.time()-t0 < budget:
+            time.sleep(.5)
+            observed, _ = bearing_probe()
+            if observed is not None:beta=observed
+        return beta, time.time() - t0
     # Where beta will be when the trigger lands if we fire right now.
     beta_at_trig = wrap_pi(beta + rate * TRIGGER_LEAD)
     err = wrap_pi(alpha - beta_at_trig)
@@ -432,7 +439,9 @@ def run_cell(motion, level, trial, outdir, args):
             # we staged at is not the bearing at activation. Wait (briefly)
             # for it to come back into the screened band rather than firing
             # blind; record what we actually got either way.
-            beta, beta_wait = (None,0.0) if getattr(args,"start","original")=="cone" else await_bearing(STAGE_ALPHA, BEARING_TOL,BEARING_WAIT_S)
+            beta, beta_wait = (None,0.0) if getattr(args,"start","original")=="cone" else await_bearing(STAGE_ALPHA, BEARING_TOL,BEARING_WAIT_S,straight=motion=="straight")
+            if getattr(args,"start","original")!="cone" and (beta is None or abs(wrap_pi(beta-STAGE_ALPHA))>BEARING_TOL):
+                raise RuntimeError(f"Requested approach bearing unavailable: beta={beta}, requested={STAGE_ALPHA}")
             sh(f"{SETUP} && rosrun comando_planner apply_profile.sh /comando_planner "
                f"{args.profile}",
                timeout=60)

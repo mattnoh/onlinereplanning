@@ -1055,22 +1055,37 @@ class Cost : public StageCostBase<double> {
     Ref::CTcSTCStageCost<double> ref_{1.0,0.0,0.0,0.0,Eigen::Vector3d(0,0,Ref::Z_STAGE)};
     Eigen::Vector4d r_,s_;
     Eigen::VectorXd oldU(const Eigen::VectorXd& u) const {Eigen::VectorXd v=Eigen::VectorXd::Zero(5);v(0)=u(0)*Ref::MASS;v(4)=DT;return v;}
+    // Penalize landing angular motion without slowing the high-altitude
+    // capture. The smooth residual is beta(z)*omega; its Hessian uses GN.
+    std::pair<double,double> rateGate(double altitude) const {
+        const double span=std::max(.1,Ref::Z_STAGE-Ref::ALT_TRIG);
+        const double slope=12/span, center=.5*(Ref::Z_STAGE+Ref::ALT_TRIG);
+        const double beta=1/(1+std::exp(std::clamp(slope*(altitude-center),-60.,60.)));
+        return {beta,-slope*beta*(1-beta)};
+    }
 public:
     Cost() {r_<<0.02,0.2,0.2,0.2;s_<<Ref::defaults.mpc.slew_thrust_weight,Ref::defaults.mpc.slew_rate_weight,Ref::defaults.mpc.slew_rate_weight,Ref::defaults.mpc.slew_rate_weight;}
     double q(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
+        const auto [beta, derivative]=rateGate(x(2));(void)derivative;
         return ref_.q(x.head(14),oldU(u))+(r_.array()*(u-hover()).array().square()).sum()+(s_.array()*(u-x.tail(NU)).array().square()).sum()
-            +Ref::defaults.mpc.angular_rate_weight*x.segment<3>(10).squaredNorm();
+            +Ref::defaults.mpc.angular_rate_weight*beta*beta*x.segment<3>(10).squaredNorm();
     }
     Eigen::VectorXd qx(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
         Eigen::VectorXd g=Eigen::VectorXd::Zero(NX);g.head(14)=ref_.qx(x.head(14),oldU(u));g.tail(NU)=2*s_.cwiseProduct(x.tail(NU)-u);
-        g.segment<3>(10)+=2*Ref::defaults.mpc.angular_rate_weight*x.segment<3>(10);return g;
+        const auto [beta, derivative]=rateGate(x(2));const double weight=Ref::defaults.mpc.angular_rate_weight;
+        g.segment<3>(10)+=2*weight*beta*beta*x.segment<3>(10);
+        g(2)+=2*weight*beta*derivative*x.segment<3>(10).squaredNorm();return g;
     }
     Eigen::VectorXd qu(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
         Eigen::VectorXd g=2*r_.cwiseProduct(u-hover())+2*s_.cwiseProduct(u-x.tail(NU));g(0)+=Ref::MASS*ref_.qu(x.head(14),oldU(u))(0);return g;
     }
     Eigen::MatrixXd qxx(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
         Eigen::MatrixXd h=Eigen::MatrixXd::Zero(NX,NX);h.topLeftCorner(14,14)=ref_.qxx(x.head(14),oldU(u));h.bottomRightCorner(NU,NU)=2*s_.asDiagonal();
-        h.block<3,3>(10,10).diagonal().array()+=2*Ref::defaults.mpc.angular_rate_weight;return h;
+        const auto [beta, derivative]=rateGate(x(2));const double weight=Ref::defaults.mpc.angular_rate_weight;
+        h.block<3,3>(10,10).diagonal().array()+=2*weight*beta*beta;
+        h.block<3,1>(10,2)+=2*weight*beta*derivative*x.segment<3>(10);
+        h.block<1,3>(2,10)+=2*weight*beta*derivative*x.segment<3>(10).transpose();
+        h(2,2)+=2*weight*derivative*derivative*x.segment<3>(10).squaredNorm();return h;
     }
     Eigen::MatrixXd quu(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
         Eigen::MatrixXd h=2*(r_+s_).asDiagonal();h(0,0)+=Ref::MASS*Ref::MASS*ref_.quu(x.head(14),oldU(u))(0,0);return h;

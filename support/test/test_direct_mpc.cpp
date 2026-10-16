@@ -38,6 +38,16 @@ int main(){try{
     for(int j=0;j<O::NX+O::NU;++j){auto xp=x,xm=x,up=u,um=u;if(j<O::NX){xp(j)+=h;xm(j)-=h;}else{up(j-O::NX)+=h;um(j-O::NX)-=h;}
         double fd=(row->c(xp,up)(0)-row->c(xm,um)(0))/(2*h);double analytic=j<O::NX?cx(0,j):cu(0,j-O::NX);cerror=std::max(cerror,std::abs(fd-analytic)/(1+std::abs(fd)));}
     check(cerror<1e-5,"CTCS Jacobians");
+    {
+        O::Cost cost;auto state=x;state(2)=.5*(O::Ref::Z_STAGE+O::Ref::ALT_TRIG);
+        const auto gx=cost.qx(state,u),gu=cost.qu(state,u);
+        for(int j=0;j<O::NX+O::NU;++j){auto xp=state,xm=state,up=u,um=u;
+            if(j<O::NX){xp(j)+=h;xm(j)-=h;}else{up(j-O::NX)+=h;um(j-O::NX)-=h;}
+            const double fd=(cost.q(xp,up)-cost.q(xm,um))/(2*h);
+            const double analytic=j<O::NX?gx(j):gu(j-O::NX);
+            check(std::abs(fd-analytic)/(1+std::abs(fd))<1e-5,"landing rate-cost gradient");
+        }
+    }
     Eigen::VectorXd odom=Eigen::VectorXd::Zero(13);odom(3)=1;odom(6)=std::sqrt(.5);odom(9)=std::sqrt(.5);odom(10)=.2;
     auto world=planner_core::bodyOdometryToWorld(odom);check(std::abs(world(4)-1)<1e-12&&std::abs(world(3))<1e-12&&world(10)==.2,"odometry frame conversion");
     check(std::abs(planner_core::normalizedThrust(9.81,.7)-.7)<1e-12&&planner_core::normalizedThrust(30,.7)==1,"thrust normalization");
