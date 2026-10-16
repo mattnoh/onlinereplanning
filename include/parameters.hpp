@@ -188,6 +188,7 @@ inline Parameters fromEnvironment() {
     p.cost.w_land_gs = envOrQ("SZMUK_W_LAND_GS",p.cost.w_land_gs);
     p.cost.w_stc_los = envOrQ("SZMUK_W_STC_LOS",p.cost.w_stc_los);
     p.cost.w_stc_stage = envOrQ("SZMUK_W_STC_STAGE",p.cost.w_stc_stage);
+    p.cost.cap_desc_radius = envOrQ("SZMUK_CAP_DESC_RADIUS",p.cost.cap_desc_radius);
     p.constraints.theta_phase0_deg = envOrQ("SZMUK_TILT_PHASE0_DEG",p.constraints.theta_phase0_deg);
     p.constraints.omega_phase0_max = envOrQ("SZMUK_OMEGA_PHASE0_MAX",p.constraints.omega_phase0_max);
     p.constraints.spd_phase0_max = envOrQ("SZMUK_SPD_PHASE0_MAX",p.constraints.spd_phase0_max);
