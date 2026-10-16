@@ -221,6 +221,21 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
 
         setupProblem(args);
 
+        if (config_.reuse_solver && solver_ && !warm_u.empty()) {
+            std::vector<Eigen::VectorXd> seeded_x, seeded_u;
+            for(int k=0;k<=problem_->getHorizon();++k)seeded_x.push_back(problem_->getInitialState(k));
+            for(int k=0;k<problem_->getHorizon();++k)seeded_u.push_back(problem_->getInitialControl(k));
+            const auto seed=auditPrimal(*problem_,seeded_x,seeded_u,solver_params_);
+            // Extending an active terminal constraint need not give a feasible
+            // warm seed. Rebuild the original cold guess before optimization,
+            // rather than carrying barrier state from a different active set.
+            // Measured-state dynamics gaps are left to FDDP.
+            if(!std::isfinite(seed.constraints)||seed.constraints>solver_params_.tolerance){
+                args.prev_X.clear();args.prev_U.clear();args.prev_K.clear();
+                solver_.reset();setupProblem(args);
+            }
+        }
+
         if (config_.reuse_solver && solver_) solver_->updateProblem(*problem_, comando_parameters::defaults.mpc.warm_iterations);
         else {
             solver_ = make_shared<ALIPDDP<double>>(*problem_);
