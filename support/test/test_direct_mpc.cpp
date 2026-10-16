@@ -58,6 +58,14 @@ int main(){try{
           "CTCS MPC future speed bound must remain enforced");
     check(std::abs(dyn->f(x,u)(13)-x(13)-O::DT)<1e-12,"fixed time grid");
     check(O::descriptor().command_mode==OCPDescriptor::CommandMode::CmdBodyRate,"direct command type");
+    {
+        OCPCreateArgs hover_args;hover_args.current_state=Eigen::VectorXd::Zero(13);
+        hover_args.current_state(2)=O::Ref::Z_STAGE+.3;hover_args.current_state(6)=1;
+        auto feasible=O::create(hover_args);ALIPDDP<double> seeded(*feasible);
+        auto parameters=O::descriptor().getSolverParams();parameters.mu=parameters.muT=1e-6;
+        seeded.init(parameters);
+        check(seeded.error<1e-7,"recentring feasible CTCS must not inject a fixed slack residual");
+    }
     if(comando_parameters::defaults.mpc.native_px4) {
         const auto ordinary=OCPRegistry::getDescriptor("landing_mpc").make_model(pred->a);
         check((ordinary.flow(x,u,.1,true).x-dyn->flow(x,u,.1,true).x).norm()<1e-12,"ordinary and CTCS must predict the same native plant");

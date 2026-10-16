@@ -1106,15 +1106,26 @@ class DirectMpcController {
                 OcpSolver::WarmStartSnapshot warm;
                 const auto& old=prior->result;
                 const double age=std::max(0.0,seconds(origin,prior->origin));
-                for(int k=0;k<dyn.horizon;++k){
-                    double s=age/dyn.dt+k;int i=std::min(static_cast<int>(s),dyn.horizon-1);
-                    warm.prev_U.push_back(old.control_trajectory[i]);
-                    auto state=old.state_trajectory[i];state(13)=k*dyn.dt;
+                for(int k=0;k<=dyn.horizon;++k){
+                    const double s=age/dyn.dt+k;
+                    const int i=std::min(static_cast<int>(s),dyn.horizon);
+                    const int control=std::min(i,dyn.horizon-1);
+                    const double remainder=(s-i)*dyn.dt;
+                    // Align the nominal seed at sub-grid update times. This
+                    // advances only the old prediction; x0 stays measured.
+                    auto state=old.state_trajectory[i];
+                    if(remainder>1e-9)state=dyn.flow(state,old.control_trajectory[control],remainder,false).x;
+                    state(13)=k*dyn.dt;
                     warm.prev_X.push_back(state);
+                    if(k<dyn.horizon){
+                        const double fraction=std::min(1.0,remainder/dyn.dt);
+                        const int next=std::min(control+1,dyn.horizon-1);
+                        warm.prev_U.push_back((1-fraction)*old.control_trajectory[control]+
+                                              fraction*old.control_trajectory[next]);
+                    }
                 }
-                auto terminal=old.state_trajectory.back();terminal(13)=dyn.horizon*dyn.dt;
-                warm.prev_X.push_back(terminal);
-                // Factory rolls out these resampled controls from the live x0.
+                // Factory fixes the root, clock and command memory, leaving
+                // FDDP to close the remaining measured/predicted state gaps.
                 solver.restoreWarmStart(warm);solver.setNextWarmStartShift(0);
             }
             auto snapshot=solver.snapshotWarmStart();

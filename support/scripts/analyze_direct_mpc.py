@@ -32,7 +32,7 @@ def analyze(cell):
         saturated_samples=sum(int(r['saturation']) for r in rows),feedback_limited_samples=sum(int(r['feedback_limited']) for r in rows),
         offboard_throughout=bool(active) and all(s[1]=='OFFBOARD' for s in active),position_commands_during_direct_control=len(interleaved))
 
-def physical_audit(cell, audit_bin):
+def physical_audit(cell, audit_bin, reference_env=None):
     """Score the controlled flight and densely propagate accepted nominal horizons."""
     import os,sys,subprocess,math
     import numpy as np
@@ -41,6 +41,12 @@ def physical_audit(cell, audit_bin):
     import bag_to_stc_csv as converter
     environment=json.loads((cell/'planner_environment.json').read_text())
     previous=dict(os.environ)
+    audit_name='constraint_audit_reference.json' if reference_env else 'constraint_audit.json'
+    if reference_env:
+        # Optimizer tightening must not redefine the physical pass criteria.
+        environment=json.loads(reference_env.read_text())
+    for name in list(os.environ):
+        if name.startswith(('SZMUK_', 'MPC_', 'PX4_')):del os.environ[name]
     os.environ.update(environment)
     try:
         bag=next(cell.glob('*.bag'))
@@ -60,7 +66,8 @@ def physical_audit(cell, audit_bin):
             if audit_bin:
                 run=subprocess.run([str(audit_bin),ocp,str(cell)],env=os.environ.copy(),capture_output=True,text=True,check=True)
                 result['predicted']=json.loads(run.stdout)
-            (cell/'constraint_audit.json').write_text(json.dumps(result,indent=2)+'\n');return result
+            if reference_env:result['reference_environment']=str(reference_env.resolve())
+            (cell/audit_name).write_text(json.dumps(result,indent=2)+'\n');return result
         start=started[0] if ordinary else activation
         end=min((t for t in stops if t>=start),default=float('inf'))
         drone,target=converter.read_bag(bag)
@@ -99,16 +106,17 @@ def physical_audit(cell, audit_bin):
         if audit_bin:
             run=subprocess.run([str(audit_bin),ocp,str(cell)],env=os.environ.copy(),capture_output=True,text=True,check=True)
             result['predicted']=json.loads(run.stdout)
-        (cell/'constraint_audit.json').write_text(json.dumps(result,indent=2)+'\n')
+        if reference_env:result['reference_environment']=str(reference_env.resolve())
+        (cell/audit_name).write_text(json.dumps(result,indent=2)+'\n')
         return result
     finally:
         os.environ.clear();os.environ.update(previous)
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('campaign',type=pathlib.Path);ap.add_argument('--physical',action='store_true');ap.add_argument('--audit-bin',type=pathlib.Path);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('campaign',type=pathlib.Path);ap.add_argument('--physical',action='store_true');ap.add_argument('--audit-bin',type=pathlib.Path);ap.add_argument('--reference-env',type=pathlib.Path,help='Score against the original physical limits instead of optimizer tightening');args=ap.parse_args()
     if args.physical:
-        result=[physical_audit(p,args.audit_bin) for p in sorted(args.campaign.glob('*__zero__t0')) if (p/'cell.json').exists()]
-        (args.campaign/'constraint_audit.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2));return
+        result=[physical_audit(p,args.audit_bin,args.reference_env) for p in sorted(args.campaign.glob('*__zero__t0')) if (p/'cell.json').exists()]
+        (args.campaign/('constraint_audit_reference.json' if args.reference_env else 'constraint_audit.json')).write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2));return
     result=[analyze(p) for p in sorted(args.campaign.glob('*__zero__t0')) if (p/'cell.json').exists()]
     (args.campaign/'control_audit.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
 if __name__=='__main__':main()

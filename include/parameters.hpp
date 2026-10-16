@@ -113,6 +113,7 @@ struct MpcParameters {
     double max_policy_age = 1.0;
     double slew_thrust_weight = 0.1;
     double slew_rate_weight = 2.0;
+    double angular_rate_weight = 0.0;
     int max_iter = 60;
     int warm_iterations = 8;
     bool native_px4 = false;
@@ -234,6 +235,7 @@ inline Parameters fromEnvironment() {
     p.mpc.max_iter=static_cast<int>(envOrQ("MPC_MAX_ITER",p.mpc.max_iter));
     p.mpc.slew_thrust_weight=envOrQ("MPC_SLEW_THR",p.mpc.slew_thrust_weight);
     p.mpc.slew_rate_weight=envOrQ("MPC_SLEW_RATE",p.mpc.slew_rate_weight);
+    p.mpc.angular_rate_weight=envOrQ("MPC_ANGULAR_RATE_WEIGHT",p.mpc.angular_rate_weight);
     return p;
 }
 inline Parameters hoverDefaults() {
