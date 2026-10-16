@@ -139,3 +139,73 @@ criterion changed in this continuation. No SITL launched. Next: establish an
 identical, physically clean open-loop reference for the actual deployed MPC
 OCP, then isolate the first feedback transition that diverges from it. Complete
 RH/MPC enforcement remains unverified; keep the goal active.
+
+
+## Retained warm-start loop: actual asynchronous offline landing
+
+The user corrected the scope again: preserve the already functioning warm MPC
+loop. Do not substitute ROS RH as a clean reference, require free-time MPC, or
+turn an isolated fixed-period diagnostic failure into a generic cold-retry
+architecture. The untested seed-based cold-rebuild candidate was checkpointed
+as c71c6bd and removed as 75c2155. The solver worktree remains unchanged. The
+planner warm-start runtime is back to the tested e2c3d09 behavior.
+
+The existing test_direct_mpc passes again with MPC_MAX_ITER=120 and
+MPC_WARM_ITER=24; ordinary moving test: 139 accepted updates / five seconds,
+max warm solve 23.91 ms. This is lifecycle/recovery evidence, not complete
+landing constraint evidence.
+
+A temporary /tmp/comando-actual-mpc-landing.cpp now exercises the actual
+DirectMpcController worker, measured world state, held first DDP input and
+independent physical residual audit through a complete model landing. The
+plant is the descriptor's zero-target-acceleration world model, integrated at
+at most 1 ms; the controller receives relative prediction via the existing
+frame preparation. Targets come from the existing TargetGenerator, not new
+handwritten motion equations. No ROS or SITL was launched. All cases ran
+sequentially. No permanent new scripts, tests, plots or log artifacts were
+added to the branch.
+
+Authoritative ROS1-cadence constant-velocity cases (1 ms solve polling, 100 Hz
+command publication, unchanged defaults, max120/warm24):
+
+- Ordinary MPC: 381 accepted, zero rejected, landing condition reached,
+  9.90621 controlled seconds; every measured physical excess and accepted
+  predicted-node physical excess exactly zero. Max solve 36.727 ms.
+  /tmp/comando-actual-ordinary-constant-100hz.log.
+- STC MPC: 144 accepted, zero rejected, landing condition reached,
+  9.23358 controlled seconds; physical limits still fail (rate excess
+  0.247128 rad/s, tilt 1.72274 deg, GS .0478512 m, LOS 4.05228 deg,
+  staging .128537 m). Accepted predictions also contain physical excess.
+  /tmp/comando-actual-stc-constant-100hz.log.
+
+The constant target reproduces the existing moving regression's velocity
+(.134,.435,0), via TargetGenerator straight with span zero. These two cases
+are not a complete three-motion MC1 validation or an independent hardware
+plant validation. Future predicted trajectories above were audited at nodes;
+the executed trajectory was sampled at approximately 1 ms. Do not claim a
+full future-interior audit from this probe.
+
+Before correcting the probe's command rate from 1 kHz to 100 Hz, the saved
+circle generator seed 8570001 reached landing in ordinary MPC with 407
+accepted / one rejected, and no measured violation above the explicit audit
+tolerances (rate excess 5.04613e-5 rad/s, tolerance 1e-4). The saved figure-eight
+seed 7060001 had zero accepted cold plans; it never entered warm MPC execution.
+These are preliminary diagnostics, not ROS1-cadence validation gates, and zero
+measured samples in the figure-eight failure must never be counted as a pass.
+
+A constructive current-MPC counterexample isolates constraint semantics:
+first STC input has body-rate norm .607747995 rad/s. In the existing first-order
+rate model (tau .08 s, zero initial omega), its .1 s predicted rate is
+.433625279 rad/s, exceeding the loose .35 rad/s physical limit. Independent
+100000-midpoint integration of max(0,omega^2-.35^2)^2 gives raw integral
+4.6995873e-5, below the current raw 1.6e-3 budget; scaled row is -1.5530041e-4.
+At this first interval staging/landing/LOS are inactive or satisfied. Thus the
+programmed CTCS allowance admits this physically violating MPC input; this is
+not evidence of a failed CTCS optimizer, nor a claim about the user's validated
+internal-RH runs. Reject/cold-retry behavior, SOC scaling changes and a free-time
+conversion do not fix that mathematical allowance.
+
+Next: correct the added MPC problem's physical enforcement while preserving
+measured-root warm DDP, unchanged first-input publication, fixed grid and the
+CTCS interface. Verify complete predicted and executed constraints on the saved
+three motions, then RH as required. Do not report the current goal complete.

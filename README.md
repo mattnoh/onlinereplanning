@@ -293,3 +293,17 @@ The broader fix remains incomplete: straight and figure-eight validation failed 
 Enforcement review: the historical circle runs accepted returned trajectories through a scaled aggregate residual gate (default maximum 1.0), without independently certifying OCP feasibility or dynamics consistency. The shared solver wrapper now checks the returned primal against every scalar, SOC and equality row, terminal rows and full dynamics, using the OCP solver tolerance. A feasible, suboptimal real-time result can pass; a returned trajectory or termination label alone cannot. This check certifies the transcribed OCP, including CTCS's finite interval allowance, rather than unrelaxed physical STCs. The solver's condensed primal-dual recursion, terminal residual sign, SOC matrix product and feasible-slack initialization have also been corrected and checked independently. The saved quadrotor reproduction still fails, and the historical 30-iteration RH smoke test now exposes an infeasible cold solve. Offline validation remains incomplete; installed ROS binaries and SITL have not been refreshed for these changes. Simply rejecting more updates while holding stale input is insufficient.
 
 Log cleanup: [logs/README.md](logs/README.md) indexes the retained evidence. Twelve intermediate tuning campaigns were compressed into one archive under `logs/archive/`, with every file verified by SHA-256 before removing the unpacked copies. This reclaimed about 208 MiB. The original STC baseline, final circle passes and representative straight/figure-eight failures remain directly accessible. Historical paths into archived campaigns can be restored using the index instructions.
+
+
+Offline warm-MPC recheck: the untested cold-rebuild experiment was removed
+(`75c2155`); no such fallback is active. At 100 Hz command publication, the
+ordinary constant-velocity model landing completed 381 accepted solves with
+zero rejected solves and zero measured/predicted-node physical excess. The
+STC version also landed with zero rejected solves, but retained physical
+violations in both predictions and execution. This is a constraint-enforcement
+failure, not a generally broken warm-start loop. In the current STC MPC, a
+first input predicting 0.4336 rad/s against the 0.35 rad/s physical bound can
+still satisfy the programmed CTCS integral allowance (about 4.7e-5 against
+1.6e-3). These results concern the added MPC formulation, not the validated
+standalone/internal RH reference. Complete three-motion physical enforcement
+and future-interior validation remain outstanding; no new SITL was run.
