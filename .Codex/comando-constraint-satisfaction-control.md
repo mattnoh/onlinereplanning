@@ -300,3 +300,54 @@ This improves over the initial comparison (316/3 and .0060141 rad/s), but
 is not the tight-constraint completion gate. Evidence:
 /tmp/comando-ctcs-final-default-circle.log. Final direct-MPC test passes in
 /tmp/comando-ctcs-final-test.log. No shared solver files were changed.
+
+## Matched active-constraint stress and open-loop feasibility check
+
+The next comparison must exercise the limits rather than reuse the earlier
+mostly slack circle. Temporary case: target constant velocity .455 m/s at
+heading .6 rad, matched initial velocity, relative position (.518,0,1.85),
+upright attitude, zero rates. Both formulations use speed .25 m/s, tilt .1
+degree, rate .019 rad/s, glideslope 15 degrees with .1 m apex offset, LOS 16
+degrees, and floor zero. CTCS interval budget is 1e-8; N40, dt .1 seconds.
+These experimental settings have NOT replaced production defaults.
+
+The user explicitly required checking open-loop feasibility before further
+MPC work. Both exact OCPs admit the same nontrivial feasible trajectory:
+a temporary speed/cone-aware initial guess reduces relative distance from
+1.92115 m to 1.66210 m over four seconds. Its actual OCP constraint and dynamics
+residuals are zero in both formulations. Independent 1-ms propagation of
+every interval reports zero physical excess for all six limits. A matched
+hover trajectory also provides an analytic feasibility witness. These are
+feasibility witnesses, not claims of successful optimizer convergence.
+
+Touchdown within this horizon is impossible: initial distance / speed limit
+is at least 7.6846 seconds, already longer than four seconds. There is no
+hard terminal touchdown equality in either OCP, so this does not make them
+infeasible. Do not introduce a terminal touchdown requirement in this case.
+With a tightly bounded upright attitude and LOS half-angle summing to less
+than 90 degrees, exact LOS membership implies nonnegative height. Floor is
+therefore redundant here; do not claim it independently changes the optimum.
+
+Unmodified production initialization starts infeasible (ordinary residual
+1.31571, normalized CTCS residual 2.65787e7). Production ordinary DDP returns
+a nodally feasible plan, distance 1.40358 m, but terminates Outer Max/Min;
+CTCS fails cold. A feasible initialization alone does not fix the CTCS solve.
+
+Temporary diagnostic changes only to DDP's existing parameters (30 line-search
+trials, inner budget matching total budget, total 2000) yield an integral-row
+feasible CTCS plan, distance 1.40544 m, but optimality residual stays 1.5508e-4
+against tolerance 1e-6 and termination is Max Iteration. Ordinary also returns
+a feasible plan without Optimal Solution termination. CTCS dense physical
+excesses include GS .000132759 m and LOS .0144429 degrees / .000380028 m;
+zero integral-row violation is NOT zero physical violation. The corresponding
+repeated MPC experiment fails on the first warm update. This is not a working
+matched benchmark, and more iteration budget alone is not the remedy.
+
+All stress harnesses, seed/parameter variants, and rejected solver experiments
+remain under /tmp. No planner implementation or shared solver change is
+retained from these checks. Evidence: /tmp/comando-mpc-constraint-stress.cpp,
+/tmp/comando-stress-openloop-production-stage.log,
+/tmp/comando-stress-openloop-production-ctcs.log,
+/tmp/comando-stress-openloop-stage-extended.log,
+/tmp/comando-stress-openloop-ctcs-extended.log,
+/tmp/comando-stress-ctcs-longlinesearch-los16.log.
