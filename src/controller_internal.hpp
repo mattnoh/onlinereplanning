@@ -1111,7 +1111,7 @@ class DirectMpcController {
         Clock::time_point origin;
         Clock::time_point measured_at;
         int number=0;
-        Eigen::Vector3d acceleration=Eigen::Vector3d::Zero();
+        TargetSnapshot target;
     };
     mutable std::mutex mutex_;
     std::condition_variable ready_;
@@ -1156,7 +1156,10 @@ class DirectMpcController {
             if(prior){
                 OcpSolver::WarmStartSnapshot warm;
                 const auto& old=prior->result;
-                const double age=std::max(0.0,seconds(origin,prior->origin));
+                const auto old_model=desc_.make_model(prior->target.acceleration);
+                // The trajectory starts at the previous measured-state timestamp,
+                // before its solve completed and u0 began publication.
+                const double age=std::max(0.0,seconds(origin,prior->measured_at));
                 for(int k=0;k<=dyn.horizon;++k){
                     const double s=age/dyn.dt+k;
                     const int i=std::min(static_cast<int>(s),dyn.horizon);
@@ -1165,7 +1168,16 @@ class DirectMpcController {
                     // Align the nominal seed at sub-grid update times. This
                     // advances only the old prediction; x0 stays measured.
                     auto state=old.state_trajectory[i];
-                    if(remainder>1e-9)state=dyn.flow(state,old.control_trajectory[control],remainder,false).x;
+                    if(remainder>1e-9)state=old_model.flow(state,old.control_trajectory[control],remainder,false).x;
+                    // The old relative state used the previous target forecast.
+                    // Preserve its world prediction when changing forecast origin.
+                    const double old_time=age+k*dyn.dt,new_time=k*dyn.dt;
+                    const auto& before=prior->target;const auto& after=input.target_snapshot;
+                    state.head<3>()+=before.position+before.velocity*old_time+
+                        .5*before.acceleration*old_time*old_time-
+                        (after.position+after.velocity*new_time+.5*after.acceleration*new_time*new_time);
+                    state.segment<3>(3)+=before.velocity+before.acceleration*old_time-
+                        (after.velocity+after.acceleration*new_time);
                     state(13)=k*dyn.dt;
                     warm.prev_X.push_back(state);
                     if(k<dyn.horizon){
@@ -1204,7 +1216,7 @@ class DirectMpcController {
             if(!valid)solver.restoreWarmStart(snapshot);
             {
                 std::lock_guard<std::mutex> lock(mutex_);if(stop_)return;
-                if(valid){pending_=Policy{raw,Clock::now(),input.now,number,input.target_snapshot.acceleration};++count_;}
+                if(valid){pending_=Policy{raw,Clock::now(),input.now,number,input.target_snapshot};++count_;}
                 completed_=std::move(out);busy_=false;
             }
             } catch(const std::exception& e) {
@@ -1241,7 +1253,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);PlannerCoreStepResult out;
         if(pending_&&now>=pending_->origin){policy_=std::move(pending_);pending_.reset();}
         if(!policy_)return out;out.has_replay_sample=true;out.solve_num=policy_->number;
-        auto dyn=desc_.make_model(policy_->acceleration);
+        auto dyn=desc_.make_model(policy_->target.acceleration);
         const double age=seconds(now,policy_->origin);
         if(age<0||age>=std::min(dyn.horizon*dyn.dt,comando_parameters::defaults.mpc.max_policy_age)||measured.size()<13||!measured.allFinite()||!target.valid||!target.position.allFinite()||!target.velocity.allFinite()){out.stale=true;return out;}
         const auto& r=policy_->result;Eigen::VectorXd nominal=r.control_trajectory.front();

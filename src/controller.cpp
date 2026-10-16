@@ -133,7 +133,12 @@ std::vector<Eigen::VectorXd> OcpSolver::makeXshifted(int n_shift) const {
 
     std::vector<Eigen::VectorXd> xs(Nx);
     for (int i = 0; i < Nx; ++i) {
-        xs[i] = prev_X_[std::min(i + NEX, Nx - 1)];
+        const int source=i+NEX;
+        if(source<Nx)xs[i]=prev_X_[source];
+        else if(problem_&&!prev_U_.empty()){
+            const auto& previous=i==0?prev_X_.back():xs[i-1];
+            xs[i]=problem_->getDynamics(problem_->getHorizon()-1)->f(previous,prev_U_.back());
+        }else xs[i]=prev_X_.back();
     }
     return xs;
 }
@@ -199,11 +204,7 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
                 warm_u = std::move(su);
 
                 if (Nx > 0) {
-                    std::vector<Eigen::VectorXd> sx(Nx);
-                    for (int i = 0; i < Nx; ++i) {
-                        sx[i] = prev_X_[std::min(i + shift, Nx - 1)];
-                    }
-                    warm_x = std::move(sx);
+                    warm_x = makeXshifted(shift);
                 }
             }
         }
