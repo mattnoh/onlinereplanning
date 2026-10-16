@@ -240,3 +240,11 @@ constraint-enforcement pass. None of these OCP/solver experiments is in the
 branch. Further work must solve both useful motion/landing progress and actual
 physical enforcement; do not substitute feasible hover or zero measured samples
 for completion.
+
+
+Follow-up validation: rebuilt test_controller and its lifecycle, mode selection,
+ordinary RH/MPC cold solves, measured moving activation, derivatives and rate
+recovery checks pass with max120, RH N40 / THH .16. Output:
+/tmp/comando-startup-controller-check.log. A temporary gapped-capture cold seed
+for the normalized conservative prototype also failed (zero accepted plans);
+it remains outside the branch and must not be reported as a successful run.
