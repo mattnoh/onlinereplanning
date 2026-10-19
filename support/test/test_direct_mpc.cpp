@@ -73,6 +73,44 @@ int main(int argc,char** argv){try{
         std::cout<<std::defaultfloat<<std::setprecision(17);
         const auto states=solver.getResX(),controls=solver.getResU();
         const auto primal=auditPrimal(*problem,states,controls,parameters);
+        {
+            auto adjoint=[&](bool central){
+                Eigen::VectorXd costate=problem->getTerminalCost()->px(states.back());
+                double maximum=0.;int offset=0;
+                for(auto type:{ConstraintType::NO,ConstraintType::SOC})for(const auto& row:problem->getTerminalConstraints(type)){
+                    const int n=row->getDimCT();costate+=row->cTx(states.back()).transpose()*solver.getTerminalY().segment(offset,n);offset+=n;
+                }
+                for(int k=model.horizon-1;k>=0;--k){
+                    Eigen::VectorXd gx=problem->getStageCost(k)->qx(states[k],controls[k]);
+                    Eigen::VectorXd gu=problem->getStageCost(k)->qu(states[k],controls[k]);offset=0;
+                    for(auto type:{ConstraintType::NO,ConstraintType::SOC})for(const auto& row:problem->getStageConstraints(k,type)){
+                        const int n=row->getDimC();Eigen::VectorXd y=solver.getYTraj()[k].segment(offset,n);
+                        if(central&&type==ConstraintType::NO){
+                            const auto c=row->c(states[k],controls[k]);
+                            for(int j=0;j<n;++j)y(j)=c(j)<0?-solver.getParam().mu/c(j):std::numeric_limits<double>::quiet_NaN();
+                        }
+                        gx+=row->cx(states[k],controls[k]).transpose()*y;gu+=row->cu(states[k],controls[k]).transpose()*y;offset+=n;
+                    }
+                    gu+=problem->getDynamics(k)->fu(states[k],controls[k]).transpose()*costate;
+                    costate=gx+problem->getDynamics(k)->fx(states[k],controls[k]).transpose()*costate;
+                    maximum=gu.allFinite()?std::max(maximum,gu.lpNorm<Eigen::Infinity>()):std::numeric_limits<double>::infinity();
+                }
+                return maximum;
+            };
+            double complementarity=0,min_slack=1e100,max_dual=0;
+            for(int k=0;k<model.horizon;++k)if(!solver.getSTraj()[k].isZero(0)){
+                min_slack=std::min(min_slack,solver.getSTraj()[k].minCoeff());max_dual=std::max(max_dual,solver.getYTraj()[k].lpNorm<Eigen::Infinity>());
+                if(type=="landing_mpc_ctcs")complementarity=std::max(complementarity,
+                    (solver.getSTraj()[k].cwiseProduct(solver.getYTraj()[k]).array()-solver.getParam().mu).abs().maxCoeff());
+            }
+            std::cout<<"INDEPENDENT lagrangian_gradient="<<adjoint(false)<<" barrier_gradient="<<adjoint(true)
+                <<" complementarity="<<complementarity<<" min_slack="<<min_slack<<" max_dual="<<max_dual<<" final_mu="<<solver.getParam().mu<<'\n';
+            if(const char* file=std::getenv("AUDIT_DUMP")){
+                std::ofstream dump(file);dump<<std::setprecision(17)<<model.horizon<<' '<<model.nx<<' '<<model.nu<<'\n';
+                for(const auto& x:states)dump<<x.transpose()<<'\n';for(const auto& u:controls)dump<<u.transpose()<<'\n';
+            }
+        }
+
         Stats root,nodes,local,rollout;root.add(residuals(states.front(),true),0);
         auto continuous=states.front();double defect=0;
         for(size_t k=0;k<controls.size();++k){

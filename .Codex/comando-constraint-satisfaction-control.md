@@ -76,6 +76,77 @@ physically acceptable benchmark. The standalone/RH source remains protected.
 ROS1 comando_planner transport build also PASS after the diagnostic fields,
 with normal solver linkage. No SITL was launched before the offline gates.
 
+## Active-goal continuation (2026-10-19)
+
+Previous goal turn: no progress (explanation only). Trees revalidated clean at
+planner 31f7c74 / solver 4d68a48b. Goal remains complete offline CTCS MPC with
+convergence and physical enforcement, preserving the matched benchmark.
+
+E9 — Hypothesis: the stalled solver residual conceals either an incorrect
+costate recursion or an inaccurate primal-dual central path. Independently
+recompute reduced Lagrangian and barrier gradients by uncondensed adjoints
+at the returned trajectory, plus complementarity and row slack/dual ranges.
+Use the existing feasible E3 configuration (2000 inner, 30 steps, 600 total)
+without modifying OCP, limits, budget, or solver. Pass for diagnosis: distinguish
+a real stationarity defect from a misleading reported residual; save the
+trajectory for isolated replays. This is not itself a convergence pass.
+
+E9 result: true reduced Lagrangian gradient .000956927 versus reported
+.000293629; exact-barrier gradient .0324710. Complementarity 4.96e-21,
+minimum slack 1.23207e-7, max dual .512113, final mu 6.30957e-8. Row/slack
+mismatch 1.03e-11 is amplified by the near-boundary barrier curvature.
+Physical GS .000149241 m and LOS .000380824 m remain above tolerance.
+
+E10 — Hypothesis: feasible nonlinear slack update eliminates amplified
+row/slack cancellation without the earlier E6 dual reset. Isolate only
+forwardPass: when already strictly feasible (no equalities), require candidate
+nonlinear rows to remain interior, set S_new=-C_new, retain affine Newton dual
+update and its fraction-to-boundary test. Other cases use original path.
+Same E9 configuration/seed/objective/budget/limits. Pass for convergence:
+Optimal Solution and independent stationarity <=1e-6; physical audit separate.
+No shared source change until isolated and reference regressions pass.
+
+E10 FAIL: feasible primal/physical audit, but dual stagnates (independent
+stationarity 6984, complementarity about initial mu). Reject exact-slack-only
+update. No shared source edits.
+
+E11 — Hypothesis: the line-search merit omits stationarity/complementarity,
+allowing grossly infeasible cost-reducing steps and rejecting useful dual
+corrections when objective differences reach rounding precision. Isolate a
+residual-norm line search using independent adjoint stationarity, primal slack
+residuals, complementarity and dynamics defects. Original Newton directions,
+slacks and dual updates unchanged. Scope initially scalar/no-equality MPC.
+Same raw objective, fixed limits/budget and production cold seed; 600 total,
+2000 inner, 30 steps. Pass: true and reported stationarity <=1e-6 with Optimal
+Solution and primal/dynamics <=1e-6. Audit physical errors independently.
+
+E11 FAIL: reduced stationarity decreases to 261.666 but scalar primal violation
+65.5946 remains; approximate Newton directions do not reliably decrease full
+KKT merit near this nonlinear boundary. No production change retained.
+
+E12 — A specific bug was found in E6's attempted feasible-barrier experiment:
+the original filter never checks objective decrease when both old and new
+primal residuals are exactly zero. Consequently E6 accepted uphill barrier
+steps. Repeat the same exact nonlinear slack/central-dual path with an explicit
+barrier-objective descent test, first on the unscaled production objective.
+One intended difference from the existing isolated feasible-barrier override:
+reject dV_act<0 whenever the feasible path is used. Fixed limits/budget/seed,
+600 total / 2000 inner / 30 line-search trials. Pass: independent and reported
+stationarity <=1e-6, Optimal Solution, and primal/dynamics <=1e-6.
+
+E12 FAIL but isolates a concrete numerical collapse: feasible descent accepts
+S_min=2.4647e-14, Y_max=4.0573e8 at the initial barrier. Subsequent barrier
+updates cannot recover a representable primal step; last duals remain centered
+on 1e-5 while final mu is 1e-8. The existing tau=max(.99,1-mu) allows the
+fraction remaining to approach mu, so it shrinks towards zero with continuation.
+
+E13 — Relative to E12 change only the feasible nonlinear path's fraction to
+boundary: require at least .1 of old slack to remain, independent of mu. Keep
+central-dual update and explicit barrier descent. Hypothesis: stop the first
+cost-reducing iterations from entering a numerically unrecoverable boundary.
+Fixed limits/budget/objective/seed; 600 total / 2000 inner / 30 steps. Pass:
+reported and independent stationarity <=1e-6 plus primal/dynamics <=1e-6.
+
 ## Current experiment register
 
 E1 — Reproduce current production cold convergence with the committed feasible
