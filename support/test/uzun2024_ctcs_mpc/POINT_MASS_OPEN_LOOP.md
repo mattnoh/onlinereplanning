@@ -1,5 +1,95 @@
 # Local point-mass open-loop 2 × 2 comparison
 
+## Certified folded/lifted review (2026-10-20)
+
+The saved-policy extension is implemented and run on all 40 frozen selections.
+[Certificate report](../../../logs/point_mass/audits/folded_lifted_certificate_20261020_v7/REPORT.md),
+[summary](../../../logs/point_mass/audits/folded_lifted_certificate_20261020_v7/certification.json),
+[matched derivative cases](../../../logs/point_mass/audits/folded_lifted_certificate_20261020_v7/matched_cases.json)
+and the adjacent per-policy JSON files preserve interval-local and propagated
+rational enclosures, independent reference integrals, native SCP reintegration,
+accumulator defects, actual historical C++ row values, derivatives and four SCP
+finite-difference step sizes. The versioned comparison now extends its original mirror with certificate flags;
+the external live benchmark remains unchanged. No optimizer, production quadrature, margins,
+budgets, controls, selector thresholds or plots were changed.
+
+The real C++ evaluator reproduces zero at 4 and 8 substeps for free-time DDP N=6
+interval 3. Exact-flow sampling at those same stage times also returns zero;
+both grids miss the positive pocket. A rational enclosure proves its integral
+exceeds 1e-11, and independently split quadrature returns about 3.60518e-10.
+At 16 substeps, production RK4 gives about 2.93489e-10 while exact flow at the
+same stage times gives about 9.66261e-13: intermediate-stage approximation is
+a separate error channel. Exact RK4 endpoints do not make stage states exact.
+The N=6 physical-clearance certificate passes separately.
+
+All 20 CTCS policies receive strict obstacle/glide path-clearance certificates;
+19 meet their physical integral budgets and N=6 fails. Thirteen satisfy the
+reported conservative sufficient-tightening test and seven fail that test.
+Failure of that sufficient test does not imply penetration. Strict input
+residuals and the original tolerance-based base gate are reported separately:
+11 serialized policies have positive input residuals, all below the existing
+1e-6 audit tolerance (largest upper bound 2.32548e-7 m/s²).
+The fixed-time stage DDP N=100 path remains uncertified at exact zero rather
+than being promoted from its tolerance-based grade.
+
+The certificate uses exact rational constant-acceleration flow, quadratic and
+quartic Bernstein bounds, and integer-square-root brackets. It reports
+configured/sufficient margins and reserve in metres, the theorem's small-budget
+condition, certified speed bounds and propagated residual error. Binary time
+dilation retains exact duration s/N. Historical CSV bounds distinguish the
+serialized doubles from conditional original-policy bounds using the recorded
+12-significant-digit export format, decimal conversion and accumulated error.
+Limits are 100,000 subdivisions and depth 60; ambiguous cases remain uncertified.
+
+SCP's optimized accumulator increment, actual native Dopri8 increment and
+certified true increment are distinct per-interval fields. JAX and finite
+differences are both retained, including sensitivity near narrow regions;
+no derivative agreement is presumed. Stage virtual-buffer penalties start at
+the pinned default zero. Their adapted values were not recorded in the saved
+arrays and cannot be recovered from J_vb alone. The report records that limit
+and distinguishes augmented-Lagrangian from constant-weight settings.
+
+Source archives, working-tree status, base commits, binaries, build caches and
+hash inventories preserve historical point-mass DDP versus current paper-MPC
+DDP attribution. Dirty historical sources are explicitly recorded; their base
+commit is not presented as an exact reconstruction of an unknown old build.
+The MPC revision's CTCS Gauss–Newton curvature affects optimization rather than
+the definition of the folded integral. Exact accumulator elimination introduces
+no mathematical relaxation when density, flow, time measure and budgets match.
+
+The new sequential C++ target builds through catkin without changing either
+solver checkout:
+
+```bash
+source /opt/ros/noetic/setup.bash
+catkin build comando_planner --no-deps -j1 -p1 \
+  --cmake-args -DCOMANDO_BUILD_POINT_MASS_DIAGNOSTIC=ON \
+  -DCOMANDO_POINT_MASS_DDP_SOURCE=/path/to/historical/point-mass-ddp \
+  --make-args point_mass_saved_policy
+```
+
+Run the existing comparison entrypoint against a frozen snapshot and a new
+output directory (paths below are relative to the planner repository):
+
+```bash
+/home/lab/miniforge3/envs/openscvx/bin/python \
+  support/test/uzun2024_ctcs_mpc/point_mass_compare_fair.py \
+  --certify-snapshot logs/point_mass/open_loop \
+  --certificate-output /absolute/path/to/NEW_CERTIFICATE_DIRECTORY \
+  --ddp-evaluator /home/lab/mavros_ws/devel/.private/comando_planner/lib/comando_planner/point_mass_saved_policy \
+  --native-scp
+python3 -m unittest discover -s support/test/uzun2024_ctcs_mpc -p 'test_*.py'
+```
+
+All 26 Python tests pass, including the saved N=6 regression. The historical
+CTCS self-check reports exact value/cache agreement and completes its derivative
+step sweep. The paper-model C++ derivative check passes. All 394 original
+snapshot hashes were verified unchanged. Earlier diagnostic attempts remain
+alongside the final evidence with ATTEMPT.txt explanations. This nominal-model
+gate excludes flight uncertainty, MPC reset/shift/tail guarantees and nonlinear
+landing guarantees.
+
+
 ## Updated plots at the required 1e-6 dynamics threshold
 
 [Free-time PNG](../../../logs/point_mass/open_loop/point_mass_2x2_free.png)

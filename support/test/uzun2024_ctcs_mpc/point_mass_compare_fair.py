@@ -79,7 +79,17 @@ def main():
     ap.add_argument("--ox-gap-tol", type=float, default=1e-8)
     ap.add_argument("--plot-snapshot", type=Path,
                     help="Freeze completed inputs, regrade and plot in the original local style; no solves")
+    ap.add_argument("--certify-snapshot", type=Path, help="Certify frozen selected policies; no solves")
+    ap.add_argument("--certificate-output", type=Path)
+    ap.add_argument("--ddp-evaluator", type=Path)
+    ap.add_argument("--native-scp", action="store_true", help="Reintegrate actual OpenSCvx Dopri8 map and JAX derivatives")
     a = ap.parse_args()
+    if a.certify_snapshot is not None:
+        if a.certificate_output is None or a.ddp_evaluator is None:
+            ap.error("--certify-snapshot requires --certificate-output and --ddp-evaluator")
+        from point_mass_saved_audit import audit_snapshot
+        audit_snapshot(a.certify_snapshot, a.certificate_output, a.ddp_evaluator, a.native_scp)
+        return
     if a.plot_snapshot is not None:
         plot_snapshot(a.plot_snapshot, a.ox_gap_tol)
         return

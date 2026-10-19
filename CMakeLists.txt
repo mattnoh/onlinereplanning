@@ -86,3 +86,22 @@ elseif(COMANDO_ROS_VERSION STREQUAL "2")
  install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
  ament_package()
 endif()
+
+# Read-only saved-policy diagnostics against an explicitly selected historical DDP.
+option(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC "Build saved-policy CTCS evaluator" OFF)
+set(COMANDO_POINT_MASS_DDP_SOURCE "" CACHE PATH "Historical point-mass DDP source root")
+if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC)
+ if(NOT EXISTS "${COMANDO_POINT_MASS_DDP_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
+  message(FATAL_ERROR "Set COMANDO_POINT_MASS_DDP_SOURCE to the recorded DDP checkout")
+ endif()
+ add_executable(point_mass_saved_policy
+  support/test/uzun2024_ctcs_mpc/point_mass_saved_policy.cpp
+  ${COMANDO_POINT_MASS_DDP_SOURCE}/alipddp/alipddp/alipddp.cpp
+  ${COMANDO_POINT_MASS_DDP_SOURCE}/problem_maker/optimal_control_problem.cpp)
+ target_include_directories(point_mass_saved_policy PRIVATE
+  ${COMANDO_POINT_MASS_DDP_SOURCE}/alipddp
+  ${COMANDO_POINT_MASS_DDP_SOURCE}/problem_maker)
+ target_link_libraries(point_mass_saved_policy PRIVATE Eigen3::Eigen)
+ target_compile_definitions(point_mass_saved_policy PRIVATE
+  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_POINT_MASS_DDP_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
+endif()

@@ -26,6 +26,15 @@ performance trial. [Full maintained report](../../support/test/uzun2024_ctcs_mpc
 All raw paper campaigns, including failed numerical candidates, remain together
 for reproduction. [Maintained paper report](../../support/test/uzun2024_ctcs_mpc/RESULTS.md).
 
+## Folded versus lifted nominal certificate
+
+[Certified report](audits/folded_lifted_certificate_20261020_v7/REPORT.md) ·
+[per-policy classifications](audits/folded_lifted_certificate_20261020_v7/certification.json) ·
+[matched derivatives](audits/folded_lifted_certificate_20261020_v7/matched_cases.json).
+All 40 frozen policies are re-audited; physical path, strict inputs, integral
+budgets and sufficient tightening remain separate. The actual historical C++
+row reproduces the N=6 4/8-substep miss. Original plots and selectors are unchanged.
+
 ## Audit history
 
 [Threshold reconciliation](audits/threshold_reconciliation_20261019/reconciliation.json) ·
