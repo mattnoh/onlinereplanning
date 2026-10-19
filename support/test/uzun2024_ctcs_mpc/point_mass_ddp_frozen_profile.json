@@ -1,5 +1,5 @@
 {
-  "profile_id": "nt_legacy_ctcs_gn_off_v1",
+  "profile_id": "nt_legacy_ctcs_gn_off_v1_1",
   "status": "frozen_by_user_selection",
   "solver_commit": "82b2da6651e8e71d3c8ad3af9e21af4785e5218f",
   "soc_scaling": "Nesterov-Todd",
@@ -28,7 +28,7 @@
     "max_regularization": 10,
     "max_step_iter": 10,
     "forward_filter": 1,
-    "forward_cost_threshold": 0.1,
+    "forward_cost_threshold": 0,
     "use_ddp_terms": true,
     "use_feasibility_ms": true,
     "feasibility_ms_merit_weight": 1.0,
@@ -40,5 +40,6 @@
   },
   "scope": "point-mass comparison only; CTCS Hessian disabled in example wrapper; no production or solver/globalization edits",
   "selection_evidence": "production_and_ablation_20261020/nt_strict0_gn0",
-  "selection_note": "Selected explicitly by user before shared cold-start calibration; not a best-of-test selection or a claim of cold-start robustness."
+  "selection_note": "Selected explicitly by user before shared cold-start calibration; not a best-of-test selection or a claim of cold-start robustness.",
+  "record_correction": "v1 recorded forward_cost_threshold as 0.1, but its C++ type is int and its effective value was always 0. v1_1 corrects that record only; no solver setting or trajectory changes."
 }

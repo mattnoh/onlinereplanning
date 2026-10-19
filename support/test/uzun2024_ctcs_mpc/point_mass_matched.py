@@ -92,8 +92,25 @@ def ddp_run(protocol,job,out,binary):
     command=[str(binary),str(out/'case.txt'),str(out/'trace')];write_json(out/'command.json',command)
     with (out/'native_summary.json').open('w') as stdout,(out/'stderr.log').open('w') as stderr:
         subprocess.run(command,stdout=stdout,stderr=stderr,check=True)
+    return read_ddp_result(protocol,job,out)
+
+
+def read_ddp_result(protocol,job,out):
+    """Also permits read-only recovery after a metadata validation error."""
+    profile=protocol['profiles']['folded_ddp'];seed=job['seed'];fixed=job['mode']=='fixed'
+    U=np.asarray(seed['U'])
+    if not fixed:U=np.c_[U,seed['durations_s']]
     summary=json.loads((out/'native_summary.json').read_text())
-    if summary['settings']!=profile['settings']:raise ValueError('runtime DDP settings differ from frozen profile')
+    expected=dict(profile['settings'])
+    # The legacy C++ field is an int, including in the successful pilot.
+    # Preserve the original requested value and the observed coercion.
+    effective=int(expected['forward_cost_threshold'])
+    if expected['forward_cost_threshold']!=effective:
+        write_json(out/'profile_record_correction.json',dict(field='forward_cost_threshold',
+            original_record=expected['forward_cost_threshold'],effective_value=effective,
+            reason='legacy C++ int field; no optimizer rerun or numerical-setting change'))
+    expected['forward_cost_threshold']=effective
+    if summary['settings']!=expected:raise ValueError('runtime DDP settings differ from frozen profile')
     records=[json.loads(line) for line in (out/'trace.jsonl').read_text().splitlines()]
     initial=records[0]
     if not np.array_equal(initial['X'],seed['X']) or not np.array_equal(initial['U'],U):
