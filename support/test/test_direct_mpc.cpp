@@ -141,6 +141,208 @@ int main(int argc,char** argv){try{
         }
         return pass?0:1;
     }
+    if(argc==3&&std::string(argv[1])=="--synchronous"){
+        // Zero-deviation closed loop: each 0.1 s solve receives the exact plant
+        // state, its u0 is held for 100 x 1 ms steps of the same relative
+        // model, and the target moves at constant velocity with zero
+        // acceleration, so the relative flow is exact. No asynchronous timing.
+        using namespace constraint_audit;
+        const std::string type=argv[2];
+        check(type=="landing_mpc"||type=="landing_mpc_ctcs","synchronous audit requires a base MPC formulation");
+        const auto& descriptor=OCPRegistry::getDescriptor(type);
+        const auto model=descriptor.make_model(Eigen::Vector3d::Zero());
+        const int steps=static_cast<int>(std::lround(model.dt/.001));
+        check(std::abs(model.dt-.1)<1e-12&&std::abs(steps*.001-model.dt)<1e-12,"synchronous audit requires fixed 0.1 s intervals");
+        // Same optional diagnostic overrides as --open-loop.
+        auto parameters=descriptor.getSolverParams();
+        parameters.max_inner_iter=comando_parameters::envOrInt("AUDIT_INNER",parameters.max_inner_iter);
+        parameters.max_step_iter=comando_parameters::envOrInt("AUDIT_STEPS",parameters.max_step_iter);
+        parameters.mu=parameters.muT=comando_parameters::envOrQ("AUDIT_MU",parameters.mu);
+        parameters.inner_tolerance=comando_parameters::envOrQ("AUDIT_INNER_TOL",parameters.inner_tolerance);
+        const double scale=comando_parameters::envOrQ("AUDIT_COST_SCALE",1.);
+        check(std::isfinite(scale)&&scale>0,"cost scale must be positive and finite");
+        const int max_solves=comando_parameters::envOrInt("AUDIT_MPC_SOLVES",400);
+        check(max_solves>0&&max_solves<=400,"AUDIT_MPC_SOLVES must lie in [1,400] (40 s)");
+        const bool fresh=comando_parameters::envOrInt("AUDIT_FRESH_SOLVER",0)!=0;
+        const int warm_iterations=comando_parameters::defaults.mpc.warm_iterations;
+        std::ofstream dump;if(const char* file=std::getenv("AUDIT_DUMP"))dump.open(file);
+        if(dump.is_open())dump<<std::setprecision(17);
+        const Eigen::Vector3d target_velocity=.455*Eigen::Vector3d(std::cos(.6),std::sin(.6),0);
+        std::cout.precision(17);
+        const auto& limits=comando_parameters::defaults.constraints;
+        std::cout<<"CONFIG type="<<type<<" synchronous=1 N="<<model.horizon<<" dt="<<model.dt<<" plant_step=.001"
+            <<" solver="<<(fresh?"fresh":"retained")<<" warm_iterations="<<warm_iterations<<" max_solves="<<max_solves
+            <<" target_velocity="<<target_velocity.transpose()<<" speed="<<limits.spd_stc_max
+            <<" tilt_deg="<<limits.alpha_theta_stc*limits.theta_stc_deg<<" rate="<<limits.omega_stc_max
+            <<" gs_deg="<<limits.gs_cone_half_angle_deg<<" apex="<<limits.gs_apex_offset
+            <<" los_deg="<<limits.los_cone_half_angle_deg<<" ctcs_budget="<<limits.ctcs_step_eps
+            <<" tolerance="<<parameters.tolerance<<" max_iter="<<parameters.max_iter<<" inner="<<parameters.max_inner_iter
+            <<" steps="<<parameters.max_step_iter<<" mu="<<parameters.mu<<" inner_tol="<<parameters.inner_tolerance
+            <<" cost_scale="<<scale<<std::endl;
+        // Signed worst row value: negative is margin, positive is violation.
+        auto rowValue=[](const Eigen::VectorXd& c,ConstraintType kind){
+            if(!c.allFinite())return std::numeric_limits<double>::infinity();
+            if(c.size()==0)return -std::numeric_limits<double>::infinity();
+            if(kind==ConstraintType::SOC)return c(0)+c.tail(c.size()-1).norm();
+            return kind==ConstraintType::EQ?c.cwiseAbs().maxCoeff():c.maxCoeff();
+        };
+        auto stageRow=[&](const OptimalControlProblem<double>& p,int k,const Eigen::VectorXd& x,const Eigen::VectorXd& u){
+            double value=-std::numeric_limits<double>::infinity();
+            for(auto kind:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
+                for(const auto& row:p.getStageConstraints(k,kind))value=std::max(value,rowValue(row->c(x,u),kind));
+            return value;
+        };
+        auto terminalRow=[&](const OptimalControlProblem<double>& p,const Eigen::VectorXd& x){
+            double value=-std::numeric_limits<double>::infinity();
+            for(auto kind:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
+                for(const auto& row:p.getTerminalConstraints(kind))value=std::max(value,rowValue(row->cT(x),kind));
+            return value;
+        };
+        // Hold one input over an interval in 1 ms steps, sampling every step.
+        auto hold=[&](Eigen::VectorXd x,const Eigen::VectorXd& u,Stats& stats,std::vector<Eigen::VectorXd>* samples=nullptr){
+            for(int i=0;i<steps;++i){
+                x=model.flow(x,u,.001,false).x;stats.add(residuals(x,true),.001);
+                if(samples)samples->push_back(x);
+            }
+            return x;
+        };
+        auto exceeds=[](const Stats& stats){
+            for(size_t j=0;j<NC;++j)if(!(stats.maxima[j]<=tolerances[j]))return true;
+            return false;
+        };
+        auto maxima=[](std::ostream& out,const Stats& stats){for(size_t j=0;j<NC;++j)out<<(j?",":"")<<stats.maxima[j];};
+        auto trajectory=[&](const char* tag,const std::vector<Eigen::VectorXd>& rows){
+            if(!dump.is_open())return;
+            for(size_t k=0;k<rows.size();++k)dump<<tag<<' '<<k<<' '<<rows[k].transpose()<<'\n';
+        };
+
+        Eigen::VectorXd physical=Eigen::VectorXd::Zero(13);physical(0)=.518;physical(2)=1.85;physical(6)=1;
+        // The plant carries the full model state: physical 13, clock and the
+        // last applied input as command memory (plus native states, if any).
+        Eigen::VectorXd plant=model.initial_state(physical,model.hover);
+        TargetSnapshot target;target.valid=true;target.velocity=target_velocity;
+        TargetSnapshot previous_target=target;
+        OcpSolver::Result previous;bool have_previous=false;
+        std::unique_ptr<ALIPDDP<double>> solver;
+        Stats roots,executed,future_nodes,future_dense,seed_tail_dense;
+        double seed_constraints=0,seed_dynamics=0,shift_gap=0,seed_tail_stage=-1e100,seed_tail_terminal=-1e100;
+        double returned_constraints=0,returned_dynamics=0,max_optimality=0,first_row=-1e100,tail_row=-1e100,terminal_row=-1e100;
+        int solves=0,converged_count=0,future_violations=0;bool finished=false;std::string failure;
+        for(int j=0;j<max_solves&&!finished&&failure.empty();++j){
+            target.position=target_velocity*(j*model.dt);
+            // Measured root: exact plant state, clock rebased to the new epoch.
+            Eigen::VectorXd root=plant;root(13)=0;
+            Stats root_stats;root_stats.add(residuals(root,true),0);roots.add(residuals(root,true),0);
+            OCPCreateArgs args;args.current_state=root;args.target_accel=target.acceleration;
+            OcpSolver::WarmStartSnapshot warm;double gap=std::numeric_limits<double>::quiet_NaN();
+            if(have_previous){
+                // Core shift with age = DT: node k samples the old trajectory at
+                // (k+1)DT, and the new terminal node integrates the old final
+                // control for one further DT. The factory then fixes the
+                // measured root, rebases the clock to k*DT and sets each node's
+                // command memory to the preceding seed control.
+                warm=planner_core::shiftMpcSeed(previous,model,previous_target,target,model.dt);
+                args.prev_X=warm.prev_X;args.prev_U=warm.prev_U;
+                gap=(warm.prev_X.front().head(13)-root.head(13)).lpNorm<Eigen::Infinity>();
+                shift_gap=std::max(shift_gap,gap);
+            }
+            auto problem=descriptor.create(args);
+            if(scale!=1.){
+                for(int k=0;k<model.horizon;++k)problem->setStageCost(k,std::make_shared<AuditStageScale>(problem->getStageCost(k),scale));
+                problem->setTerminalCost(std::make_shared<AuditTerminalScale>(problem->getTerminalCost(),scale));
+            }
+            std::vector<Eigen::VectorXd> seed_x,seed_u;
+            for(int k=0;k<=model.horizon;++k)seed_x.push_back(problem->getInitialState(k));
+            for(int k=0;k<model.horizon;++k)seed_u.push_back(problem->getInitialControl(k));
+            const auto seed=auditPrimal(*problem,seed_x,seed_u,parameters);
+            seed_constraints=std::max(seed_constraints,seed.constraints);seed_dynamics=std::max(seed_dynamics,seed.dynamics);
+            // New tail: last seed interval and terminal node.
+            const int last=model.horizon-1;
+            const double tail_stage=stageRow(*problem,last,seed_x[last],seed_u[last]),tail_terminal=terminalRow(*problem,seed_x.back());
+            seed_tail_stage=std::max(seed_tail_stage,tail_stage);seed_tail_terminal=std::max(seed_tail_terminal,tail_terminal);
+            Stats tail_dense;hold(seed_x[last],seed_u[last],tail_dense);
+            for(size_t i=0;i<NC;++i){seed_tail_dense.maxima[i]=std::max(seed_tail_dense.maxima[i],tail_dense.maxima[i]);seed_tail_dense.duration[i]+=tail_dense.duration[i];}
+            seed_tail_dense.samples+=tail_dense.samples;seed_tail_dense.total+=tail_dense.total;
+
+            const bool retained=!fresh&&solver;
+            const int budget=retained?warm_iterations:parameters.max_iter;
+            std::ostringstream record;record<<std::setprecision(17)<<"SOLVE "<<j<<" t="<<j*model.dt
+                <<" mode="<<(retained?"retained":fresh&&have_previous?"fresh_warm":"cold")<<" budget="<<budget
+                <<" root_distance="<<root.head<3>().norm()<<" root_speed="<<root.segment<3>(3).norm()<<" root_physical=";
+            maxima(record,root_stats);
+            record<<" seed_constraints="<<seed.constraints<<" seed_dynamics="<<seed.dynamics<<" shift_root_gap="<<gap
+                <<" seed_tail_stage_row="<<tail_stage<<" seed_tail_terminal_row="<<tail_terminal<<" seed_tail_dense=";
+            maxima(record,tail_dense);
+            std::vector<Eigen::VectorXd> states,controls,samples;
+            try{
+                if(retained)solver->updateProblem(*problem,warm_iterations);
+                else{solver=std::make_unique<ALIPDDP<double>>(*problem);solver->init(parameters);}
+                const auto start=std::chrono::steady_clock::now();solver->solve();
+                const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+                ++solves;states=solver->getResX();controls=solver->getResU();
+                const auto primal=auditPrimal(*problem,states,controls,parameters);
+                const bool converged=solver->getTerminationReason()=="Optimal Solution"&&std::isfinite(solver->getOptError())
+                    &&solver->getOptError()<=parameters.tolerance;
+                converged_count+=converged;
+                returned_constraints=std::max(returned_constraints,primal.constraints);returned_dynamics=std::max(returned_dynamics,primal.dynamics);
+                max_optimality=std::max(max_optimality,solver->getOptError());
+                record<<" termination=\""<<solver->getTerminationReason()<<"\" iterations="<<solver->getNumIter()
+                    <<" optimality="<<solver->getOptError()<<" internal_error="<<solver->getError()<<" final_mu="<<solver->getParam().mu
+                    <<" converged="<<converged<<" constraints="<<primal.constraints<<" dynamics="<<primal.dynamics<<" solve_ms="<<ms;
+                if(!primal.feasible(1e-6))failure="returned_primal";
+                else{
+                    const double first=stageRow(*problem,0,states[0],controls[0]),tail=stageRow(*problem,last,states[last],controls[last]);
+                    const double terminal=terminalRow(*problem,states.back());
+                    first_row=std::max(first_row,first);tail_row=std::max(tail_row,tail);terminal_row=std::max(terminal_row,terminal);
+                    // Future audit of the returned plan: nodes and every interval
+                    // densely from its own node. Reported, not a stop criterion.
+                    Stats nodes,dense;
+                    for(int k=0;k<model.horizon;++k){nodes.add(residuals(states[k+1],true),0);hold(states[k],controls[k],dense);}
+                    for(size_t i=0;i<NC;++i){
+                        future_nodes.maxima[i]=std::max(future_nodes.maxima[i],nodes.maxima[i]);future_dense.maxima[i]=std::max(future_dense.maxima[i],dense.maxima[i]);
+                        future_nodes.duration[i]+=nodes.duration[i];future_dense.duration[i]+=dense.duration[i];
+                    }
+                    future_nodes.samples+=nodes.samples;future_dense.samples+=dense.samples;future_dense.total+=dense.total;
+                    future_violations+=exceeds(nodes)||exceeds(dense);
+                    // Execute exactly u0, unclipped, on the 1 ms plant.
+                    const Eigen::VectorXd u0=controls.front();Stats interval;
+                    plant=hold(root,u0,interval,&samples);
+                    for(size_t i=0;i<NC;++i){executed.maxima[i]=std::max(executed.maxima[i],interval.maxima[i]);executed.duration[i]+=interval.duration[i];}
+                    executed.samples+=interval.samples;executed.total+=interval.total;
+                    record<<" first_interval_row="<<first<<" tail_row="<<tail<<" terminal_row="<<terminal
+                        <<" u0="<<u0.transpose().format(Eigen::IOFormat(17,Eigen::DontAlignCols,",",","))<<" future_nodes=";
+                    maxima(record,nodes);record<<" future_dense=";maxima(record,dense);record<<" executed=";maxima(record,interval);
+                    record<<" end_distance="<<plant.head<3>().norm()<<" end_speed="<<plant.segment<3>(3).norm();
+                    if(exceeds(interval))failure="executed_physical";
+                    finished=plant.head<3>().norm()<.003&&plant.segment<3>(3).norm()<.01;
+                }
+            }catch(const std::exception& e){failure=std::string("exception: ")+e.what();record<<" exception=\""<<e.what()<<'"';}
+            if(dump.is_open())dump<<record.str()<<'\n';
+            if(!failure.empty()){
+                std::cout<<"FAIL solve="<<j<<" reason="<<failure<<'\n'<<record.str()<<'\n';
+                // First failing solve: seed, returned primal and executed samples.
+                trajectory("FAIL_SEED_X",seed_x);trajectory("FAIL_SEED_U",seed_u);
+                trajectory("FAIL_X",states);trajectory("FAIL_U",controls);trajectory("FAIL_PLANT",samples);
+                break;
+            }
+            previous.state_trajectory=states;previous.control_trajectory=controls;have_previous=true;previous_target=target;
+        }
+        if(failure.empty()&&!finished)failure="incomplete_max_solves";
+        const bool pass=failure.empty();
+        std::cout<<"RESULT solves="<<solves<<" finished="<<finished<<" time="<<solves*model.dt
+            <<" distance="<<plant.head<3>().norm()<<" speed="<<plant.segment<3>(3).norm()
+            <<" converged_solves="<<converged_count<<" max_optimality="<<max_optimality
+            <<" seed_constraints="<<seed_constraints<<" seed_dynamics="<<seed_dynamics<<" shift_root_gap="<<shift_gap
+            <<" seed_tail_stage_row="<<seed_tail_stage<<" seed_tail_terminal_row="<<seed_tail_terminal
+            <<" returned_constraints="<<returned_constraints<<" returned_dynamics="<<returned_dynamics
+            <<" first_interval_row="<<first_row<<" tail_row="<<tail_row<<" terminal_row="<<terminal_row
+            <<" future_violation_solves="<<future_violations<<" failure="<<(pass?"none":failure)<<" pass="<<pass<<'\n';
+        for(const auto& entry:{std::make_pair("roots",roots),std::make_pair("seed_tail_dense",seed_tail_dense),
+                std::make_pair("future_nodes",future_nodes),std::make_pair("future_dense",future_dense),std::make_pair("executed",executed)}){
+            std::cout<<entry.first<<' ';entry.second.write(std::cout);std::cout<<'\n';
+        }
+        return pass?0:1;
+    }
     if(argc==3&&std::string(argv[1])=="--initial-guess"){
         // Reproduce a feasible near-cone start with tightened limits, without
         // conflating an inadmissible seed with a failed optimizer iteration.
@@ -173,7 +375,7 @@ int main(int argc,char** argv){try{
         check(states.back().head<3>().norm()<states.front().head<3>().norm()-.05,"feasible initial guess must make nontrivial landing progress");
         return 0;
     }
-    check(argc==1,"usage: test_direct_mpc [--initial-guess|--open-loop landing_mpc|landing_mpc_ctcs]");
+    check(argc==1,"usage: test_direct_mpc [--initial-guess|--open-loop|--synchronous landing_mpc|landing_mpc_ctcs]");
     {
         // A diagnostic must fail closed on invalid physical states, including
         // NaN quaternions that std::max(0, NaN) could otherwise hide.
