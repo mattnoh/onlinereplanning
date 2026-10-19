@@ -1,3 +1,25 @@
+# Current authorized task — faster DDP CTCS on the paper benchmark
+
+User2026-10-19 requests RK4/tuning speed experiments. Landing repair remains
+paused. Retain physical obstacle/input limits, delta=.05, epsilon1e-6,
+horizon8, nodes17, ZOH, K4, duration30, root/reference and independent1ms audit.
+Do not confuse RK4 integration substeps with changing the OCP node spacing.
+
+P12 hypothesis: 100 RK4 substeps per .5s interval over-resolves the smooth
+physical dynamics, and 20 may preserve physical/integral feasibility at lower
+solve cost. Single intended change from P7: --substeps100->20. No tolerance,
+physical budget, tightening, constraints or shared solver algorithm change.
+Pass: full30s/15 replans, all solvesOptimal to1e-6, returnedprimal<=1e-6,
+dynamics/independentphysicalflow<=1e-6, executed physicalexcess<=1e-6,
+executed integral<=1e-6 within existingrelative1e-6 budgetaudit; usefultracking.
+Report actual raw integral maxima, quadrature errors and timer median/p95/max
+separately. Reject coarse integration if it passes modeled rows but fails the
+independent budget/physical audit. Compare saved seed/solution accuracy.
+All campaigns sequential. Failed candidates stay labeled; change defaults
+only after the complete relevant verification. Prior source commit133f53d.
+
+---
+
 # Current authorized task — matched paper-example 2×2 comparison
 
 2026-10-19: user paused the landing-fix goal. No further landing experiments
@@ -923,3 +945,70 @@ P11b final-source CTCS regression PASS, X/U parityexact0 against savedP5solve0.
 caught by visualinspection and repaired. Plot formatting retry did not rerun
 optimization or alter scenario data. Allfailures remain labeled.
 Landing objective remains PAUSED; no landing experiments executed this task.
+P12 early result: M20 reduces early solves (solve1 .177s versusP7 .588s),
+all earlyOptimal and physicalclearance, but C++ independentfine integral at
+solve1 futureinterval1.0019153e-6 >1e-6 while modeled9.999287e-7. Do not
+accept coarse quadrature merely because solver row is feasible.
+P13 hypothesis: M50 halves quadrature work while resolving activation peaks
+well enough for the independent budget. Single intended change fromP7:
+--substeps100->50. Same fullrun pass criteria asP12, no tuning or marginchange.
+Run sequentially afterP12 completes, preserve failed candidates honestly.
+P14 hypothesis: initialmu1 forces unnecessary barrier-reduction iterations;
+mu.1 also lowers updateProblem's recenter floor .01->.001 without changing
+constraints or stopping tolerance. Single change relativeP7: --mu1->.1 at
+validatedM100 (not combined with P13 yet). Same fullrun acceptance, independent
+integral/physical and all15Optimal. Distinguish numerics from changing epsilon.
+Choose this isolated tuning test afterP13, not a broad parameter sweep.
+P12 finished15/15Optimal, physicalexcess0/duration0, tracking.250060.
+Independent executedImax1.00692670e-6: fixedbudgetFAIL (.69267% excess).
+Candidate rejected as recommended profile despite faster solves and clearance.
+
+P15 hypothesis: redundant interval integration and cross-stage cache thrash
+can be removed by one shared FlowCache per stage between dynamics and cost.
+Single intended change: exact memoization, atM100 and alloriginalsolverparams.
+Keep a --flow-cache legacy path in the same local OCP to isolate/cache parity;
+shared solver/StcStageConstraint and quadrature/density unchanged. Pass:
+existingderivativechecks plus full15solve X/U/iterations/termination parity
+againstP7 to1e-8 (expect exact), physical and budgetchecks unchanged, measured
+warmmedian/p95 improve. Newflag diagnostic-only, no ROS/control changes.
+Implement whileP13 runs oldbinary; build only afterP13 is confirmed terminal.
+ActualClaude review confirms four sensitivity integrations per acceptedstage
+plus trialvalue repeats; this change removes only dynamics/cost duplication,
+not CTCS interface integration or sharedsolver work.
+P13 completePASS:15/15Optimal, physicalexcess0/duration0, independent
+executedImax9.99905365e-7<=1e-6, tracking.250056094 (P7 .250057624),
+maxexecutedpredictionplant1.75923e-8. Host backgroundload rose above18, so
+historicalwallclock medians cannot establish clean speedup. Exact paired
+replays on one newbinary will measure cache speed and CPUtime separately.
+P15 validation extension: replay every saved retained-MPC request fromP7 and
+P13 in two independentservers (legacy/shared), sequential solves with pair
+orderalternated. Require all15fulltrajectories/iterations/termination equal
+saved audited outputs<=1e-8. This verifies the entire measured-root/shift/tail
+sequence, not a singlehorizon. The existing independentdenseplant audit is
+transferred only when complete control/state parity holds; do not claim newly
+integratedplant or async/real-time completion. Sameimmutable modeldata/cache
+perstage, noCTCSquad/solverinternalschanged. CompareCPUtime duehostcontention.
+P14 (mu.1 isolated tuning) remains planned, not run; prioritize verified exact
+reuse first. No claim about that unexecuted candidate.
+P15/P16 PASS: paired full15-request retained-MPC sequence replays atM100 and
+M50 both match original audited trajectories/iterations/termination EXACTLY
+(maxdifference0). Newbinarylegacy also matches both oldbinaries. Bothsource
+campaigns passedphysical and integralchecks; samecontrols/states transfer the
+independent30sdenseaudits. No freshplant integration is claimed for replays.
+Warmmedian currentpaired measurements: M100legacy825.985ms, shared617.586ms;
+M50legacy319.005ms, shared224.404ms. Combined3.68x median and2.50x totalCPU
+improvement; p95 1852.783->842.254ms; latermax1962.532->1214.989ms. M50shared
+max is worse than M50legacy1095.152ms, so avoid per-solve speedguarantees.
+Hostload>18; allvalues scoped tocurrentpaired replays, not originalSCP comparison.
+All100/50 derivative checksPASS. Physicalmodel/defaultbounds/epsilon/delta/
+objective/tolerance remain unchanged. Sharedsolver and CTCSinterface untouched.
+Retained recommendation is --substeps50 --flow-cache shared. Reference defaults
+remain100/legacy for reproducibility. P14mu.1 deferred; notneeded for this
+verifiedprofile and notclaimed as a successful experiment. Benchmarkdriver
+adds pairedsavedrequest mode and CPUtime field, no publicROS interfacechange.
+Speedreport and CSV/JSON saved, sourcehashes/snapshots verified exact forP15/P16.
+Landingrepair remains PAUSED. This task changes only the originalpaperbenchmark.
+Finalverification: single-target sequential buildPASS; RK100/RK50 existing
+finite-differencechecksPASS;18 independent model/audit regression testsPASS;
+Pythoncompile andgitdiffchecksPASS. RetainedlocalOCP cache commit3a962c5a.
+No scenario/build/server processes from this task remain running.

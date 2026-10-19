@@ -93,6 +93,19 @@ MPC protocol around the C++ OCP), and solver-independent `common.py` (physical
 model/replay/audit). The complete DDP OCP is one solver-repository file:
 `problem_examples/uzun2024_ctcs_mpc.cpp`.
 
+## Faster DDP CTCS profile
+
+Verified profile: `--substeps 50 --flow-cache shared`. Complete30s MPC and
+full retained-request parity checks preserve all15 converged solves, zero
+observed physical violation and the unchanged integral budget. Current paired
+replay median improves826ms→224ms; total solver CPU improves2.50×. See
+[RESULTS.md](RESULTS.md) for timing scope, residuals and rejected20-step case.
+Reference defaults remain100/legacy. No shared solver algorithm changed.
+
+```bash
+python ddp.py --reuse-solver --substeps 50 --flow-cache shared --output-dir NEW_FAST_CTCS
+```
+
 ## Reproduction
 
 Use `/home/lab/miniforge3/envs/openscvx/bin/python` and run campaigns sequentially.

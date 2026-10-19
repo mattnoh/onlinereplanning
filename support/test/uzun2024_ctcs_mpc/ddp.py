@@ -24,7 +24,8 @@ manifest and exit code 3 rather than silently run as ZOH.
 
 The SCP-only shared flags (--penalty, --prox, --iterations) are accepted for CLI
 parity and recorded as unused; ALIPDDP iterates to its own termination, capped by
---ddp-max-iter.  See DDP_IMPLEMENTATION.md.
+--ddp-max-iter. See README.md. ``--replay-saved CAMPAIGN`` compares legacy
+and shared flow caches on the exact saved retained-MPC request sequence.
 """
 from __future__ import annotations
 
@@ -35,6 +36,7 @@ import json
 import platform
 import os
 import select
+import shlex
 import subprocess
 import sys
 import time
@@ -153,7 +155,7 @@ def solve_horizon(args, sdir, root, tc, mask, seed_X, seed_U, roll_from):
            "--N", str(args.nodes - 1), "--dt", f"{args.horizon / (args.nodes - 1):.17g}",
            "--substeps", str(args.substeps), "--eps", f"{args.epsilon:.17g}",
            "--delta", f"{args.delta:.17g}", "--umax", f"{args.umax:.17g}", "--cd", f"{common.C_D:.17g}",
-           "--constraint-mode", args.constraint_mode,
+           "--constraint-mode", args.constraint_mode, "--flow-cache", args.flow_cache,
            "--hold", "zoh", "--shooting", args.shooting, "--cost-hessian", args.cost_hessian,
            "--max-iter", str(args.ddp_max_iter), "--tol", f"{args.ddp_tol:.17g}",
            "--audit-step", f"{args.audit_step:.17g}",
@@ -359,7 +361,7 @@ def run(args, out):
             d, s = diag["diagnostics"], diag["solver"]
             rec.update({
                 "termination": s["termination"], "used_update_problem": s.get("used_update_problem", False), "solver_iterations": s["iterations"],
-                "solver_seconds": s["seconds"], "solver_cost": s["cost"],
+                "solver_seconds": s["seconds"], "solver_cpu_seconds": s.get("cpu_seconds"), "solver_cost": s["cost"],
                 "primal_error": s["primal_error"], "optimality_error": s["optimality_error"],
                 "fddp_gap_error": s["fddp_gap_error"],
                 "integrated_cost": d["integrated_cost"], "root_defect_inf": d["root_defect_inf"],
@@ -523,6 +525,103 @@ def run(args, out):
     return summary
 
 
+def replay_saved(args, out):
+    """Paired cache benchmark on a complete saved retained-MPC request sequence.
+
+    Solve sequentially, alternating pair order, with independent retained
+    solvers. Reuse the original measured roots and shifted seeds verbatim.
+    Full trajectory parity transfers the existing independent plant audits;
+    no newly integrated plant or real-time performance claim is made here.
+    """
+    source = args.replay_saved.resolve()
+    source_summary = json.loads((source / "summary.json").read_text())
+    commands = sorted((source / "solves").glob("solve_*/command.txt"))
+    if not commands:
+        raise ValueError(f"no saved MPC requests under {source}")
+    (out / "config.json").write_text(json.dumps(provenance(args), indent=2, default=str))
+    rows, sessions, failure = [], {}, None
+    try:
+        for mode in ("legacy", "shared"):
+            d = out / mode
+            d.mkdir()
+            sessions[mode] = SolverSession(args.binary, d)
+        for i, saved in enumerate(commands):
+            reference = np.genfromtxt(saved.parent / "traj.csv", delimiter=",", names=True)
+            orig_diag = json.loads((saved.parent / "diag.json").read_text())
+            order = ("legacy", "shared") if i % 2 == 0 else ("shared", "legacy")
+            for mode in order:
+                d = out / mode / saved.parent.name
+                d.mkdir()
+                cmd = shlex.split(saved.read_text())[1:]
+                def option(flag, value):
+                    if flag in cmd:
+                        cmd[cmd.index(flag) + 1] = str(value)
+                    else:
+                        cmd.extend([flag, str(value)])
+                option("--flow-cache", mode)
+                for flag, filename in (("--out-traj", "traj.csv"), ("--out-json", "diag.json"),
+                                       ("--out-seed", "seed_used.csv")):
+                    option(flag, (d / filename).resolve())
+                (d / "request.json").write_text(json.dumps(cmd, indent=2))
+                rc, stdout = sessions[mode].solve(cmd, args.solve_timeout)
+                (d / "stdout.txt").write_text(stdout)
+                diag = json.loads((d / "diag.json").read_text())
+                actual = np.genfromtxt(d / "traj.csv", delimiter=",", names=True)
+                if reference.dtype.names != actual.dtype.names or reference.shape != actual.shape:
+                    raise RuntimeError(f"{mode} {i}: trajectory schema changed")
+                ref = np.column_stack([reference[n] for n in reference.dtype.names])
+                got = np.column_stack([actual[n] for n in actual.dtype.names])
+                same_nan = np.array_equal(np.isnan(ref), np.isnan(got))
+                finite = np.isfinite(ref) & np.isfinite(got)
+                difference = float(np.max(abs(ref[finite] - got[finite])))
+                solver = diag["solver"]
+                parity = (same_nan and difference <= 1e-8
+                          and solver["iterations"] == orig_diag["solver"]["iterations"]
+                          and solver["termination"] == orig_diag["solver"]["termination"])
+                rows.append({"solve": i, "mode": mode, "returncode": rc,
+                    "solver_seconds": solver["seconds"], "solver_cpu_seconds": solver.get("cpu_seconds"),
+                    "iterations": solver["iterations"], "termination": solver["termination"],
+                    "used_update_problem": solver["used_update_problem"],
+                    "trajectory_max_abs_diff": difference, "reference_parity": parity})
+                if rc != 0 or not parity:
+                    raise RuntimeError(f"{mode} solve{i}: failed solve or saved trajectory/iteration parity")
+            print(f"cache pair {i}: legacy/shared match saved trajectory and iterations", flush=True)
+    except Exception:
+        failure = traceback.format_exc()
+        (out / "error.txt").write_text(failure)
+    finally:
+        for session in sessions.values():
+            session.close()
+        write_csv(out / "solves.csv", rows)
+    stats = {}
+    for mode in ("legacy", "shared"):
+        rr = sorted([r for r in rows if r["mode"] == mode], key=lambda r: r["solve"])
+        stats[mode] = {}
+        for key in ("solver_seconds", "solver_cpu_seconds"):
+            v = np.array([r[key] for r in rr[1:] if r[key] is not None], float)
+            if v.size:
+                stats[mode][key] = {"median": float(np.median(v)), "p95": float(np.percentile(v, 95)),
+                                    "max": float(v.max()), "total_all": sum(r[key] for r in rr)}
+    ratios = {key: stats["legacy"][key]["median"] / stats["shared"][key]["median"]
+              for key in ("solver_seconds", "solver_cpu_seconds")
+              if key in stats["legacy"] and key in stats["shared"]}
+    summary = {"status": "pass" if failure is None and len(rows) == 2 * len(commands) else "fail",
+        "mode": "saved_retained_mpc_cache_replay", "source": str(source), "requests": len(commands),
+        "all_trajectories_and_iterations_match": all(r["reference_parity"] for r in rows),
+        "source_status": source_summary.get("status"),
+        "source_physical_execution_pass": source_summary.get("physical_execution_pass"),
+        "source_integral_budgets_met": source_summary.get("closed_loop", {}).get("interval_budgets_met"),
+        "source_summary_sha256": sha(source / "summary.json"),
+        "source_dense_sha256": sha(source / "closed_loop_dense.npz"),
+        "audits_transferred_by_trajectory_parity": failure is None,
+        "max_trajectory_difference": max((r["trajectory_max_abs_diff"] for r in rows), default=None),
+        "timing_excludes_first_solve_and_independent_audits": True,
+        "timing": stats, "median_speedup_legacy_over_shared": ratios}
+    (out / "summary.json").write_text(json.dumps(summary, indent=2))
+    print("CACHE_REPLAY " + json.dumps(summary), flush=True)
+    return summary
+
+
 def parse(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--output-dir", required=True, type=Path)
@@ -547,6 +646,9 @@ def parse(argv=None):
     ap.add_argument("--tracking-tol", type=float, default=1.)
     ap.add_argument("--reuse-solver", action="store_true", help="retain the ALIPDDP instance and call production updateProblem between horizons")
     ap.add_argument("--binary", type=Path, default=DEFAULT_BINARY)
+    ap.add_argument("--replay-saved", type=Path, help="paired legacy/shared cache replay of saved retained MPC requests; no plant re-integration")
+    ap.add_argument("--flow-cache", choices=["legacy", "shared"], default="legacy",
+                    help="exact per-stage dynamics/cost flow reuse; legacy preserves the reference cache layout")
     ap.add_argument("--substeps", type=int, default=100, help="RK4 substeps per interval (assumption)")
     ap.add_argument("--shooting", choices=["ms", "ss"], default="ms")
     ap.add_argument("--cost-hessian", choices=["gn", "fd"], default="gn")
@@ -567,6 +669,9 @@ def main(argv=None):
     if out.exists() and any(out.iterdir()):
         sys.exit(f"output dir {out} exists and is not empty")
     out.mkdir(parents=True, exist_ok=True)
+    if args.replay_saved is not None:
+        summary = replay_saved(args, out)
+        sys.exit(0 if summary["status"] == "pass" else 1)
     if args.hold != "ZOH":
         msg = ("hold FOH unsupported by the ALIPDDP OCP (no control-endpoint memory); "
                "rerun with --hold ZOH. Not emulated.")

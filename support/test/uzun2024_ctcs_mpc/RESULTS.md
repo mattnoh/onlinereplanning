@@ -104,6 +104,74 @@ optimizer superiority. Unsafe nodal tracking scores do not count as a safety
 performance improvement. These original-obstacle results do not validate the
 stressed landing MPC, whose repair remains paused at the user's request.
 
+## Verified faster DDP CTCS profile
+
+Use **`--substeps 50 --flow-cache shared`**. The horizon remains8s with17
+nodes, dt=.5s, ZOH and K4. Only RK4 integration inside each interval is reduced
+from100 to50 substeps (5ms to10ms); the MPC/node grid is unchanged. Physical
+limits, obstacle tightening.05, epsilon1e-6, objective and solver tolerance1e-6
+remain fixed. No shared solver algorithm or CTCS-row implementation changed.
+The reference defaults remain100 substeps and legacy cache for reproducibility.
+
+The 50-substep campaign P13 completed all15 MPC solves with `Optimal Solution`,
+zero physical violation in the independent1ms replay, max executed integral
+9.999053652e-7, max future-interval independent integral9.999053746e-7,
+tracking.250056094m (100-step reference.250057624m), and max executed
+prediction/plant error1.75923e-8. The max independently audited interval state
+error is1.22306e-8; model/root defects are zero. Integral quadrature discrepancy
+can reach4.50e-10; exact quadrature equality is not claimed, but the independently
+evaluated integral remains within the unchanged budget.
+
+The local OCP now shares one `FlowCache` per stage between dynamics and cost.
+Previously one dynamics cache thrashed across all stages, and cost repeated its
+flow/sensitivity calculation. Shared cache uses exactly the same RK4 formulas;
+the existing folded CTCS interface/integration remains intact. Its ownership
+is restricted to one stage of an immutable horizon problem.
+
+To isolate this from host load, P15/P16 replay each saved 15-request measured-
+root/shift/tail sequence in two independent retained solvers, alternating
+legacy/shared order and solving sequentially. Every returned trajectory column
+and iteration/termination matches the original audited run **exactly (max
+absolute difference0)** at both100 and50 substeps. Original independent plant
+and integral audits therefore transfer by full trajectory parity. These are
+saved-MPC request replays, not a second plant integration or a latency-aware MPC
+validation. Process CPU time is recorded separately from wall time.
+
+| RK4 substeps | Cache | Later median [ms] | Later p95 [ms] | Later max [ms] | Total solver CPU [s] |
+|---:|---|---:|---:|---:|---:|
+| 100 | legacy | 825.985 | 1852.783 | 1962.532 | 11.449 |
+| 100 | shared | 617.586 | 1418.526 | 1427.539 | 8.263 |
+| 50 | legacy | 319.005 | 952.831 | 1095.152 | 5.423 |
+| 50 | shared | **224.404** | **842.254** | 1214.989 | **4.586** |
+
+The combined profile is3.68× faster by measured warm median and2.50× by total
+solver CPU time in these runs. Cache alone improves median1.34× at100 and1.42×
+at50. The 50-step shared maximum is worse than its legacy maximum, so no
+per-solve speed guarantee is implied. Background host load rose above18 during
+this task. These paired replay times must not be directly mixed with earlier
+SCP/DDP timing rows collected under another load. First solve is excluded from
+median/p95/max; audits, initialization and IPC are outside the solver timer.
+This improvement applies to the paper obstacle benchmark; landing remains paused.
+
+**Rejected candidate:**20 RK4 substeps completed15/15 Optimal and zero physical
+violation, but independent executed integral reached1.006926698e-6 (.6927%
+over the fixed budget). It is not recommended. No budget/tightening was relaxed
+to call it a pass. Initial-mu tuning was considered but not run; it is not part
+of the retained profile.
+
+[Speed statistics JSON](../../../logs/uzun2024_ctcs_mpc/ddp_speed_comparison.json)
+([CSV](../../../logs/uzun2024_ctcs_mpc/ddp_speed_comparison.csv));
+[100-step parity/timing](../../../logs/uzun2024_ctcs_mpc/P15_cache_replay_rk100/summary.json),
+[50-step parity/timing](../../../logs/uzun2024_ctcs_mpc/P16_cache_replay_rk50/summary.json).
+Source snapshots/hashes, per-solve requests, returned plans, diagnostics and
+both complete dense-audited campaigns are saved with the runs.
+
+```bash
+python ddp.py --constraint-mode ctcs --reuse-solver --substeps 50 --flow-cache shared --output-dir NEW_FAST_CTCS
+python ddp.py --replay-saved ../../../logs/uzun2024_ctcs_mpc/P7_ddp_zoh_reuse --output-dir NEW_CACHE100_PAIR
+python ddp.py --replay-saved ../../../logs/uzun2024_ctcs_mpc/P13_ddp_ctcs_rk50 --output-dir NEW_CACHE50_PAIR
+```
+
 ## Executed results
 
 Physical constraint is `g_i=1-norm(S*(r-c_i))<=0`, over **all five obstacles**.
