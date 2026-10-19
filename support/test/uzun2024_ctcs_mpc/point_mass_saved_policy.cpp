@@ -2,6 +2,16 @@
 #define main historical_optimizer_main
 #include POINT_MASS_DIAGNOSTIC_SOURCE
 #undef main
+#include <type_traits>
+#include <utility>
+
+template<class Row, class = void> struct HasCurvature : std::false_type {};
+template<class Row> struct HasCurvature<Row, std::void_t<decltype(std::declval<Row>().lagrangianHessian(
+    std::declval<Vec>(),std::declval<Vec>(),std::declval<Vec>()))>> : std::true_type {};
+template<class Row> Mat unitCurvature(Row& row,const Vec& x,const Vec& u) {
+    if constexpr (HasCurvature<Row>::value) return row.lagrangianHessian(x,u,Vec::Ones(1));
+    else return Mat::Zero(x.size()+u.size(),x.size()+u.size());
+}
 
 int main() {
     std::cout << std::setprecision(17);
@@ -36,6 +46,16 @@ int main() {
             if(j<6) {xp(j)+=h; xm(j)-=h;} else {up(j-6)+=h; um(j-6)-=h;}
             if(j) std::cout << ',';
             std::cout << (row->c(xp,up)(0)-row->c(xm,um)(0))/(2*h);
+        }
+        const Mat H=unitCurvature(*row,x,controls);
+        std::cout << "],\"has_constraint_curvature\":"
+                  << (HasCurvature<StcStageConstraint<Scalar>>::value ? "true" : "false")
+                  << ",\"unit_multiplier_hessian\":[";
+        for(int i=0;i<H.rows();++i) {
+            if(i) std::cout << ',';
+            std::cout << '[';
+            for(int j=0;j<H.cols();++j) {if(j)std::cout << ',';std::cout << H(i,j);}
+            std::cout << ']';
         }
         std::cout << "]}" << std::endl;
     }

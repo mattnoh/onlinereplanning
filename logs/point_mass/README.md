@@ -1,5 +1,15 @@
 # Point-mass evidence
 
+## Optimization research
+
+[Direct answer and source evidence](../../support/test/uzun2024_ctcs_mpc/CTCS_OPTIMIZATION_DIFFERENCES.md) ·
+[local experiments](audits/optimization_structure_20261020_v2/REPORT.md) ·
+[raw C++/convex-subproblem results](audits/optimization_structure_20261020_v2/results.json).
+This separates exact accumulator equivalence from curvature, proximal metrics,
+finite virtual penalties and stopping differences. It does not claim an
+end-to-end speed or robustness ranking.
+
+
 ## Current open-loop 2 × 2 comparison
 
 [Free-time PNG](open_loop/point_mass_2x2_free.png) · [PDF](open_loop/point_mass_2x2_free.pdf)

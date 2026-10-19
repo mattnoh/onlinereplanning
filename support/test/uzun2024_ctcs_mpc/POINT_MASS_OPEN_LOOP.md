@@ -1,5 +1,47 @@
 # Local point-mass open-loop 2 × 2 comparison
 
+## Optimization differences: direct research update (2026-10-20)
+
+The original question concerns **optimization differences**, and the earlier
+certificate work addressed the numerical-enforcement prerequisite. The new
+[optimization report](CTCS_OPTIMIZATION_DIFFERENCES.md) now isolates optimization
+mechanisms using actual C++ row/curvature evaluators from both DDP revisions,
+source-extracted SCP stopping metrics and controlled paired convex subproblems.
+[Raw results](../../../logs/point_mass/audits/optimization_structure_20261020_v2/results.json),
+[research evidence](../../../logs/point_mass/audits/optimization_structure_20261020_v2/REPORT.md)
+and source/binary/build/test hashes are kept together.
+
+The concrete progress is:
+
+- Exact accumulator condensation preserves the local physical step when every
+  objective and constraint term is retained (nine paired problems; largest
+  step difference 7.3e-12).
+- SCP's accumulator proximal cost becomes an additional metric on physical
+  steps after condensation. Its virtual-control penalty permits a hard
+  increment row to coexist with an over-budget physical integral model.
+  Both effects were isolated with matched local problems, including consistent
+  density/weight scaling. They are not effects of exact folding itself.
+- Twelve actual C++ comparisons have identical historical/current values and
+  Jacobians. The current CTCS GN contribution has rank 3 in the active test,
+  including two directions orthogonal to the integral gradient; the historical
+  scalar-row slack contribution alone has rank at most one. This isolates a
+  revision-dependent optimization difference, not a change in integral meaning.
+- Both formulations inherit the physical integral's weak gradient near grazing.
+  Measured integral/gradient exponents are approximately 2.5/1.5. Adding an
+  accumulator identity derivative does not remove this reduced physical flatness.
+- A pinned SCP implementation discrepancy was reproduced: CVXPY nu is already
+  scaled, but J_vc applies the state scale again. A controlled S=10 case yields
+  J_vc=0.01 instead of the once-scaled 0.1. This affects physical states with
+  nonunit scales; the user accumulator's scale is one. It has not been attributed
+  as the cause of any particular historical run, and no upstream fix was made.
+
+The report distinguishes these measured mechanisms from hypotheses about
+convergence speed. A controlled full-solver performance ranking is still open.
+All 32 tests passed. Only the read-only evaluator and research tooling were
+extended; no trajectory optimizer campaigns, controller changes, production
+quadrature changes or benchmark-pool edits were made.
+
+
 ## Certified folded/lifted review (2026-10-20)
 
 The saved-policy extension is implemented and run on all 40 frozen selections.
