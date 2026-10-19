@@ -830,3 +830,14 @@ P8 strongest intersample witness is from an Optimal Solution at solve6,
 t=[12,12.5]: endpoints g=-.05000048,-.05000041, peak .6070366852.
 Thus the failure is not explained by the three nonconverged solves; retain
 their labels and report the converged witness separately.
+
+P9 complete30s: all15 Optimal Solution, node physicalmax=-3.9763e-7,
+dense max.6072811035, violation2.42926547s, max geometrypenetration.381092m,
+max prediction/plant discrepancy7.10e-12. Nodal primal passes; physical dense
+audit FAIL from five between-node intervals. No optimizerfailure needed.
+Plots generated from saved dense data and visually inspected: overall
+trajectory/g/tracking/integral and nodal closeups, PNG/PDF plus exactseries
+CSV/JSON. RESULTS.md records both contrasts and convergence caveats.
+Previous explanation-only user question was NO PROGRESS; resumed by confirming
+P9 terminal state and finishing requested artifacts, not restarting runs.
+Active landing goal remains incomplete.
