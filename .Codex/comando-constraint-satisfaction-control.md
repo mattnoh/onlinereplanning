@@ -1189,3 +1189,17 @@ step/linearizedVC/VB, not original independent replay defects. No isolated
 root-cause claim for every pool failure. Full result in POINT_MASS_OPEN_LOOP.md
 and ignored logs/point_mass_free_scp_review_20261019.json. Old snapshot stays
 immutable. No landing work or solver changes.
+
+
+## Corrected four-arm plots delivered — 2026-10-19
+User requests redo after threshold reconciliation. Regenerated both fixed and
+free figures from saved policies at SCP gap1e-6, original DDP selections1e-8
+explicit in footer. No optimizer runs. Preserve original local style and prior
+snapshots. New snapshot logs/point_mass_open_loop_2x2_gap1e6_20261019_v2:40
+exact saved-policy replays,394 SHA256-verified files, bothfigures visualPASS.
+Free SCP CTCS allfive meshes pass physical/budget/base audit; now includes
+completed N100 policy (clearance4.94mm, I0, gap6.76e-9), separate live sweep
+ongoing. Free stageN100 no accepted saved run. Heatmap clearly labeled worst
+obstacle/glide clearance; table obstacle-only, timing limitations explicit.
+Known free DDP CTCS N6 budget failure remains marked. No safety bounds,
+tightening, epsilon, optimizer or landing changes.

@@ -1,5 +1,30 @@
 # Local point-mass open-loop 2 × 2 comparison
 
+## Updated plots at the required 1e-6 dynamics threshold
+
+[Free-time PNG](../../../logs/point_mass_open_loop_2x2_gap1e6_20261019_v2/point_mass_2x2_free.png)
+([PDF](../../../logs/point_mass_open_loop_2x2_gap1e6_20261019_v2/point_mass_2x2_free.pdf));
+[fixed-time PNG](../../../logs/point_mass_open_loop_2x2_gap1e6_20261019_v2/point_mass_2x2_fixed.png)
+([PDF](../../../logs/point_mass_open_loop_2x2_gap1e6_20261019_v2/point_mass_2x2_fixed.pdf)).
+
+Regenerated with `--ox-gap-tol 1e-6 --plot-snapshot NEW_DIRECTORY`, keeping the
+original local figure style. Both figures now print the selection threshold.
+The mesh panel explicitly reports the worse of obstacle and glide clearance;
+the highlighted policy table reports obstacle clearance. Consequently stage
+heatmap numbers can differ from an obstacle-only summary table.
+
+The completed-results snapshot replays 40 saved policies. All five selected
+free-time SCP CTCS meshes N=100,40,20,10,6 pass the independent physical,
+integral-budget and base checks. A newly completed N=100 CTCS run is included
+(clearance about 4.94 mm, zero tightened violation integral, dynamics gap
+6.76e-9). The separate live N=100 sweep remains ongoing; the stage arm has
+no accepted saved run in this snapshot. No optimizer was launched here.
+Earlier plots remain intact. Both final figures were visually inspected;
+all 394 inventoried files were SHA256-verified. The versioned mirror and local
+compare_fair.py are identical. A separate local four_arm_review_gap1e6_20261019
+symlink points to the corrected snapshot.
+
+
 ## Current interpretation: reconcile Claude's table (2026-10-19)
 
 **Free-time SCP CTCS works for the tested N=40,20,10,6 cases under the original
@@ -131,7 +156,7 @@ Use a new output directory: snapshots refuse to overwrite existing evidence.
 ```bash
 /home/lab/miniforge3/envs/openscvx/bin/python \
   support/test/uzun2024_ctcs_mpc/point_mass_compare_fair.py \
-  --plot-snapshot /absolute/path/to/NEW_DIRECTORY
+  --ox-gap-tol 1e-6 --plot-snapshot /absolute/path/to/NEW_DIRECTORY
 ```
 
 This command only selects, independently audits and plots saved policies.

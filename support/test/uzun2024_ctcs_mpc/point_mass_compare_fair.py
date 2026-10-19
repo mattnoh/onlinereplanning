@@ -473,9 +473,9 @@ def plot_snapshot(destination, gap_tol):
             for j in range(len(MESHES)):
                 rec = cells.get((i, j))
                 if rec is None:
-                    text = "not run"
+                    text = "no saved\nresult"
                 elif not rec["accepted_by_existing_selector"]:
-                    text = "no accepted\nsetting"
+                    text = "no accepted\nsaved run"
                 else:
                     cl = -max(rec["exact_penetration_m"], rec["exact_glideslope_excess_m"])*1000
                     text = f'{cl:+.2f} mm\n{rec["solve_ms"]:.0f} ms'
@@ -485,8 +485,8 @@ def plot_snapshot(destination, gap_tol):
         axmesh.set_xticks(range(len(MESHES)), [f"N={n}" for n in MESHES], fontsize=12)
         axmesh.set_yticks(range(4), ["DDP stage", "DDP CTCS", "SCP stage", "SCP CTCS"], fontsize=12)
         axmesh.tick_params(length=0)
-        axmesh.set_title("(c) worst path clearance and saved solve time", loc="left", fontsize=15)
-        table = axtable.table(cellText=table_rows, colLabels=[f"N={mesh}", "clear. [mm]", "budget", "cost", "solve [ms]"],
+        axmesh.set_title("(c) worst obstacle/glide clearance and saved solve time", loc="left", fontsize=15)
+        table = axtable.table(cellText=table_rows, colLabels=[f"N={mesh}", "obs. [mm]", "budget", "cost", "solve [ms]"],
                               cellLoc="center", colWidths=[.28, .20, .14, .21, .17], bbox=[0., .36, 1., .59])
         table.auto_set_font_size(False); table.set_fontsize(11)
         for (rr, cc), cell in table.get_celld().items():
@@ -501,8 +501,9 @@ def plot_snapshot(destination, gap_tol):
                    fontsize=12, frameon=True, edgecolor=".7")
         fig.suptitle(f'Point mass, {"fixed final time = 4 s" if mode == "fixed" else "free final time"}: DDP / SCP × stage / CTCS',
                      y=.99, fontsize=19)
-        fig.text(.095, .025, "Exact replay from the shared initial state; ≤1 ms plotted spacing. Grey = obstacle interior; red cells = physical violation.\n"
-                 "Selected settings and CTCS budgets/margins vary by cell; source snapshots and raw audits accompany this figure.", fontsize=11)
+        fig.text(.095, .025,
+                 f"SCP selection: dynamics gap ≤ {gap_tol:g}; saved DDP selections: ≤ 1e-8. Exact replay; ≤1 ms plotted spacing.\n"
+                 "Completed saved runs only; campaigns may continue. Seeds/tuning differ. Grey = obstacle interior; red cells = physical violation.", fontsize=11)
         for ext in ("png", "pdf"):
             fig.savefig(out / f"point_mass_2x2_{mode}.{ext}", dpi=180, bbox_inches="tight")
         plt.close(fig)
