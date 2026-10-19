@@ -153,6 +153,7 @@ def solve_horizon(args, sdir, root, tc, mask, seed_X, seed_U, roll_from):
            "--N", str(args.nodes - 1), "--dt", f"{args.horizon / (args.nodes - 1):.17g}",
            "--substeps", str(args.substeps), "--eps", f"{args.epsilon:.17g}",
            "--delta", f"{args.delta:.17g}", "--umax", f"{args.umax:.17g}", "--cd", f"{common.C_D:.17g}",
+           "--constraint-mode", args.constraint_mode,
            "--hold", "zoh", "--shooting", args.shooting, "--cost-hessian", args.cost_hessian,
            "--max-iter", str(args.ddp_max_iter), "--tol", f"{args.ddp_tol:.17g}",
            "--audit-step", f"{args.audit_step:.17g}",
@@ -307,7 +308,8 @@ def run(args, out):
     for source in (Path(__file__), Path(common.__file__)):
         (source_dir / source.name).write_bytes(source.read_bytes())
     (source_dir / CPP_SOURCE.name).write_bytes(CPP_SOURCE.read_bytes())
-    summary = {"status": "fail", "stage": "startup", "solves_completed": 0}
+    summary = {"status": "fail", "stage": "startup", "solves_completed": 0,
+               "constraint_mode": args.constraint_mode, "interval_budget_enforced": args.constraint_mode == "ctcs"}
     solves, plan_rows, exec_rows = [], [], []
     arrays = {"X": [], "U": [], "guess_X": [], "guess_U": [], "tc": [], "mask": [], "root": []}
     dense = []
@@ -362,6 +364,8 @@ def run(args, out):
                 "fddp_gap_error": s["fddp_gap_error"],
                 "integrated_cost": d["integrated_cost"], "root_defect_inf": d["root_defect_inf"],
                 "model_defect_max": d["max_dynamics_defect_inf"], "ctcs_row_max": d["max_ctcs_row"],
+                "modeled_path_max": d["max_modeled_path_constraint"],
+                "modeled_nodal_g_masked": d["max_nodal_physical_g_masked"],
                 "solver_y_increment_max": d["max_interval_integral"], "max_u_norm": d["max_unorm"],
                 "seed_defect_inf": d["seed_defect_inf"], "seed_root_shift_inf": d["seed_root_shift_inf"],
             })
@@ -393,12 +397,15 @@ def run(args, out):
             rec["certified"] = bool(rec["defects_ok"] and rec["ms_budget_met"]
                                     and rec["ss_max_physical_excess"] <= args.excess_tol
                                     and rec["u_norm_excess"] <= 1e-8)
+            if args.constraint_mode == "stage":
+                rec["certified"] = bool(rec["defects_ok"] and d["max_modeled_path_constraint"] <= args.ddp_tol
+                                        and rec["u_norm_excess"] <= args.ddp_tol)
             rec["status"] = classify(diag, rec, args)
 
             # Match production's primal acceptance: stationarity is diagnostic,
             # but an infeasible returned plan must not be applied as a new policy.
             primal_error = max(d["max_dynamics_defect_inf"], d["root_defect_inf"],
-                max(0., d["max_unorm_excess"]), max(0., d["max_ctcs_row"] or 0.))
+                max(0., d["max_unorm_excess"]), max(0., d["max_modeled_path_constraint"]))
             rec["returned_primal_error"] = primal_error
             if primal_error > args.ddp_tol:
                 rec["status"] = "primal_infeasible"
@@ -422,6 +429,8 @@ def run(args, out):
                     "integral": float(rep["integral"]), "cost": float(rep["cost"]),
                     "budget_met": bool(rep["integral"] <= args.epsilon * (1 + 1e-6)),
                     "max_physical_excess": float(rep["max_physical_excess"]),
+                    "node_start_g_max": float(np.max(common.obstacle_g(rep["start"][:2]))),
+                    "node_end_g_max": float(np.max(common.obstacle_g(end[:2]))),
                     "max_g": float(rep["max_g"]), "max_g_obstacle": int(rep["max_g_obstacle"]),
                     "violation_duration": float(rep["violation_duration"]),
                     "min_clearance": float(rep["min_clearance"]),
@@ -443,7 +452,7 @@ def run(args, out):
             summary["solves_completed"] = i + 1
             print(f"[solve {i:2d}] tc={tc:6.2f} mask={rec['mask']} {rec['status']} "
                   f"term='{rec['termination']}' it={rec['solver_iterations']} J={rec['integrated_cost']:.4g} "
-                  f"row={rec['ctcs_row_max'] if rec['ctcs_row_max'] is not None else float('nan'):.2e} "
+                  f"path={rec['modeled_path_max']:.2e} "
                   f"defect={rec['model_defect_max']:.2e} ms_int={ms_int:.2e} "
                   f"exec_excess={rec['executed_max_physical_excess']:.3e} cert={rec['certified']} "
                   f"{rec['solver_seconds']:.2f}s", flush=True)
@@ -473,6 +482,7 @@ def run(args, out):
                 summary["dense_save_error"] = repr(e)
         closed = {
             "common_summarize": common.summarize(executed),
+            "max_executed_node_g": max((max(r["node_start_g_max"], r["node_end_g_max"]) for r in exec_rows), default=None),
             "executed_intervals": len(exec_rows),
             "max_physical_excess": max((r["max_physical_excess"] for r in exec_rows), default=None),
             "violation_duration_total": sum(r["violation_duration"] for r in exec_rows),
@@ -500,10 +510,10 @@ def run(args, out):
         summary["solver_termination_gate_pass"] = all(s.get("status") in good for s in solves)
         ok = (summary["stage"] == "done" and bool(exec_rows)
               and summary["physical_execution_pass"] and summary["useful_tracking_pass"]
-              and closed["interval_budgets_met"])
+              and (args.constraint_mode == "stage" or closed["interval_budgets_met"]))
         summary["status"] = "pass" if ok else "fail"
         summary["pass_definition"] = ("Complete synchronous execution, finite returned plans, physical/input limits, "
-            "executed interval budgets, and mean tracking error <= tracking_tol. Solver termination and "
+            "executed interval budgets when CTCS is enforced, and mean tracking error <= tracking_tol. Solver termination and "
             "future plan feasibility are separate diagnostics, not a perfect optimality requirement.")
         (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
         print("DDP_SUMMARY " + json.dumps({k: summary.get(k) for k in
@@ -516,6 +526,8 @@ def run(args, out):
 def parse(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--output-dir", required=True, type=Path)
+    ap.add_argument("--constraint-mode", choices=["ctcs", "stage"], default="ctcs",
+                    help="CTCS interval integral or ordinary nodal path constraints including terminal node")
     ap.add_argument("--horizon", type=float, default=8.)
     ap.add_argument("--nodes", type=int, default=17)
     ap.add_argument("--mpc-intervals", type=int, default=4, help="K intervals applied per solve")

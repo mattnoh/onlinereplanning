@@ -788,3 +788,45 @@ tests:18/18 PASS (model_tests.log); canonical SCP/DDP CLI imports and Python
 compilation PASS. No shared alipddp/ or problem_maker/ diffs. All scenario
 processes and the retained solver server are stopped. Source+results summary
 retained in support/test/uzun2024_ctcs_mpc/README.md and logs comparison.json.
+
+## Requested node-vs-continuous comparison (2026-10-19)
+
+Current results are to be written and plotted, with an ordinary DDP stage-only
+comparator. Outcome is measured, never manufactured. Parallel Claude worker
+owns plot_comparison.py; parent owns nodal OCP mode and report. All builds and
+scenarios remain sequential. Existing paper CTCS evidence is preserved.
+
+P8 hypothesis: replacing interval CTCS by ordinary inequalities at every node,
+including terminal, may permit between-node violations even with delta=.05.
+Single intended change from P7: enforcement location (stage-only), preserving
+root, reference, horizon/grid, cost, bounds, sensing, tightening and solver.
+Pass for a demonstrated intersample counterexample: all enforced selected
+node rows/primal gaps<=1e-6, yet independent executed dense max g>1e-6.
+A dense-safe result will be reported as such. Complete30s, retained solver,
+M100, max300 iterations, same control delivery. Integral remains diagnostic
+only in stage mode and is not misclassified as a stage constraint.
+
+P9 hypothesis: paper usual nodal baseline g<=0 without CTCS tightening permits
+physical intersample penetration. Relative to P8 change only delta .05->0;
+label the margin difference explicitly rather than attributing everything to
+optimizer choice. Same demonstration criteria; do not coarsen grid, move
+obstacles or otherwise force a failure. Plot all cases and selected nodes
+against the independent1ms trajectory, physical g separately from integral.
+
+P8 complete30s: node-feasible / dense-unsafe demonstrated. All15 returned
+plans have feasible enforced nodal rows and zero dynamics gaps;12/15 report
+Optimal Solution and3 Max Iteration (optimality not hidden). Executed maximum
+node physicalg=-.0500000010, dense peakg=.6070366852 at12.25236s,
+physical violation2.19815585s, geometric penetration max.381378m.
+Max prediction/plant deviation7.10e-12: zero-deviation intersample violation.
+CTCS same-tightening P7 remains physicalsafe. No physical limit/grid change.
+P9 now runs the explicitly labeled untightened usual nodal comparator.
+
+Goal-resume audit: previous turn is PROGRESS: paper SCP/DDP complete30s
+campaigns, retained state verified, committed sources922574d/d07d8d46.
+Active landing objective remains incomplete and is not redefined as the paper
+benchmark. Current user deliverable is node-vs-dense results and plots.
+P8 strongest intersample witness is from an Optimal Solution at solve6,
+t=[12,12.5]: endpoints g=-.05000048,-.05000041, peak .6070366852.
+Thus the failure is not explained by the three nonconverged solves; retain
+their labels and report the converged witness separately.

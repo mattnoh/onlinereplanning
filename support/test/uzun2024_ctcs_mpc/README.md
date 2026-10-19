@@ -127,3 +127,30 @@ Its near-budget integral agrees with independent SciPy to 1.12e-10, flow to
 python -m unittest discover -s . -p test_common.py -v
 /home/lab/mavros_ws/build/comando_planner/alipddp/uzun2024_ctcs_mpc --check-derivatives --substeps 100
 ```
+
+## Nodal comparator and figures
+
+`ddp.py --constraint-mode stage` replaces the CTCS interval constraints with
+ordinary `g_i + delta <= 0` constraints at every selected stage and terminal
+node. It preserves the same dynamics, integrated objective, ZOH grid, sensing,
+initial state, limits, seeds and retained-solver lifecycle. The independent
+interval integrals remain diagnostics; they are not enforced in stage mode.
+
+The same-tightening comparator (`--delta .05`) is P8; an explicitly separate
+usual nodal baseline (`--delta 0`) is P9. The P8 run has feasible node rows
+throughout yet violates the physical obstacle constraints between nodes. Its
+worst interval [12,12.5] s is from a solve reporting `Optimal Solution`, so the
+intersample failure is not inferred from a failed optimization. Full results,
+convergence caveats, plots and commands are in [RESULTS.md](RESULTS.md).
+
+```bash
+python ddp.py --constraint-mode stage --delta .05 --reuse-solver --output-dir NEW_STAGE_005
+python ddp.py --constraint-mode stage --delta 0 --reuse-solver --output-dir NEW_STAGE_0
+python plot_comparison.py --output-dir ../../../logs/uzun2024_ctcs_mpc/comparison_plots
+```
+
+Figures are standalone PNG and PDF; their exact dense and node series plus
+statistics are exported as CSV/JSON. Physical `max_i g_i(t)`, nodal feasibility,
+and tightened integral feasibility are separate quantities. The DDP CTCS
+result continues to work on this benchmark; the demanding landing case remains
+unfixed and cannot be declared solved from these plots.
