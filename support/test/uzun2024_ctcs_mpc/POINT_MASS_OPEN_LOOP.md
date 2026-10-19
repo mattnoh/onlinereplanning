@@ -1,5 +1,33 @@
 # Local point-mass open-loop 2 × 2 comparison
 
+## Direct comparison with the paper’s non-augmented method
+
+The primary [optimization report](CTCS_OPTIMIZATION_DIFFERENCES.md) now compares
+**Sections 5–5.1 of the local Elango PDF directly with our folded DDP**, rather
+than treating the paper as augmented-y only. Both impose interval-integral
+budgets without y. The paper-style reference uses an L1 penalty on the budget
+residual and a prox-linear subproblem; DDP uses explicit primal-dual slack/dual
+updates, CTCS curvature, a Riccati pass and its barrier/AL line search.
+
+A new isolated run uses the actual fixed-time 3D N=6 point-mass OCP, identical
+seed arrays and a shared 512-substep C++ CTCS map. The direct reference finishes
+with independently replayed integral/budget 0.77213 and objective
+4.004202520112. Original raw-row/current-GN DDP first becomes feasible at
+iteration 4 but returns over budget (188.76) at its iteration limit. Its log
+records 1155 control-SOC slack/dual fraction-to-boundary failures. A normalized
+DDP/GN-off research ablation succeeds with integral/budget 0.96782 and objective
+4.004202515041. The successful final policies also pass rational nominal-model
+path and integral certificates. This isolates solver/scaling/curvature
+interactions; it does not establish a universal method ranking.
+
+[Direct progress plot](../../../logs/point_mass/audits/direct_nonaug_n6_20261020_v3/direct_nonaug_progress_first200.png) ·
+[full traces and comparison](../../../logs/point_mass/audits/direct_nonaug_n6_20261020_v3/comparison.json) ·
+[DDP ablations](../../../logs/point_mass/audits/direct_nonaug_n6_20261020_v3/ablation_summary.json).
+All 36 tests pass. The older lifted-SCP study is preserved as a
+[supplement](CTCS_LIFTED_COMPARISON_SUPPLEMENT.md); it is not the answer to the
+paper’s non-augmented comparison.
+
+
 **Paper correction:** Elango et al. Section 5, equations (47)–(49), already
 provides non-augmented CTCS integral inequalities with variables X,U and no y.
 Our direct interval-integral structure is not a distinction unique to our DDP.

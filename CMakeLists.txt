@@ -105,3 +105,10 @@ if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC)
  target_compile_definitions(point_mass_saved_policy PRIVATE
   POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_POINT_MASS_DDP_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
 endif()
+
+if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC)
+ add_executable(point_mass_nonaug_trace support/test/uzun2024_ctcs_mpc/point_mass_nonaug_trace.cpp)
+ target_link_libraries(point_mass_nonaug_trace PRIVATE alipddp_library)
+ target_compile_definitions(point_mass_nonaug_trace PRIVATE
+  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_SOLVER_DIR}/problem_examples/point_mass_ctcs_compare.cpp")
+endif()

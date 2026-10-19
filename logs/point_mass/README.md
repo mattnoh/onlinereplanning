@@ -1,5 +1,16 @@
 # Point-mass evidence
 
+## Direct paper non-augmented comparison
+
+[Primary optimization report](../../support/test/uzun2024_ctcs_mpc/CTCS_OPTIMIZATION_DIFFERENCES.md) ·
+[progress plot](audits/direct_nonaug_n6_20261020_v3/direct_nonaug_progress_first200.png) ·
+[traces and ablations](audits/direct_nonaug_n6_20261020_v3/).
+The matched N=6 run compares an L1/prox-linear reference without y against
+our explicit primal-dual folded DDP, using the same physical problem, seed
+and C++ integral map. This supersedes using an augmented-y distinction to
+answer the question about the paper’s direct formulation.
+
+
 ## Optimization research
 
 [Direct answer and source evidence](../../support/test/uzun2024_ctcs_mpc/CTCS_OPTIMIZATION_DIFFERENCES.md) ·
