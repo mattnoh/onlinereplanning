@@ -1,3 +1,53 @@
+# Current priority — paper CTCS MPC reproduction, then identical DDP problem
+
+User direction 2026-10-19: implement and execute the original Uzun et al.
+2024 obstacle-avoidance MPC in SCP first, including its tightening, then
+recreate the same physical OCP and synchronous MPC in DDP. This diagnostic
+precedes further landing tuning or shared-solver modifications. The user
+explicitly prioritizes physical enforcement in synchronous zero-deviation MPC;
+perfect optimality is diagnostic, not a substitute for that result. Earlier
+landing experiments below are historical evidence, not this reproduction.
+
+1. Three actual Claude implementation workers run in parallel: native SCP
+   driver, original-problem DDP driver, and independent shared model/audit.
+   Parent runs all builds and optimization scenarios sequentially.
+2. SCP paper configuration: 2-D drag double integrator, five ellipses,
+   integrated reference-tracking cost, 8 s horizon / 17 nodes, K=4 intervals
+   executed per update, 30 s campaign, three SCP iterations, delta_obs=.05,
+   single horizon accumulator with per-interval increment bounds. FOH first.
+3. Document unreported settings as assumptions: epsilon=1e-6, initial
+   (r,v)=(-10,0,0,0), exact-penalty weight=1e4, proximal coefficient=1.
+   No claim these are recovered author settings. Record source hashes.
+4. Independently replay at <=1 ms, separately audit actual physical g,
+   tightened integral, physical and accumulator dynamics defects, virtual
+   controls, input limits and tracking progress. Preserve failed artifacts.
+5. Matched ZOH SCP replay, then the SAME ZOH obstacle OCP in untouched
+   ALIPDDP, same initial state / density / budgets / objective / MPC shift
+   and tail extension. Establish open-loop behavior and successive solves.
+   No asynchronous latency, tracking error, ROS or landing dynamics enter.
+6. Diagnose first discrepancy using saved shifted seeds and returned plans;
+   only then return to the landing gates recorded below. No solver changes
+   or physical-limit relaxation before the matched comparison.
+
+Implementation starts from planner 2148894 and solver 4d68a48b.
+Existing catkin cache has an E13 temporary linker override pointing to a
+missing /tmp object; do NOT use that build for the DDP paper baseline.
+The paper executable will be built with clean standalone linkage.
+
+Experiment P1: hypothesis — native SCP with the paper's CTCS structure and
+explicit tightening supports the original complete obstacle MPC example.
+Single intended change: new reproduction driver, no library modifications.
+Pass: completed 30 simulated seconds with useful tracking, independently
+verified zero physical obstacle penetration within 1e-6 and norm(u)<=5
+within 1e-6; report nonlinear dynamics / integral defects and interval budget
+feasibility separately. Three iterations is the paper-performance run;
+additional iterations are labeled diagnostics, never silently substituted.
+Current state: original paper-example SCP/FOH/ZOH and DDP fresh/retained
+MPC implemented and executed. Physical results verified; SCP finite-iteration
+integral residuals are reported separately. Landing gates remain incomplete.
+
+---
+
 # Authoritative gate record — reliable constrained DDP MPC
 
 Updated 2026-10-19. This ordered sequence supersedes the historical experiments
@@ -629,3 +679,112 @@ branch. The stressed CTCS terminal state is almost at its tilt cap with
 outward angular velocity, so holding the last command is not a feasible
 extension. Evidence: /tmp/comando-stress-ctcs-feedback-tail.log and
 /tmp/comando-stress-ctcs-feasible-states.log. The main goal remains active.
+
+P1 startup diagnostic: native problem initialized and solved, but adapter logging
+failed on scalar-valued J_tr_history (TypeError len(float)). No physical result.
+P1b intended change: accept scalar/array diagnostic fields; OCP/settings unchanged.
+Pass criterion remains full physical MPC audit; source hashes saved per run.
+
+P1b startup: native solve and first independent interval audit succeeded,
+but driver failed at obsolete dense_fields call. No complete MPC result.
+P1c change: use shared dense replay helpers; identical OCP and defaults.
+Same physical pass criterion, useful tracking and all diagnostics reported.
+
+P1c complete: 32 s (literal inclusive pseudocode), 16 solves, physical
+penetration zero but mean tracking error 11.4324 m and final x=-24.9649 m.
+This is FAIL for useful reproduction despite the early adapter physical-only
+status=pass. Source snapshot retained; that inadequate pass definition has
+been corrected to require tracking, input limits and executed interval budgets.
+Execution now stops at T=30 rather than one update beyond T.
+P2 hypothesis: assumed w_prox=1 over the integrated-cost state suppresses
+useful changes in the three-iteration solver. Change ONLY w_prox to 1e-4;
+all dynamics, physical bounds, tightening .05, epsilon1e-6 and iterations3 fixed.
+Pass: useful tracking mean<=1 m, no physical excess>1e-6, input norm<=5+1e-6,
+executed interval integrals<=epsilon; report future defects independently.
+
+P2 FAIL: completed30s, mean tracking44.4437m, physicalexcess0 because
+vehicle departed obstacle region; max nonlinear future defect~2m, negative
+linearized l values, max executed prediction drift4.54. No SCP success claimed.
+P3 hypothesis: identity scaling of integrated cost over-damps physical motion
+for w_prox1; coststate scale100 and objective coefficient compensation100
+preserve physical objective while changing numerical conditioning. Only
+scaling is changed relative to P1c defaults; first2s diagnostic before campaign.
+Pass diagnostic: root tracking error reduced substantially from5m and
+physical/control limits respected, no numerical failure; then full30s audit.
+
+P3 initial2s diagnostic: position (-8.7711,3.2539), velocity(.8143,.6746),
+physical excess0, normu max3.9497, cost22.0883; useful approach toward
+reference, unlike P1/P2. Whole-horizon nonlinear defect.0054 and executed
+prediction drift.0109 remain reported (not a convergence claim).
+P3 full30s: same exact settings, no parameter change; acceptance as P2.
+
+P3 full30s: physical execution PASS (zero obstacle penetration/duration,
+minimum shape clearance.0311668, geometric clearance.0388717m, maxu4.31184),
+useful tracking mean.746276m over15solves. CTCS integral budget FAIL:
+max executed tightened integral2.22613e-5 versus1e-6. Future predictions
+also have nonlinear defects; do not claim complete constraint convergence.
+P4 hypothesis: the paper's ten-iteration diagnostic reduces remaining nonlinear
+accumulator defects while preserving physical execution. Single change:
+iterations3->10, all P3 settings including delta.05/eps1e-6/scaling100 fixed.
+Pass: same physical/useful gate plus independently verified executed budgets.
+
+P4 full30s: physical execution PASS, mean tracking.400330m (paper reports
+.44m under unspecified remaining settings), zero physical violation/duration,
+maxu5.0, minimum geometric clearance.039435m. Tightened executed integral
+max1.26985e-6 still exceeds eps1e-6; numerical-budget status remains FAIL.
+This is distinct from successful physical avoidance, not hidden as convergence.
+DDP build PASS via single catkin target, normal linkage restored (E13 missing
+object override removed). Solver algorithm source unchanged. Active-density
+FD derivative relative error2.21e-10. Independent SciPy flow/cost/integral
+fixture passes (raw evidence ddp_derivatives.json/ddp_independent_parity.json).
+P5: change only control hold FOH->ZOH from P4; exact same original OCP,
+tightening/budget/scaling and teniterations. Run30s before DDP comparison.
+
+P5 complete30s ZOH: physical execution PASS, zero penetration/duration,
+mean tracking.403897m, maxu5.0, minimum geometric clearance.0374448m.
+FOH .400330 vs ZOH .403897: no material physical enforcement difference
+in this original example. Tightened executed integral max1.26407e-6
+versus1e-6 (budget FAIL still reported); future nonlinear defects remain.
+DDP near-budget independent parity: RK4 M100 raw integral error1.12e-10,
+flow error1.78e-15, costerror3.98e-13. Gradients pass FD; M100 chosen
+explicitly for matched comparison, no physical OCP change.
+P6 hypothesis: unchanged DDP with same ZOH physical OCP and density can
+execute the original30s MPC. Only solver representation/algorithm changes
+from SCP P5; same root, dt.5/N16/K4/reference/mask/tightening.05/eps1e-6.
+DDP uses M100 RK4, max300iterations, existing stage SOC inputnorm5,
+folded normalized interval rows, shifted nodes+controls and integratedtail,
+fresh dual initialization per solve (explicitly not production dual reuse).
+Apply only primal-feasible returned controls; log optimality separately.
+Pass physical/useful criteria as SCP; independent budgets separate.
+
+P6 PASS physical/useful/executed budgets over30s: all15 DDP solves Optimal
+Solution, zero model dynamics gaps, mean tracking.250053m, zero physical
+penetration/duration, maxu4.99999965, max executed integral9.99960e-7,
+max executed prediction/plant drift1.67e-9. This uses fresh dual initialization
+and does not establish the production retained-solver lifecycle or landing.
+P7 hypothesis: production updateProblem barrier/penalty retention changes
+successive MPC behavior. Single intended change from P6: retain the same
+ALIPDDP instance using updateProblem; same max300 iteration budget, same
+OCP/root/seeds/plant/limits/quadrature. Reinitialize only on actual stage
+structure changes (no CTCS rows when sensed mask is empty). Each horizon
+logs used_update_problem. No shared solver source edits. Same pass criteria.
+
+P7 PASS full30s: all15 DDP solves Optimal Solution, updateProblem used13times,
+zero model gaps, zero physical violation/duration, mean tracking.250058m,
+max executed integral9.99933e-7, max prediction/plant drift1.70e-9.
+Same physical outcome as fresh P6. Generic MPC/updateProblem failure is not
+reproduced on this original problem; do not attribute the landing failure to
+DDP generally. Folded per-interval CTCS works here with the paper tightening.
+All Claude implementation/review workers finished; retained solver process
+tears down cleanly. Source is retained in support/test/uzun2024_ctcs_mpc
+and the single solver example, alongside exact per-run snapshots under logs.
+No shared solver algorithm source edits. Catkin cache override was cleared
+but existing planner/test executables were not relinked by the paper target;
+do not treat old binaries as a freshly verified landing baseline.
+Original demanding landing MPC/STC/SITL remain incomplete.
+
+Retained solver example/CMake commit: d07d8d46. Final canonical model/audit
+tests:18/18 PASS (model_tests.log); canonical SCP/DDP CLI imports and Python
+compilation PASS. No shared alipddp/ or problem_maker/ diffs. All scenario
+processes and the retained solver server are stopped. Source+results summary
+retained in support/test/uzun2024_ctcs_mpc/README.md and logs comparison.json.
