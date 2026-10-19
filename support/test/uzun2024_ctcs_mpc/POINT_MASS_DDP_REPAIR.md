@@ -1,5 +1,10 @@
 # DDP prerequisite repairs and unchanged-seed N=6 reruns
 
+**Subsequent validation:** the [production regression and 2×2 ablation](POINT_MASS_DDP_ABLATION.md)
+restore the legacy gate/default tolerance, place strict gating behind a flag,
+rerun the successful GN-off case and identify an accepted CTCS violation jump.
+This document preserves the earlier unconditional-strict revision and its results.
+
 SOC appears here because the existing point mass has input norm and tilt-cone
 constraints in addition to CTCS obstacle/glide rows. DDP solves their slack/dual
 systems in the same backward pass. Correcting those equations is a prerequisite

@@ -151,6 +151,8 @@ def main():
     ap.add_argument('--seed-ctcs-blend',type=float,default=.1)
     ap.add_argument('--ddp-normalized',action='store_true')
     ap.add_argument('--ddp-no-gn',action='store_true')
+    ap.add_argument('--ddp-strict-gate',action='store_true')
+    ap.add_argument('--ddp-max-inner',type=int,default=60)
     args=ap.parse_args();out=args.output;out.mkdir(parents=True,exist_ok=False)
     row=json.loads((args.snapshot/'inputs/fixed_DDP_ctcs_N6/selected_row.json').read_text())
     nodes=list(csv.DictReader((args.snapshot/'inputs/fixed_DDP_node_N6/nodes.csv').open()))
@@ -163,6 +165,7 @@ def main():
     (out/'configuration.json').write_text(json.dumps(dict(vars(args),snapshot=str(args.snapshot),oracle=str(args.oracle),ddp=str(args.ddp),output=str(out),selected_row=row,
         seed='exact rollout of a shared convex blend of frozen stage and CTCS controls; blend avoids near-zero input-cone slack',scope='direct non-augmented method comparison; nonconvex extension of paper Section 5'),indent=2,default=str)+'\n')
     command=[str(args.ddp),'6',str(args.substeps),row['eps'],row['tighten_obs'],row['tighten_glide'],str(seed),str(out/'ddp_trace.jsonl'),str(int(args.ddp_normalized)),str(int(not args.ddp_no_gn))]
+    command += [str(args.ddp_max_inner),str(int(args.ddp_strict_gate))]
     result=subprocess.run(command,capture_output=True,text=True,check=True)
     (out/'ddp_summary.json').write_text(result.stdout);ddp=[json.loads(line) for line in (out/'ddp_trace.jsonl').read_text().splitlines()]
     oracle=Oracle(args.oracle,row,args.substeps)

@@ -18,7 +18,7 @@ private:
 };
 
 int main(int argc,char**argv){
-    if(argc!=10 && argc!=11){std::cerr<<"N substeps epsilon margin_obs margin_glide seed_file trace_file normalized gauss_newton [max_inner_iter]\n";return 2;}
+    if(argc<10 || argc>13){std::cerr<<"N substeps epsilon margin_obs margin_glide seed_file trace_file normalized gauss_newton [max_inner_iter [strict_gate [forward_filter]]]\n";return 2;}
     const int N=std::stoi(argv[1]),substeps=std::stoi(argv[2]);const double eps=std::stod(argv[3]);
     g_fixed_dt=4./N;g_row_norm=1/std::sqrt(g_fixed_dt);g_tight_obs=std::stod(argv[4]);g_tight_glide=std::stod(argv[5]);
     g_glide_tan=1.;
@@ -48,7 +48,9 @@ int main(int argc,char**argv){
     problem.addTerminalConstraint(std::make_shared<TerminalEquality>());
     ALIPDDP<double> solver(problem);Param param;
     param.max_iter=1200;param.max_inner_iter=60;param.tolerance=1e-8;param.inner_tolerance=10.;
-    if(argc==11){param.max_inner_iter=std::stoi(argv[10]);if(param.max_inner_iter<=0)return 2;}
+    if(argc>=11){param.max_inner_iter=std::stoi(argv[10]);if(param.max_inner_iter<=0)return 2;}
+    if(argc>=12)param.use_strict_barrier_gate=std::stoi(argv[11])!=0;
+    if(argc==13){param.forward_filter=std::stoi(argv[12]);if(param.forward_filter!=0 && param.forward_filter!=1)return 2;}
     param.mu=param.muT=1e-3;param.mu_mul=.2;param.mu_min=1e-10;
     param.rho=param.rhoT=100.;param.rho_max=1e10;param.reg1_min=1e-6;param.reg2_min=1e-6;
     param.use_feasibility_ms=true;param.verbose=true;
@@ -60,14 +62,38 @@ int main(int argc,char**argv){
         const auto tick=std::chrono::steady_clock::now();
         const auto xs=solver.getResX(),us=solver.getResU();
         const auto& settings=solver.getParam();
+        double barrier=0.,barrierT=0.,al=0.;
+        for(int k=0;k<N;++k){
+            if(solver.getDimG(k))no_helper::addBarrierCost(barrier,solver.getSTraj()[k].head(solver.getDimG(k)));
+            if(solver.getDimH(k))soc_helper::addBarrierCost(barrier,solver.getSTraj()[k],solver.getDimHs(k),solver.getDimHsTop(k));
+            if(solver.getDimEC(k))al+=-solver.getLambdaTraj()[k].dot(solver.getRTraj()[k])+.5*settings.rho*solver.getRTraj()[k].squaredNorm();
+        }
+        if(solver.getDimGT())no_helper::addBarrierCost(barrierT,solver.getTerminalS().head(solver.getDimGT()));
+        if(solver.getDimHT())soc_helper::addBarrierCost(barrierT,solver.getTerminalS(),solver.getDimHTs(),solver.getDimHTsTop());
+        if(solver.getDimECT())al+=-solver.getTerminalLambda().dot(solver.getTerminalR())+.5*settings.rhoT*solver.getTerminalR().squaredNorm();
+        const double merit=solver.getCost()-settings.mu*barrier-settings.muT*barrierT+al;
         const double elapsed=std::chrono::duration<double>(tick-start).count();
         trace<<"{\"event\":"<<count++<<",\"iteration\":"<<(count==1?0:solver.getNumIter())<<",\"wall_seconds\":"<<elapsed
              <<",\"solve_seconds_excluding_observer\":"<<elapsed-overhead<<",\"mu\":"<<settings.mu
              <<",\"muT\":"<<settings.muT<<",\"rhoT\":"<<settings.rhoT
              <<",\"effective_inner_kappa\":"<<std::min(1.,settings.inner_tolerance)
+             <<",\"strict_barrier_gate\":"<<(settings.use_strict_barrier_gate?"true":"false")
+             <<",\"forward_filter\":"<<settings.forward_filter
+             <<",\"primal_error\":"<<solver.getError()<<",\"augmented_cost_recomputed\":"<<merit
+             <<",\"optimality_is_pre_step\":true,\"optimality_evaluated\":"<<(count==1?"false":"true")
              <<",\"rho\":"<<settings.rho<<",\"opterror\":"<<(count==1?0.:solver.getOptError())<<",\"X\":[";
         for(size_t k=0;k<xs.size();++k){if(k)trace<<',';trace<<'[';for(int j=0;j<6;++j){if(j)trace<<',';trace<<xs[k](j);}trace<<']';}
         trace<<"],\"U\":[";for(size_t k=0;k<us.size();++k){if(k)trace<<',';trace<<'[';for(int j=0;j<3;++j){if(j)trace<<',';trace<<us[k](j);}trace<<']';}
+        trace<<"],\"ctcs_intervals\":[";
+        const auto& slacks=solver.getSTraj();const auto& duals=solver.getYTraj();
+        for(int k=2;k<=4 && k<N;++k){
+            if(k>2)trace<<',';
+            const double c=ctcs->c(xs[k],us[k])(0),s=slacks[k](0),y=duals[k](0);
+            trace<<"{\"interval\":"<<k<<",\"row\":"<<c<<",\"slack\":"<<s
+                 <<",\"dual\":"<<y<<",\"primal_residual\":"<<c+s
+                 <<",\"complementarity_residual\":"<<s*y-settings.mu
+                 <<",\"slack_elimination_weight\":"<<y/s<<'}';
+        }
         trace<<"]}"<<std::endl;
         overhead+=std::chrono::duration<double>(std::chrono::steady_clock::now()-tick).count();
     };

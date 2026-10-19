@@ -64,6 +64,15 @@ Mocap can feed PX4 through MAVROS vision/mocap for fused local odometry, or feed
 
 The ROS2 Crazyflie native adapter uses `world`, rotates native body velocity into world axes, and converts native gyro units into rad/s. A configured external odometry source supplies full SI state. Build compatibility does not establish Crazyflie flight performance.
 
+## Solver validation update (2026-10-20)
+
+NT SOC scaling is active; strict barrier scheduling is opt-in and production
+retains the legacy gate/default tolerance. The planner and all production test
+binaries were rebuilt. Two tests still fail with both the old SOC baseline and
+NT, and one SITL smoke run ended `NO_SETTLE` before landing. Historical landing
+results below do not validate this solver revision. See the
+[production checks and ablation report](support/test/uzun2024_ctcs_mpc/POINT_MASS_DDP_ABLATION.md).
+
 ## Build and launch ROS1
 
 Run these commands in bash, or source the corresponding `.zsh` setup files in zsh. Keep `ALIPDDP-main` as a sibling, or set `COMANDO_SOLVER_DIR`.

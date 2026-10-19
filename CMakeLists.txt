@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
+
 set(COMANDO_ROS_VERSION "$ENV{ROS_VERSION}" CACHE STRING "0=standalone, 1=ROS1, 2=ROS2")
 if(COMANDO_ROS_VERSION STREQUAL "")
   set(COMANDO_ROS_VERSION 0)
@@ -126,4 +127,33 @@ if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC AND COMANDO_POINT_MASS_FACTORIZATION_SOUR
  target_link_libraries(point_mass_factorization_trace PRIVATE Eigen3::Eigen)
  target_compile_definitions(point_mass_factorization_trace PRIVATE
   POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
+endif()
+
+# Research-only old-SOC baseline. It never replaces the production library.
+option(COMANDO_BUILD_SOLVER_ABLATION "Build isolated old-SOC regression targets" OFF)
+set(COMANDO_SOLVER_ABLATION_SOURCE "" CACHE PATH "Frozen old-SOC research source")
+if(COMANDO_BUILD_SOLVER_ABLATION)
+ if(NOT EXISTS "${COMANDO_SOLVER_ABLATION_SOURCE}/snapshot_manifest.json")
+  message(FATAL_ERROR "Provide an explicitly prepared old-SOC snapshot")
+ endif()
+ add_library(alipddp_old_soc STATIC
+  ${COMANDO_SOLVER_ABLATION_SOURCE}/alipddp/alipddp/alipddp.cpp
+  ${COMANDO_SOLVER_ABLATION_SOURCE}/problem_maker/optimal_control_problem.cpp)
+ target_include_directories(alipddp_old_soc PUBLIC
+  ${COMANDO_SOLVER_ABLATION_SOURCE}/alipddp
+  ${COMANDO_SOLVER_ABLATION_SOURCE}/problem_maker)
+ target_link_libraries(alipddp_old_soc PUBLIC Eigen3::Eigen)
+ add_library(planner_core_old_soc STATIC src/ocp_registry.cpp src/controller.cpp)
+ target_include_directories(planner_core_old_soc PUBLIC include config)
+ target_link_libraries(planner_core_old_soc PUBLIC alipddp_old_soc Threads::Threads)
+ foreach(name stc_landing_noaug direct_mpc)
+  add_executable(test_${name}_old_soc support/test/test_${name}.cpp)
+  target_include_directories(test_${name}_old_soc PRIVATE src)
+  target_link_libraries(test_${name}_old_soc PRIVATE planner_core_old_soc)
+  target_compile_options(test_${name}_old_soc PRIVATE -UNDEBUG)
+ endforeach()
+ add_executable(point_mass_old_soc_trace support/test/uzun2024_ctcs_mpc/point_mass_nonaug_trace.cpp)
+ target_link_libraries(point_mass_old_soc_trace PRIVATE alipddp_old_soc)
+ target_compile_definitions(point_mass_old_soc_trace PRIVATE
+  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_SOLVER_ABLATION_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
 endif()

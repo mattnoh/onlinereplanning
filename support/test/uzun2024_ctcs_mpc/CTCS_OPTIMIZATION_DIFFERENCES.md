@@ -1,5 +1,12 @@
 # Paper non-augmented CTCS versus our folded DDP
 
+Latest [production checks, SOC/gate 2×2 and CTCS globalization evidence](POINT_MASS_DDP_ABLATION.md):
+the successful normalized/GN-off pilot survives NT with the legacy gate. All
+four GN-on cells fail. A measured step is accepted with a huge CTCS increase
+because of the current-point barrier/AL acceptance rule; the direct pilot's
+hinge merit would reject that candidate. This is optimization evidence about
+one recorded implementation, not a distinction in the underlying integral.
+
 **Paper comparison status:** historical mesh figures are qualitative evidence;
 their selected costs, final times and timings cannot rank the methods. The
 N=6 experiment below is a controlled warm-start pilot, not a robustness study.
@@ -119,4 +126,10 @@ This gives a concrete result for **one warm-started N=6 case and recorded settin
 - Research tools: [point_mass_nonaug_compare.py](point_mass_nonaug_compare.py), [point_mass_nonaug_trace.cpp](point_mass_nonaug_trace.cpp), [tests](test_point_mass_nonaug_compare.py).
 - [Raw comparison](../../../logs/point_mass/audits/direct_nonaug_n6_20261020_v3/comparison.json), [DDP ablations](../../../logs/point_mass/audits/direct_nonaug_n6_20261020_v3/ablation_summary.json), [nominal certificates](../../../logs/point_mass/audits/direct_nonaug_n6_20261020_v3/nominal_certificates.json), and adjacent traces, sources, build/test logs and hashes.
 
-All 36 tests pass. Existing benchmark pools, original plots, controllers and production optimization algorithms are unchanged. The read-only research wrapper can disable its CTCS Hessian contribution for the explicit ablation. The earlier lifted-SCP implementation study is preserved as a [supplement](CTCS_LIFTED_COMPARISON_SUPPLEMENT.md), not used as the answer to this direct comparison.
+The original pre-NT pilot passed its 36 focused tests and left production
+algorithms unchanged at that time. Subsequent NT and gate changes, 42 focused
+tests, production failures and default restoration are documented in the
+[latest ablation report](POINT_MASS_DDP_ABLATION.md). Do not interpret the
+historical pilot as validation of the later production solver. The research
+wrapper disables CTCS Hessian contribution only for the explicit GN ablation.
+The earlier lifted-SCP study remains a [supplement](CTCS_LIFTED_COMPARISON_SUPPLEMENT.md).

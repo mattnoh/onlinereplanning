@@ -77,6 +77,11 @@ rho-weighted inner threshold failed that requirement. The
 factor, cap effective kappa at 1, exclude inactive barriers, and prevent
 unsolved inner/pass exits from advancing mu or AL schedules. These fixes do
 not yet make the normalized/GN-on pilot converge.
+Strict gating is now opt-in (`use_strict_barrier_gate=true`); production restores
+the legacy gate and `inner_tolerance=10` until validation. The
+[subsequent production tests and 2×2](POINT_MASS_DDP_ABLATION.md) retain two
+production failures and a SITL `NO_SETTLE`. Freeze no paper profile from these
+pilot outcomes.
 
 Check both mu and muT traces and reject invalid settings. Normalization alone is
 not a demonstrated repair: the existing normalized/GN pilot fails, whereas

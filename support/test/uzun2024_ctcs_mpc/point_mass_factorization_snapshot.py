@@ -54,10 +54,56 @@ def snapshot(source, output):
     return manifest
 
 
+def legacy_soc_snapshot(source, output):
+    """Research-only old SOC equations; leave production NT unchanged.
+
+    Keep the current gate flag and every other solver equation identical, so
+    old/NT x legacy/strict can be compared in one pinned source snapshot.
+    """
+    output.mkdir(parents=True, exist_ok=False)
+    for name in ('alipddp', 'problem_maker'):
+        shutil.copytree(source/name, output/name)
+    (output/'problem_examples').mkdir()
+    shutil.copy2(source/'problem_examples/point_mass_ctcs_compare.cpp',
+                 output/'problem_examples/point_mass_ctcs_compare.cpp')
+    target=output/'alipddp/helper_functions/soc_helper.h'
+    before=target.read_text()
+    start=before.index('inline void ntElimination(')
+    end=before.index('// === END LLM-AUTHORED ===',start)
+    declaration="""inline void ntElimination(Eigen::Ref<Eigen::MatrixXd>,
+    Eigen::Ref<Eigen::VectorXd>,const Eigen::VectorXd&,const Eigen::VectorXd&,
+    const Eigen::VectorXd&,double);
+"""
+    definition="""inline void ntElimination(Eigen::Ref<Eigen::MatrixXd> metric,
+                          Eigen::Ref<Eigen::VectorXd> rhs,
+                          const Eigen::VectorXd& s, const Eigen::VectorXd& y,
+                          const Eigen::VectorXd& rp, double mu) {
+    // RESEARCH ONLY: invoke the exact original Jordan helper operations.
+    Eigen::VectorXd rd(s.size()),r(s.size());
+    LtimesVec(rd,y,s);rd(0)-=mu;
+    LtimesVec(r,y,rp);r-=rd;
+    LinvTimesVec(rhs,s,r);
+    LinvTimesArrow(metric,s,y);
+}
+"""
+    modified=before[:start]+declaration+before[end:]
+    anchor='} // namespace soc_helper'
+    if modified.count(anchor)!=1:raise ValueError('unexpected namespace layout')
+    target.write_text(modified.replace(anchor,definition+anchor))
+    manifest=dict(source=str(source.resolve()), change='research-only old SOC elimination; current gate flag retained',
+                  original_helper_sha256=hashlib.sha256(before.encode()).hexdigest(),
+                  files={str(p.relative_to(output)):hashlib.sha256(p.read_bytes()).hexdigest()
+                         for p in sorted(output.rglob('*')) if p.is_file()})
+    (output/'snapshot_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    return manifest
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--legacy-soc', action='store_true', help='isolated old-SOC ablation, no factorization logging patch')
     args = parser.parse_args()
-    print(json.dumps({k: v for k, v in snapshot(args.source, args.output).items()
+    prepare = legacy_soc_snapshot if args.legacy_soc else snapshot
+    print(json.dumps({k: v for k, v in prepare(args.source, args.output).items()
                       if k != 'files'}, indent=2))

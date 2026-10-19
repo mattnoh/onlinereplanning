@@ -1,5 +1,14 @@
 # Point-mass evidence
 
+## Production validation and factor separation
+
+[Production regressions, SOC/gate 2×2 and fixed-barrier diagnostics](../../support/test/uzun2024_ctcs_mpc/POINT_MASS_DDP_ABLATION.md) ·
+[raw evidence](audits/production_and_ablation_20261020/).
+Strict gating is opt-in, production keeps NT plus the legacy gate. Two production
+tests fail with both SOC variants; SITL ends before landing. Normalized/GN-off
+still succeeds with NT/legacy; all four GN-on cells fail. Slack/dual traces
+identify a large CTCS violation accepted by the current globalization rule.
+
 ## DDP prerequisite repairs
 
 [NT scaling, strict barrier gate and pilot results](../../support/test/uzun2024_ctcs_mpc/POINT_MASS_DDP_REPAIR.md) ·
