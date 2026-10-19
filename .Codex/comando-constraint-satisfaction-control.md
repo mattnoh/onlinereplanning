@@ -39,6 +39,8 @@ No separate optimizer/controller or post-solve command clipping is authorized.
 
 ## Verified checkpoint (2026-10-19)
 
+Retained implementation commit: `5747e3acb1a96c23312cf45c8065c4bec2b0df47`.
+
 - E7 PASS: test_direct_mpc passes with independent ordinary dynamics Jacobians,
   all six constraint Jacobians/geometric signs/scales, and stage/terminal cost
   gradients. Existing analytic rate response, folded RK quadrature, Jacobian,
