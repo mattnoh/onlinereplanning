@@ -1,5 +1,13 @@
 # Local point-mass open-loop 2 × 2 comparison
 
+**Paper correction:** Elango et al. Section 5, equations (47)–(49), already
+provides non-augmented CTCS integral inequalities with variables X,U and no y.
+Our direct interval-integral structure is not a distinction unique to our DDP.
+That section's convex, fixed-time, linear-dynamics setting differs from our
+nonconvex obstacle problem and free-time cases. See the correction in
+[the optimization report](CTCS_OPTIMIZATION_DIFFERENCES.md).
+
+
 ## Optimization differences: direct research update (2026-10-20)
 
 The original question concerns **optimization differences**, and the earlier

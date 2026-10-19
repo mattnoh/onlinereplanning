@@ -1,5 +1,30 @@
 # What changes in CTCS optimization: folded DDP versus lifted SCP
 
+## Paper reference correction: the non-augmented formulation exists
+
+The local Elango et al. PDF, **Section 5, “Exploiting Convexity,” equations
+(46)–(49)**, explicitly formulates CTCS without an accumulator decision state.
+It defines the interval violation integral xi_k(x_k,U) in (47), then imposes
+xi_k(x_k,U) <= epsilon in (49c), with decision variables X,U. Thus it is wrong
+to characterize the paper as offering only an augmented-y formulation, or to
+present eliminating y as a distinction unique to our implementation.
+
+That section specializes to fixed initial/final times, linear nonhomogeneous
+dynamics and convex constraints/cost. It handles the integral inequalities by
+exact L1 penalization and the prox-linear method in Section 5.1. Our folded
+rows have the same direct-interval-integral structure, but our sphere-exterior
+obstacle constraint is nonconvex; free duration additionally makes the physical
+discrete dynamics nonlinear. Those differences prevent importing the convex
+section's global-minimizer guarantee. Our DDP enforcement, curvature,
+quadrature and stopping also differ from its optimizer.
+
+Local primary source:
+`/home/lab/Zotero/storage/FGP9CC2S/Elango et al. - 2024 - Successive Convexification for Trajectory Optimization with Continuous-Time Constraint Satisfaction.pdf`.
+The lifted/condensed experiments below compare our chosen lifted SCP reference
+with our folded DDP implementation; they do not establish that the paper lacks
+a folded formulation.
+
+
 **Answer:** exact folding does not change the CTCS feasible set. In these implementations, the optimization differences come from the local curvature model, the accumulator’s scaled proximal metric and finite virtual-control penalty, globalization, and stopping. We have now isolated several of these effects with matched local experiments; a full-solver convergence ranking remains unestablished.
 
 ## Progress against the research question
