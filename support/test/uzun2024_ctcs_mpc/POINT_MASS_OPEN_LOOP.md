@@ -1,5 +1,12 @@
 # Local point-mass open-loop 2 × 2 comparison
 
+**Quantitative claims withdrawn from these historical selections.** Per-cell
+budgets/margins, asymmetric tuning selection, different starts and convergence
+gates, source revisions and host load prevent solver rankings from cost, tf or
+runtime. Retain the trajectories as qualitative examples with their audit
+failures visible. The [matched paper protocol](POINT_MASS_PAPER_PROTOCOL.md)
+defines the replacement study; its candidate is not yet frozen or executed.
+
 ## Direct comparison with the paper’s non-augmented method
 
 The primary [optimization report](CTCS_OPTIMIZATION_DIFFERENCES.md) now compares

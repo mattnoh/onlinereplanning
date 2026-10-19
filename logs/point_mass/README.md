@@ -1,5 +1,16 @@
 # Point-mass evidence
 
+## Matched paper campaign preparation
+
+[Protocol and release gates](../../support/test/uzun2024_ctcs_mpc/POINT_MASS_PAPER_PROTOCOL.md) ·
+[candidate, shared seeds and manifest](audits/matched_paper_protocol_20261020/).
+The candidate contains 32 test bearings and three disjoint calibration bearings.
+It is not frozen and no paper campaign has been launched. Historical selected
+cost/tf/runtime tables cannot support quantitative solver rankings.
+[Actual DDP factorization diagnosis](../../support/test/uzun2024_ctcs_mpc/POINT_MASS_DDP_FACTORIZATION.md):
+logging-only replay reproduces all 42 failures with identical optimizer records;
+the first misleading positive spectrum is traced to the asymmetric SOC IPM block.
+
 ## Direct paper non-augmented comparison
 
 [Primary optimization report](../../support/test/uzun2024_ctcs_mpc/CTCS_OPTIMIZATION_DIFFERENCES.md) ·

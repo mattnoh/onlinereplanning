@@ -112,3 +112,18 @@ if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC)
  target_compile_definitions(point_mass_nonaug_trace PRIVATE
   POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_SOLVER_DIR}/problem_examples/point_mass_ctcs_compare.cpp")
 endif()
+
+# Optional isolated snapshot with logging-only factorization instrumentation.
+set(COMANDO_POINT_MASS_FACTORIZATION_SOURCE "" CACHE PATH "Instrumented snapshot; never the live solver")
+if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC AND COMANDO_POINT_MASS_FACTORIZATION_SOURCE)
+ add_executable(point_mass_factorization_trace
+  support/test/uzun2024_ctcs_mpc/point_mass_nonaug_trace.cpp
+  ${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/alipddp/alipddp/alipddp.cpp
+  ${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/problem_maker/optimal_control_problem.cpp)
+ target_include_directories(point_mass_factorization_trace PRIVATE
+  ${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/alipddp
+  ${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/problem_maker)
+ target_link_libraries(point_mass_factorization_trace PRIVATE Eigen3::Eigen)
+ target_compile_definitions(point_mass_factorization_trace PRIVATE
+  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
+endif()

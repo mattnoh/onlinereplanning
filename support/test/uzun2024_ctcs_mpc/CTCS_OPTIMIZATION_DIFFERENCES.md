@@ -1,5 +1,12 @@
 # Paper non-augmented CTCS versus our folded DDP
 
+**Paper comparison status:** historical mesh figures are qualitative evidence;
+their selected costs, final times and timings cannot rank the methods. The
+N=6 experiment below is a controlled warm-start pilot, not a robustness study.
+The [matched paper protocol](POINT_MASS_PAPER_PROTOCOL.md) records the new
+shared-budget, shared-start campaign and its unresolved release gates. Its
+candidate settings and generated seeds have not been used for paper runs.
+
 **The formulation is shared; the optimization treatment differs.** The local Elango paper already defines direct interval-integral inequalities without y in Section 5, equations (47)–(49). The comparison here is its L1/prox-linear treatment in Section 5.1 versus our explicit primal-dual DDP treatment of the same CTCS rows. No accumulator metric or accumulator virtual control appears in this comparison.
 
 Local primary source: [Elango et al. PDF](</home/lab/Zotero/storage/FGP9CC2S/Elango et al. - 2024 - Successive Convexification for Trajectory Optimization with Continuous-Time Constraint Satisfaction.pdf>). Section 5 starts on printed page 14; equations (49)–(50) and Theorems 29–30 are on printed page 15. A source copy and hash are saved with the experiment.
@@ -70,7 +77,14 @@ The reference’s own adaptive-rho mapping (8.45e-8) and the common fixed-rho ma
 
 For raw-row/current-GN DDP, 1155 of 1200 logged iterations report ForwardFail::BOUNDARY_SOC; only 45 have no failure flag. The check is applied to the **control SOC slack or dual**, not directly to the physical CTCS integral. Thus it would be wrong to explain this run only by integral-gradient flatness or claim folding itself caused failure. The reference instead handles those convex control SOCs directly in its convex subproblems.
 
-The normalized+GN DDP run also records backward QUU_NOT_PD failures. The existing diagnostic reports eigenvalues of an averaged symmetric matrix, whereas factorization uses the upper self-adjoint view, so those logged eigenvalues alone do not establish the precise cause of factorization failure. No unverified diagnosis of a bad CTCS Hessian is made here.
+The normalized+GN DDP run also records backward QUU_NOT_PD failures. A subsequent
+[logging-only replay](POINT_MASS_DDP_FACTORIZATION.md) now captures the actual
+matrices: all 42 failures reproduce independently, with all 301 optimizer
+records unchanged. Six matrices have a positive averaged spectrum but an
+indefinite upper-triangle matrix used by LLT. The first has averaged minimum
+eigenvalue +79.29 versus actual factored minimum −1005.98; its asymmetry comes
+from the SOC IPM contribution. This locates a concrete SOC elimination and
+factorization issue without claiming the CTCS GN Hessian is itself defective.
 
 The raw final integral ratio 188.76 corresponds to a raw mean-square row residual of approximately 1.88e-9, below the solver’s absolute tolerance 1e-8. This shows why that absolute numerical scale cannot stand in for a relative 1e-11 budget check; it is not proof that tolerance alone caused the whole stall. Row normalization and GN ablations expose a substantial interaction with the rest of the primal-dual solver.
 
