@@ -101,6 +101,11 @@ observed physical violation and the unchanged integral budget. Current paired
 replay median improves826ms→224ms; total solver CPU improves2.50×. See
 [RESULTS.md](RESULTS.md) for timing scope, residuals and rejected20-step case.
 Reference defaults remain100/legacy. No shared solver algorithm changed.
+Optional verified intermediate stopping adjustment:
+`--solver-arg=--inner-tol --solver-arg=100`. Final tolerance remains1e-6;
+all15 solves and independent physical/budget audits pass. Separate paired
+measurements show median165→140ms (15% lower), with little worst-case gain.
+See RESULTS.md for the distinct timing conditions and landing-failure evidence.
 
 ```bash
 python ddp.py --reuse-solver --substeps 50 --flow-cache shared --output-dir NEW_FAST_CTCS

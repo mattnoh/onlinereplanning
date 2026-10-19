@@ -1,3 +1,26 @@
+# Current authorized task — CTCS stopping efficiency and landing diagnosis
+
+User asks whether CTCS DDP stopping can be faster without losing safety, and
+why paper MPC success has not fixed landing. Landing-fix goal remains paused:
+only read-only landing diagnosis is authorized by the question; no landing
+changes or experiments. Test stopping tuning on the paper benchmark first.
+Startplannerb103ef4, solver3a962c5a; bothtrackedclean. Prior speed profile is
+M50/sharedcache, allphysical/integralchecks and all15Optimal verified.
+
+P17 hypothesis: reduce unnecessary intermediate barrier centering by increasing
+inner_tolerance10->100, leaving the final/globaltolerance1e-6, barrierfloor,
+physicalbounds, delta.05, epsilon1e-6, horizon/grid/hold and fastM50/shared
+profile unchanged. Single intended change: --inner-tol100. This parameter
+controls when to advance barrier subproblems, not final plan acceptance.
+Pass: complete30s/15 measuredroot MPC solves, allOptimal<=1e-6, modeledprimal
+andindependentstateflow<=1e-6, executedphysicalviolation0within1e-6 andtrue
+integral<=1e-6 withinexistingrelative1e-6audit, usefultracking. Recorditerations,
+CPUtime andwalltime; do not infer performance from differing hostload. Reject
+candidate if modelrows pass but independent budget/physical checks fail.
+No shared solver algorithm change and no relaxation of finaltolerance.
+
+---
+
 # Current authorized task — faster DDP CTCS on the paper benchmark
 
 User2026-10-19 requests RK4/tuning speed experiments. Landing repair remains
@@ -1012,3 +1035,54 @@ Finalverification: single-target sequential buildPASS; RK100/RK50 existing
 finite-differencechecksPASS;18 independent model/audit regression testsPASS;
 Pythoncompile andgitdiffchecksPASS. RetainedlocalOCP cache commit3a962c5a.
 No scenario/build/server processes from this task remain running.
+P17 fullPASS:15/15Optimal, totaliterations593->530, zeroexecutedphysical
+violation, independentlyexecutedImax9.99965105e-7<=1e-6, tracking.250055296m.
+Final/globaltolerance1e-6 remainsunchanged. Initialbarrier/epsilon/tightening
+unchanged; advance intermediatebarrierstages sooner, not infeasibleacceptance.
+P18 hypothesis: identicalsaved roots/seeds and pairedsequentialreplays measure
+whether reducedintermediatecentering improves timing ratherthan hostload.
+Single intended change between profiles: inner_tolerance10 vs100, cache/grid/
+OCP identical. Reuse existing replay diagnostic with --replay-inner100; candidate
+must exactlymatch savedP17 trajectories/iterationcounts, baselineallowedto
+have different convergedtrajectory; both require primal/dynamics/independent
+finebudget/selectedphysical/inputchecks. No control delivery fromthis replay,
+no claim that baselineandcandidate trajectories are identical. Fullindependent
+plant audit belongs toP17. Run only afterP17isconfirmedterminal.
+P18 PASS: pairedsame-root/same-seed baselineinner10 andcandidateinner100
+bothconverge and passmodeled/independentfinephysical/integral/inputchecks.
+Candidateall15trajectories/iterations exactlymatchP17. Baselineisexpectedto
+have a different solution: no globaltrajectoryparity or audittransferclaim.
+Medianwall164.888->139.751ms (15.24% lower,1.180x); p95441.165->417.142ms;
+max577.923->573.579ms (littleworstcaseimprovement); totalCPU2.584386->2.247520s.
+No comparison toold224ms acrosshostload is claimed. P17fullMPCiterations
+593->530 (10.62% fewer), maxoptimality8.94937e-7 andreturnedprimal0.
+
+P19 regression hypothesis: extending the existing replayhelper with an optional
+innercomparison does not change its originalcache-parity mode. Single change
+fromP15: diagnostichelpercode, sameP7savedrequests and currentbinary. Require
+all15legacy/shared fulltrajectory/iteration/terminationparityexact0 andnew
+independentfinechecks. No optimizationmath orplant changes. RunafterP18.
+
+Landingread-only finding: archivedE1CTCSlog is present. Feasibleproductionseed
+haszero primal/dynamics; returnedplanphysicalFAIL: speedexcess.29641648m/s,
+tiltexcess1.18789182deg, LOSspatialexcess.06767562m, dynamicsgap0, interval
+fineflowdefect1.96463e-8. E3rawlog firststepacceptsalpha1 andnormalizederror
+1.750489829e10 fromzero-feasibilityseed. Thisisrealfeasibilityfailure, not
+merelystationarityfailure orplanttrackingdeviation. Currentdensityhaszero
+firstderivativewhileallconsequences<=0; terminalweights2500/900 andtight
+angularnormalizations/budget1e-8 amplifythe firstinfeasiblestep. Mechanism
+plausible; noisolatedcausalrepairhasbeenverified. Landingdensityhasnophysical
+bufferaddedtopathrows, unlikepaperdelta.05 (nottransferableacrossunits).
+Priorprogressrecord also reports warmtailresidual1.145e6 despite2e-9gap:
+laststateattiltcap/outwardrate makesheldlastcommandaninfeasibletail.
+The /tmprawlogs citedbythatolderentryarenotcurrentlyavailable, so that warm
+mechanism remains historicalevidence pendingfreshpersistenttraces; do not
+claim afreshreproduction orverifiedfix. No landingexperimentrunwhilepaused.
+P19 oldcachepath regressionPASS: all15legacy/shared trajectories/iterations
+exactlymatch savedP7 (maxdifference0); newfinechecksallpass.18existingmodel/
+auditregressionsPASS, PythoncompilePASS, invalidreplayargumentguardPASS.
+Currentpaperstoprecommendation optionalinner100 onM50/shared retainsfinal1e-6.
+No solverlibrarychanges. Pairedhelper snapshots forP18/P19matchtheirrecorded
+sourcehashes; laterCLIargumentguard onlyrejectsinvalidflagcombinations.
+WrittenRESULTS/README now separate testedstoppinggain fromunverifiedlanding
+repair andmarkmissinghistorical/tmptraces. LandingremainsPAUSED.

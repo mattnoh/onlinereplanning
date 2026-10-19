@@ -530,8 +530,10 @@ def replay_saved(args, out):
 
     Solve sequentially, alternating pair order, with independent retained
     solvers. Reuse the original measured roots and shifted seeds verbatim.
-    Full trajectory parity transfers the existing independent plant audits;
-    no newly integrated plant or real-time performance claim is made here.
+    Full trajectory parity transfers the existing independent plant audits.
+    With --replay-inner only the candidate must match its saved campaign;
+    baseline/candidate must both pass convergence and independent fine checks.
+    No newly integrated plant or real-time performance claim is made here.
     """
     source = args.replay_saved.resolve()
     source_summary = json.loads((source / "summary.json").read_text())
@@ -539,16 +541,21 @@ def replay_saved(args, out):
     if not commands:
         raise ValueError(f"no saved MPC requests under {source}")
     (out / "config.json").write_text(json.dumps(provenance(args), indent=2, default=str))
+    profiles = {"legacy": {"--flow-cache": "legacy"}, "shared": {"--flow-cache": "shared"}}
+    if args.replay_inner is not None:
+        profiles = {"baseline": {"--inner-tol": "10"},
+                    "candidate": {"--inner-tol": str(args.replay_inner)}}
+    modes = list(profiles)
     rows, sessions, failure = [], {}, None
     try:
-        for mode in ("legacy", "shared"):
+        for mode in modes:
             d = out / mode
             d.mkdir()
             sessions[mode] = SolverSession(args.binary, d)
         for i, saved in enumerate(commands):
             reference = np.genfromtxt(saved.parent / "traj.csv", delimiter=",", names=True)
             orig_diag = json.loads((saved.parent / "diag.json").read_text())
-            order = ("legacy", "shared") if i % 2 == 0 else ("shared", "legacy")
+            order = modes if i % 2 == 0 else modes[::-1]
             for mode in order:
                 d = out / mode / saved.parent.name
                 d.mkdir()
@@ -558,7 +565,8 @@ def replay_saved(args, out):
                         cmd[cmd.index(flag) + 1] = str(value)
                     else:
                         cmd.extend([flag, str(value)])
-                option("--flow-cache", mode)
+                for flag, value in profiles[mode].items():
+                    option(flag, value)
                 for flag, filename in (("--out-traj", "traj.csv"), ("--out-json", "diag.json"),
                                        ("--out-seed", "seed_used.csv")):
                     option(flag, (d / filename).resolve())
@@ -578,14 +586,26 @@ def replay_saved(args, out):
                 parity = (same_nan and difference <= 1e-8
                           and solver["iterations"] == orig_diag["solver"]["iterations"]
                           and solver["termination"] == orig_diag["solver"]["termination"])
+                d = diag["diagnostics"]
+                fine_g = d.get("fine_max_g_masked")
+                accepted = (rc == 0 and solver["termination"] == "Optimal Solution"
+                    and solver["optimality_error"] <= args.ddp_tol
+                    and solver["primal_error"] <= args.defect_tol
+                    and d["max_dynamics_defect_inf"] <= args.defect_tol
+                    and d["root_defect_inf"] <= args.defect_tol
+                    and d["max_unorm_excess"] <= args.excess_tol
+                    and (fine_g is None or fine_g <= args.excess_tol)
+                    and d["fine_max_interval_integral"] <= d["interval_budget"] * (1 + 1e-6))
                 rows.append({"solve": i, "mode": mode, "returncode": rc,
+                    "convergence_and_feasibility_pass": accepted,
                     "solver_seconds": solver["seconds"], "solver_cpu_seconds": solver.get("cpu_seconds"),
                     "iterations": solver["iterations"], "termination": solver["termination"],
                     "used_update_problem": solver["used_update_problem"],
                     "trajectory_max_abs_diff": difference, "reference_parity": parity})
-                if rc != 0 or not parity:
-                    raise RuntimeError(f"{mode} solve{i}: failed solve or saved trajectory/iteration parity")
-            print(f"cache pair {i}: legacy/shared match saved trajectory and iterations", flush=True)
+                require_parity = args.replay_inner is None or mode == "candidate"
+                if not accepted or (require_parity and not parity):
+                    raise RuntimeError(f"{mode} solve{i}: failed convergence/feasibility or required saved parity")
+            print(f"replay pair {i}: converged/feasible; required saved-reference parity passed", flush=True)
     except Exception:
         failure = traceback.format_exc()
         (out / "error.txt").write_text(failure)
@@ -594,7 +614,7 @@ def replay_saved(args, out):
             session.close()
         write_csv(out / "solves.csv", rows)
     stats = {}
-    for mode in ("legacy", "shared"):
+    for mode in modes:
         rr = sorted([r for r in rows if r["mode"] == mode], key=lambda r: r["solve"])
         stats[mode] = {}
         for key in ("solver_seconds", "solver_cpu_seconds"):
@@ -602,21 +622,23 @@ def replay_saved(args, out):
             if v.size:
                 stats[mode][key] = {"median": float(np.median(v)), "p95": float(np.percentile(v, 95)),
                                     "max": float(v.max()), "total_all": sum(r[key] for r in rr)}
-    ratios = {key: stats["legacy"][key]["median"] / stats["shared"][key]["median"]
+    ratios = {key: stats[modes[0]][key]["median"] / stats[modes[1]][key]["median"]
               for key in ("solver_seconds", "solver_cpu_seconds")
-              if key in stats["legacy"] and key in stats["shared"]}
+              if key in stats[modes[0]] and key in stats[modes[1]]}
     summary = {"status": "pass" if failure is None and len(rows) == 2 * len(commands) else "fail",
-        "mode": "saved_retained_mpc_cache_replay", "source": str(source), "requests": len(commands),
+        "mode": "saved_retained_mpc_cache_replay" if args.replay_inner is None else "saved_retained_mpc_inner_comparison",
+        "profiles": profiles, "source": str(source), "requests": len(commands),
         "all_trajectories_and_iterations_match": all(r["reference_parity"] for r in rows),
         "source_status": source_summary.get("status"),
         "source_physical_execution_pass": source_summary.get("physical_execution_pass"),
         "source_integral_budgets_met": source_summary.get("closed_loop", {}).get("interval_budgets_met"),
         "source_summary_sha256": sha(source / "summary.json"),
         "source_dense_sha256": sha(source / "closed_loop_dense.npz"),
-        "audits_transferred_by_trajectory_parity": failure is None,
+        "audits_transferred_by_trajectory_parity": failure is None and all(r["reference_parity"] for r in rows),
         "max_trajectory_difference": max((r["trajectory_max_abs_diff"] for r in rows), default=None),
         "timing_excludes_first_solve_and_independent_audits": True,
-        "timing": stats, "median_speedup_legacy_over_shared": ratios}
+        "timing": stats,
+        ("median_speedup_legacy_over_shared" if args.replay_inner is None else "median_speedup_baseline_over_candidate"): ratios}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     print("CACHE_REPLAY " + json.dumps(summary), flush=True)
     return summary
@@ -646,6 +668,7 @@ def parse(argv=None):
     ap.add_argument("--tracking-tol", type=float, default=1.)
     ap.add_argument("--reuse-solver", action="store_true", help="retain the ALIPDDP instance and call production updateProblem between horizons")
     ap.add_argument("--binary", type=Path, default=DEFAULT_BINARY)
+    ap.add_argument("--replay-inner", type=float, help="with --replay-saved, compare inner tolerance 10 versus this value; saved campaign must use the candidate setting")
     ap.add_argument("--replay-saved", type=Path, help="paired legacy/shared cache replay of saved retained MPC requests; no plant re-integration")
     ap.add_argument("--flow-cache", choices=["legacy", "shared"], default="legacy",
                     help="exact per-stage dynamics/cost flow reuse; legacy preserves the reference cache layout")
@@ -660,7 +683,11 @@ def parse(argv=None):
                          "--solver-arg=0.1)")
     ap.add_argument("--stop-on-fail", action="store_true",
                     help="stop at the first failed solve (artifacts are kept either way)")
-    return ap.parse_args(argv)
+    args = ap.parse_args(argv)
+    if args.replay_inner is not None and (args.replay_saved is None
+            or not np.isfinite(args.replay_inner) or args.replay_inner <= 0):
+        ap.error("--replay-inner requires --replay-saved and a positive finite value")
+    return args
 
 
 def main(argv=None):

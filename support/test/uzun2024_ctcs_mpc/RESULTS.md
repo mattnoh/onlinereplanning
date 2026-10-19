@@ -104,6 +104,89 @@ optimizer superiority. Unsafe nodal tracking scores do not count as a safety
 performance improvement. These original-obstacle results do not validate the
 stressed landing MPC, whose repair remains paused at the user's request.
 
+## Verified intermediate stopping adjustment
+
+Optional addition to the fast profile:
+`--solver-arg=--inner-tol --solver-arg=100` (reference inner tolerance10).
+This advances intermediate barrier subproblems sooner. It **does not change**
+the final/global1e-6 tolerance, physical/input bounds, delta.05 or epsilon1e-6.
+The existing solver still requires final stationarity/barrier/primal/dynamics
+checks to pass. No shared solver source change was needed.
+
+P17 completed30s with15/15 `Optimal Solution`, returned modeled primal0,
+max optimality8.94937e-7, zero independently audited physical violation,
+max executed integral9.99965105e-7 and mean tracking.250055296m. Compared
+with the prior M50/shared campaign, total iterations fell593→530 (10.62%).
+
+P18 compares inner10/100 on **identical saved roots and seeds**, with separate
+retained solvers and alternating sequential solve order. Both profiles pass
+convergence and independent fine predicted constraints. Candidate trajectories
+and iteration counts exactly reproduce P17. Baseline differs (maximum saved
+trajectory-column difference.000708), so their plant audits are not transferred
+by equivalence; the actual candidate plant audit comes from full campaignP17.
+Paired iteration totals are602→530; these differ from separate-campaign totals
+because the paired roots/seeds are fixed to P17.
+
+| Paired stopping setting | Warm median [ms] | Warm p95 [ms] | Warm max [ms] | Total solver CPU [s] |
+|---|---:|---:|---:|---:|
+| Inner tolerance10 | 164.888 | 441.165 | 577.923 | 2.584386 |
+| Inner tolerance100 | 139.751 | 417.142 | 573.579 | 2.247520 |
+
+Observed median latency is15.24% lower (1.18× speedup); total solver CPU is
+13.03% lower. Worst-case latency barely improves. First solve/audits/IPC are
+excluded from warm statistics. Host load differs from previous timing tables;
+compare the two rows within this experiment, not139ms directly against earlier
+224ms or the historical SCP170ms.
+
+[Stopping comparison data](../../../logs/uzun2024_ctcs_mpc/ddp_stopping_comparison.json),
+[full MPC audit](../../../logs/uzun2024_ctcs_mpc/P17_ddp_ctcs_inner100/summary.json),
+[paired diagnostics](../../../logs/uzun2024_ctcs_mpc/P18_inner_stopping_paired/summary.json).
+
+```bash
+python ddp.py --reuse-solver --substeps 50 --flow-cache shared --solver-arg=--inner-tol --solver-arg=100 --output-dir NEW_FAST_INNER100
+python ddp.py --replay-saved ../../../logs/uzun2024_ctcs_mpc/P17_ddp_ctcs_inner100 --replay-inner 100 --output-dir NEW_STOPPING_PAIR
+```
+
+## What still fails in the stressed landing OCP
+
+The successful obstacle example establishes that folded interval CTCS and
+measured-root retained DDP MPC can work. It does **not** establish convergence
+for the landing OCP or rule out solver robustness problems at landing scales.
+No matched SCP landing reproduction has yet been validated.
+
+The retained [stressed E1 log](../../../logs/constraint_gate_20261019/comando-gate-e1-ctcs.log)
+starts with a feasible production seed but returns a physically unsafe plan:
+speed excess.29641648m/s, tilt excess1.18789182deg, spatial LOS excess.06767562m.
+Model dynamics gaps are zero and dense interval propagation discrepancy is
+1.96e-8. Thus these are substantial path-constraint failures, not an optimality
+label or plant tracking error. The [E3 iteration log](../../../logs/constraint_gate_20261019/comando-gate-e3-ctcs.log)
+shows the first full step taking normalized residual from zero to1.75e10.
+
+Relevant mechanisms requiring isolated repair tests:
+
+- The squared positive-part CTCS density has zero value/gradient while every
+  consequence is inside its limit. This also occurs in the paper model; it is
+  not intrinsically unique to landing. In landing, a strong terminal position/
+  velocity objective (weights2500/900), .1deg tilt bound and budget1e-8 create a
+  much steeper transition once a trial step crosses the physical boundary.
+- The earlier progress record reports a shifted warm seed whose new tail had
+  CTCS residual1.145e6 despite2e-9 dynamics gap: the old trajectory ended near
+  the tilt cap with outward rate, so holding the final command did not yield a
+  feasible extension. A safe finite horizon alone does not guarantee a safe
+  appended interval even with exact execution of the old prefix. That record's
+  original `/tmp` raw logs are unavailable here; a fresh persistent warm trace
+  is still needed before claiming a current causal reproduction/fix.
+- Paper density includes explicit delta.05 tightening. Current landing density
+  uses physical consequences directly, without corresponding per-limit CTCS
+  tightening. Its conservative cold seed does not constrain later iterates.
+  Appropriate margins must respect the different physical units and initial
+  clearance; copying the obstacle's dimensionless.05 would not be justified.
+
+These explain where to isolate failures, but no verified landing repair is
+claimed. Earlier stopping can accept a less stationary **feasible** iterate;
+it cannot make an infeasible returned plan acceptable. Landing repair remains
+paused, and no landing optimization experiment was run during this task.
+
 ## Verified faster DDP CTCS profile
 
 Use **`--substeps 50 --flow-cache shared`**. The horizon remains8s with17
