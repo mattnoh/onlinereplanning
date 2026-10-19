@@ -1220,3 +1220,23 @@ ongoing. Free stageN100 no accepted saved run. Heatmap clearly labeled worst
 obstacle/glide clearance; table obstacle-only, timing limitations explicit.
 Known free DDP CTCS N6 budget failure remains marked. No safety bounds,
 tightening, epsilon, optimizer or landing changes.
+
+
+## CTCS interface and deterministic-tightening review — 2026-10-19
+Read-only user question: successful paper MPC and point-mass comparisons support
+folded per-interval transcription, not a universal numerical certificate. Re-read
+local Zotero Elango2024 Theorem14/Remark15/AppendixA. Exact accumulator elimination
+preserves I_k<=B_k for per-interval increment budgets. Numerical difference: SCP
+can retain accumulator dynamics defects; folded DDP removes that channel but
+retains quadrature/physical-flow/shooting errors. Historical DDPfreeN6 replay
+36.05eps remains unresolved; do not assign cause or claim all configs reliable.
+Documented conditional B_eff=B(1+positive normalized row residual)+evaluation
+error; sufficient normalized delta_i>=(4L_i B_eff)^(1/3)+propagated residual error,
+with theorem condition B_eff<=L_i^2 dt_min^3/4 and explicit physical-unit/scaling
+conversions. Fixed pointmass mean-square B=epsilon*dt vs free integralB=epsilon.
+Existing pointmass V refinement can verify its speed bound a posteriori under
+exact ZOH flow, but lacks validated quadrature/flow/roundoff enclosures.
+Recommendation: retain folding, isolate N6 and quantify numerical contract using
+existing diagnostics before transferring deterministic margins to landing.
+Full derivation appended POINT_MASS_OPEN_LOOP.md. No new tools/log clutter,
+optimization, shared-solver edits, physical-budget changes or landing resumption.

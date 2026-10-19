@@ -202,3 +202,128 @@ logs/point_mass/audits/free_scp_strict_review.json. The correct next diagnostic 
 nonlinear-residual-aware stopping and accumulator conditioning, with physical
 limits, tightening and epsilon held fixed. No new optimization was authorized
 or run by this explanatory review.
+
+
+## Folded versus lifted CTCS: evidence and numerical guarantee
+
+2026-10-19 follow-up is a read-only mathematical/interface review, not another
+optimization campaign or an authorization to resume landing experiments.
+Primary reference re-read locally: Elango et al. (2024), Section 3.3,
+Theorem 14, Remark 15 and Appendix A, from
+`/home/lab/Zotero/storage/FGP9CC2S/Elango et al. - 2024 - Successive Convexification for Trajectory Optimization with Continuous-Time Constraint Satisfaction.pdf`.
+
+### Exact equivalence and the scope of the evidence
+
+With identical physical flow/control parameterization, density, time measure
+and positive interval budgets, the lifted formulation has
+
+    y[k+1] - y[k] = I_k,  y[k+1] - y[k] <= B_k.
+
+Eliminating y gives I_k <= B_k, exactly the folded constraint. This is the
+construction in the paper and our Uzun SCP/DDP drivers. One horizon accumulator
+with per-interval increments has the same feasible set as those folded rows
+when its dynamics hold. A single total-horizon budget is a different feasible
+set and must not be substituted silently. Shared versus per-consequence budgets
+also change the feasible set unless their allocation is matched.
+
+The successful full paper MPC runs and matched point-mass policies support the
+correctness/usefulness of this construction. They do not certify all numerical
+configurations. The historical free-time DDP N=6 policy still has independently
+replayed I=3.60518082e-10 against B=1e-11 (36.05 times B), despite physical
+clearance. Its source/grade history needs an isolated reproduction before
+assigning a cause; it is not proof that algebraic elimination is invalid.
+
+### Numerical error channels differ
+
+Let d_y = (y[k+1]-y[k]) - I_k be a lifted accumulator dynamics residual, using
+unscaled physical integral units. A lifted increment bound can permit
+I_k <= B_k + positive increment-row residual + |d_y|. Folding removes this
+extra accumulator variable/defect channel, but still relies on numerical
+quadrature and the approximate physical flow. Both also need full-rollout
+consistency across physical multiple-shooting gaps. Algorithm stopping flags
+alone do not bound all of these quantities.
+
+For a folded normalized row Qhat_k/B_k-1 <= rho_k, the computed integral obeys
+Qhat_k <= B_k*(1+rho_k). Thus a conservative true local-integral upper budget is
+
+    B_eff,k = B_k*(1+max(rho_k,0)) + eta_eval,k,
+
+where eta_eval bounds quadrature, nominal numerical-flow and roundoff error in
+integral units. Lifted SCP needs its increment-row tolerance and accumulator
+defect included after undoing the y/density scaling. This is error accounting,
+not increasing the configured optimization budget B_k. Report B_k and B_eff,k
+separately. Actual residuals should be used; an aggregate solver tolerance is
+not automatically an integral-error bound.
+
+For physical residual c_i measured in its own units, write normalized residual
+h_i=c_i/s_i, with s_i>0. Suppose the true local density is
+sum_i [h_i+delta_i]_+^2. Let L_i bound |d h_i/dt| on that continuous interval.
+The paper gives the sufficient pointwise bound
+
+    max(h_i + delta_i) <= (4*L_i*B_eff,k)^(1/3)
+
+provided B_eff,k <= L_i^2*Delta_t_min^3/4. Check this condition using a valid
+positive interval-duration lower bound, including free time. If the density has
+weights w_i, the component budget in this expression is B_eff,k/w_i. Equality
+constraints need a violation bound; inequality tightening does not establish
+exact equality satisfaction.
+
+If the globally propagated/implemented residual differs from the exact local
+model residual by at most E_i,k, a sufficient inequality tightening is
+
+    delta_i >= (4*L_i*B_eff,k)^(1/3) + E_i,k.
+
+The physical tightening is s_i*delta_i. E_i,k must be obtained by bounding
+propagated root/shooting errors; a flight guarantee additionally needs bounded
+model/tracking/timing errors. A local gap tolerance alone is not that bound.
+Avoid double counting errors already included in eta_eval. Verify error bounds
+for the actual chosen margin. For L_i=0 or when the theorem's small-budget
+condition is unavailable, do not use the cubic expression unconditionally:
+a universally sufficient Lipschitz bound is sqrt(B_eff,k/Delta_t_k)+L_i*Delta_t_k,
+which is conservative; exact interval extrema can provide a tighter certificate
+for this point-mass model.
+
+### What must be kept straight in our interface
+
+For the point-mass normalized obstacle residual, L_obs <= V/R; for its glide
+residual, L_glide <= sqrt(2)*V/R. These recover the existing physical margin
+rule R*(4*B_k*L_i)^(1/3) in exact arithmetic. Under ZOH point-mass dynamics,
+velocity is linear on each interval, so its norm maximum occurs at an endpoint;
+exact replay node velocities can validate V a posteriori for the returned
+policy. The initial guessed V is not a certificate until this check passes.
+The current speed-refinement loop checks V after solving, but does not supply
+certified quadrature/flow/roundoff bounds or a complete numerical certificate.
+
+Fixed-time point-mass rows currently constrain an interval MEAN SQUARE,
+(1/Delta_t_k)*integral sum_i [h_i+delta_i]_+^2 <= epsilon.
+Consequently their physical integral budget is B_k=epsilon*Delta_t_k.
+Free-time rows use the plain integral, B_k=epsilon. Use physical time: in the
+SCP normalized time coordinate, dy/dtau = s(tau)*density; DDP's duration action
+must carry the identical Jacobian/time factor. Numerical density scaling is
+reversed before interpreting budgets or residuals. Changing duration, units,
+normalization or density weights without these conversions changes the
+problem or invalidates the intended margin calculation.
+
+The Uzun obstacle benchmark uses its paper margin delta=.05; that successful
+profile does not by itself establish a deterministic margin for landing speed,
+tilt, angular-rate, glideslope or LOS residuals. Those need their own scales,
+derivative/domain bounds and numerical-error allowances. Near touchdown,
+spatial cone/LOS residuals with bounded derivatives need explicit treatment;
+do not transfer an obstacle's dimensionless margin to an angular/length limit.
+
+### Recommended next investigation, retaining the folded formulation
+
+1. At identical states, controls and durations, compare lifted and folded true
+   integrals and first derivatives, especially duration derivatives and fixed-
+   versus free-time normalization. Treat this as an interface equivalence test.
+2. Isolate the saved N=6 DDP discrepancy; separate transcription/configuration,
+   grading-version, quadrature and physical-flow errors before changing a solver.
+3. Add per-interval B_eff and per-consequence physical-margin diagnostics to the
+   existing auditors. First use this point-mass problem's exact flow/extrema.
+   Dense sampling and M-versus-2M agreement are useful evidence, not certified
+   numerical error bounds. A strict deterministic certificate needs validated
+   error enclosures or analytic bounds, including rounding, over each interval.
+4. Extend that numerical contract to the nonlinear paper model, then to landing
+   when its work is resumed. Hold physical limits and configured budgets fixed.
+
+No optimizer, controller or tightening configuration was changed by this review.
