@@ -5,6 +5,10 @@ returning to landing. All reported campaigns use synchronous execution: plant
 time is frozen during optimization, then the first K optimized intervals are
 applied with their specified hold. There is no ROS or tracking controller.
 
+The matched **SCP/DDP × CTCS/nodal 2×2** is now implemented and executed.
+See [RESULTS.md](RESULTS.md) for the four-case plot, tracking/clearance/timing
+table, remaining SCP nonlinear residuals and exact reproduction commands.
+
 ## Verified results (2026-10-19)
 
 Every row below completed 30 simulated seconds / 15 replans. Physical violations
@@ -130,11 +134,14 @@ python -m unittest discover -s . -p test_common.py -v
 
 ## Nodal comparator and figures
 
-`ddp.py --constraint-mode stage` replaces the CTCS interval constraints with
+`scp.py --constraint-mode stage` and `ddp.py --constraint-mode stage` replace the CTCS interval constraints with
 ordinary `g_i + delta <= 0` constraints at every selected stage and terminal
 node. It preserves the same dynamics, integrated objective, ZOH grid, sensing,
 initial state, limits, seeds and retained-solver lifecycle. The independent
 interval integrals remain diagnostics; they are not enforced in stage mode.
+SCP uses native nonconvex `.at(all_nodes)` constraints, linearized by OpenSCvx,
+and omits its obstacle `y` accumulator completely. The library clock CTCS is
+unchanged and identically inactive; it does not enforce obstacle clearance.
 
 The same-tightening comparator (`--delta .05`) is P8; an explicitly separate
 usual nodal baseline (`--delta 0`) is P9. The P8 run has feasible node rows
@@ -144,6 +151,7 @@ intersample failure is not inferred from a failed optimization. Full results,
 convergence caveats, plots and commands are in [RESULTS.md](RESULTS.md).
 
 ```bash
+python scp.py --constraint-mode stage --hold ZOH --iterations 10 --delta .05 --output-dir NEW_SCP_STAGE_005
 python ddp.py --constraint-mode stage --delta .05 --reuse-solver --output-dir NEW_STAGE_005
 python ddp.py --constraint-mode stage --delta 0 --reuse-solver --output-dir NEW_STAGE_0
 python plot_comparison.py --output-dir ../../../logs/uzun2024_ctcs_mpc/comparison_plots

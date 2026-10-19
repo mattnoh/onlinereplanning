@@ -1,3 +1,34 @@
+# Current authorized task — matched paper-example 2×2 comparison
+
+2026-10-19: user paused the landing-fix goal. No further landing experiments
+while paused. Earlier Claude landing diagnostic implementation was checkpointed
+as cbdbcd7, unverified; it is not a retained landing fix.
+Current explicit request: SCP/DDP × CTCS/node-only with performance comparison.
+Previous explanatory turn yielded no implementation progress; this turn adds
+the missing SCP nodal comparator and verifies it against saved runs.
+
+P10 hypothesis: normal nonconvex nodal SCP rows can be satisfied while the
+independently propagated continuous trajectory violates obstacles between
+nodes. Outcome is measured, not forced. Single intended change from P5:
+replace obstacle CTCS accumulator/increment rows by masked g_i+.05<=0
+at all 17 nodes, including terminal. Omit the unused obstacle accumulator
+entirely so it supplies no hidden proximal term or integral constraint.
+Keep ZOH, dt=.5, horizon8, K4, duration30, root, reference, sensing, normu<=5,
+drag, integrated objective, cost scale100, prox1, penalty1e4, 10 SCP iterations.
+The library's identically-zero clock CTCS remains audited and unchanged.
+Pass as a nodal method: complete30s, finite solutions, modeled node rows and
+physical dynamics/root defects<=1e-6, useful tracking. Independently report
+physical dense peak/duration and prediction/plant drift; dense failure must
+not be attributed to intersampling alone unless nodal/defect evidence holds.
+Integral ratios are diagnostic only for both nodal methods, not constraints.
+Measure solve wall time, first/JIT separately from subsequent solves; timing
+across Python/JAX and C++/Eigen is implementation evidence, not optimizer
+superiority or real-time certification. Saved SCP10/DDP budgets differ.
+All scenario runs sequential; Claude plotting worker edits only existing plot
+code in parallel. No shared solver edits or physical-limit changes.
+
+---
+
 # Current priority — paper CTCS MPC reproduction, then identical DDP problem
 
 User direction 2026-10-19: implement and execute the original Uzun et al.
@@ -841,3 +872,54 @@ CSV/JSON. RESULTS.md records both contrasts and convergence caveats.
 Previous explanation-only user question was NO PROGRESS; resumed by confirming
 P9 terminal state and finishing requested artifacts, not restarting runs.
 Active landing goal remains incomplete.
+
+P10 early evidence: fixed10 SCP nodal mode executes intersample obstacle
+penetration. Physical dynamics defects remain up to ~1e-3 over future horizon;
+will report explicitly instead of claiming converged zero-deviation SCP.
+P11 regression hypothesis: CTCS branch remains numerically unchanged after
+adding stage mode. Single change from saved P5: diagnostic adapter code only,
+execute first2s/one solve with original ZOH10 parameters. Pass: X/U agree with
+P5 solve0 within1e-8, same residuals, correct y state and integral rows. Short
+startup tracking status is not a full-campaign verdict. Run only after P10.
+
+P10 INVALID as intended nodal comparator: independent audit found node rows
+up to+.616, because native OpenSCvx default lam_vb=0 makes nodal slack free.
+Actual node physicalg+.54957, dense+.70326. Retained as setup failure, not
+intersample evidence. No claim it satisfies node constraints.
+P10b hypothesis: matching nodal L1 slack weight to w_ep=1e4 enforces the intended
+ordinary node constraints. Single change: lam_vb=penalty (lam_vc already1e4).
+CTCS branch has no nonconvex obstacle node rows, so this setting has no effect
+there. Same physicalOCP/settings/grid/teniterations. Require node<=1e-6 before
+attributing dense violations to intersampling; report nonlinear gaps separately.
+Run after P11 regression finishes. Plot case must reference P10b, not invalidP10.
+P11 CTCS regression PASS: saved X/U exactly equal P5 first solve (both0 max
+absolute difference). Short-run aggregate fail is startup tracking criterion,
+not a CTCS regression. Its source predates adding explicit lam_vb; because
+CTCS has no nonconvex nodal rows this has no objective contribution. Verify
+final-source branch again after P10b before claiming final regression.
+First provisional plots from invalid P10 are archived as comparison_2x2_invalid_P10;
+they must not be delivered as the matched comparison.
+
+P10b complete30s/15 measured-root replans. Actual executed node endpoints are
+all physically safe (maxg=-.0499976043); dense refined peakg=.7896887086,
+physical violation2.623946857s across7 intersample-only intervals, geometric
+penetration.406581m. No obstacle y state exists in saved slices; library clock
+accumulator<=1.16e-11. No integral budget is applied to stage acceptance.
+All15 MPC solves run10 SCP iterations, final conic statusoptimal. Strict
+nonlinear gate FAIL: max modeled tightened node residual2.395731e-6 exceeds
+1e-6, future physical dynamics defect.0120815, cost-integrator defect1.18817.
+Rootdefect4.44e-15; maximum executed prediction/plant discrepancy1.65794e-4.
+Do not claim zero-deviation or fully converged SCP. Actual node-safe/dense-
+unsafe execution is independently established despite these residuals.
+Same physical benchmark with .05 margin: SCPCTCS physicalduration0,
+DDPCTCS0, DDPnodal2.19815585s. Allfixed30s / sameZOH / grid / physicalsettings.
+Warm median solve seconds: SCPCTCS .169795, SCPnodal .207791,
+DDPCTCS .416259, DDPnodal .134705. DDPnodal warmmax3.62285s (threecapped
+solves), so median alone is inadequate. Separate initialization, IPC and audit
+costs; do not infer solver superiority from unmatched iteration/convergence.
+P11b final-source CTCS regression PASS, X/U parityexact0 against savedP5solve0.
+18 existing independent model/audit tests PASS. No sharedsolverlibrarychange.
+2x2 and performance plots rebuilt from saved evidence, initiallegendoverlap
+caught by visualinspection and repaired. Plot formatting retry did not rerun
+optimization or alter scenario data. Allfailures remain labeled.
+Landing objective remains PAUSED; no landing experiments executed this task.

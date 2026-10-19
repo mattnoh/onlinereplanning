@@ -10,7 +10,10 @@ replan is ``reset()`` + ``solve(max_iters=J, continuous=True)``.
 Plant time is frozen during solves (synchronous): after each solve the first K
 intervals are applied with the same hold, through ``common.replay_interval``.
 Each solve and each executed interval is re-audited independently at 1 ms.
-See SCP_IMPLEMENTATION.md for the representation and the assumption list.
+With ``--constraint-mode stage``, obstacle rows are ordinary nonconvex
+inequalities at all nodes including terminal; the obstacle y state and its
+increment constraints are absent. Integral values are then audit diagnostics.
+See README.md for the representation and explicit assumptions.
 """
 from __future__ import annotations
 
@@ -59,9 +62,10 @@ ASSUMPTIONS = {
                "and its virtual-control weight by cost_scale. Paper scaling/weights are unreported.",
     "lam_prox": "OpenSCvx proximal term is lam_prox*||z-z_ref||^2; paper (15) is w_prox/2*||.||^2, "
                 "so lam_prox = w_prox/2.",
+    "lam_vb": "Nodal nonconvex-row slack L1 weight equals penalty (1e4 by default); OpenSCvx default zero would leave node rows unenforced. CTCS mode has no nonconvex obstacle nodal rows, so this adds no cost there.",
     "lam_vc": "L1 virtual-control weight on scaled defects; physical l weight is penalty/cost_scale.",
     "terminal": "no terminal cost/constraint besides l(N) (paper L_h, P_h unspecified for the example).",
-    "state_bounds": "generous redundant nodal boxes: |r|,|v|<=1e3, |l|<=1e6, |y|<=1e3; y has NO "
+    "state_bounds": "CTCS mode only has the obstacle y state. Generous redundant nodal boxes: |r|,|v|<=1e3, |l|<=1e6, |y|<=1e3; y has NO "
                     "global <=eps bound; only the cross-node increment rows.",
     "loop_termination": "Execute [0,T): solve at tc<T, clip the last execution to T; avoid an extra step beyond the reported simulation.",
     "ode": "Dopri8, rtol=atol=ode_tol (default 1e-10) inside OpenSCvx; warm-start tails / augmented "
@@ -217,17 +221,28 @@ def build(args):
     for term in terms[1:]:
         density = density + term
     dynamics = {"position": vel, "velocity": u - CD * speed * vel,
-                "l": ox.Sum((pos - ref) * (pos - ref)), "y": density}
+                "l": ox.Sum((pos - ref) * (pos - ref))}
+    states = [pos, vel, l]
     constraints = [(ox.linalg.Norm(u) <= args.umax).convex()]
-    # Paper (12c): one horizon accumulator, per-interval increment budgets.
-    constraints += [(y.at(k + 1) - y.at(k) <= args.epsilon).convex() for k in range(n - 1)]
+    if args.constraint_mode == "ctcs":
+        dynamics["y"] = density
+        states.append(y)
+        # Paper (12c): one horizon accumulator, per-interval increment budgets.
+        constraints += [(y.at(k + 1) - y.at(k) <= args.epsilon).convex() for k in range(n - 1)]
+    else:
+        # Ordinary NONCONVEX nodal rows: linearized by SCP, not CTCS-wrapped.
+        # Mask is frozen from the measured root, identically to the CTCS case.
+        # Include the terminal node. No y state or obstacle integral constraint.
+        for i, c in enumerate(CENTERS):
+            g = 1. - ox.linalg.Norm((pos - c) * SHAPE)
+            constraints.append((mask[i] * (g + args.delta) <= 0.).at(list(range(n))))
 
     ode_kwargs = {"rtol": args.ode_tol, "atol": args.ode_tol, "num_substeps": 30}
     problem = ox.Problem(
-        dynamics=dynamics, states=[pos, vel, l, y], controls=[u], time=t,
+        dynamics=dynamics, states=states, controls=[u], time=t,
         constraints=constraints, N=n, float_dtype="float64",
         algorithm={"k_max": args.iterations, "lam_cost": args.cost_scale, "lam_prox": args.prox / 2.,
-                   "lam_vc": args.penalty, "ep_tr": 0., "ep_vc": 0., "ep_vb": 0.,
+                   "lam_vc": args.penalty, "lam_vb": args.penalty, "ep_tr": 0., "ep_vc": 0., "ep_vb": 0.,
                    "autotuner": ox.ConstantProximalWeight()},
         discretizer={"type": "VectorizeDiscretizeLinearize", "ode_solver": "Dopri8",
                      "diffrax_kwargs": ode_kwargs},
@@ -240,7 +255,9 @@ def build(args):
 
 def set_guess(h, xi, U, l, y, args):
     h["position"].guess = xi[:, :2].copy(); h["velocity"].guess = xi[:, 2:].copy()
-    h["l"].guess = l[:, None].copy(); h["y"].guess = y[:, None].copy()
+    h["l"].guess = l[:, None].copy()
+    if args.constraint_mode == "ctcs":
+        h["y"].guess = y[:, None].copy()
     h["u"].guess = U.copy()
     h["time"].guess = np.linspace(0., args.horizon, args.nodes)[:, None]
 
@@ -267,11 +284,11 @@ def audit_plan(Xi, L, Y, U, tc, dt, mask, args):
         state = np.asarray(ss["end"], float)
         rows.append({
             "k": k, "t0": tc + k * dt,
-            "solver_y_increment": float(Y[k + 1] - Y[k]),
+            "solver_y_increment": float(Y[k + 1] - Y[k]) if Y is not None else None,
             "solver_l_increment": float(L[k + 1] - L[k]),
             "ms_integral": float(ms["integral"]), "ms_cost": float(ms["cost"]),
             "ms_phys_defect_inf": float(np.max(abs(np.asarray(ms["end"]) - Xi[k + 1]))),
-            "ms_y_defect": float(abs(Y[k + 1] - Y[k] - ms["integral"])),
+            "ms_y_defect": float(abs(Y[k + 1] - Y[k] - ms["integral"])) if Y is not None else None,
             "ms_l_defect": float(abs(L[k + 1] - L[k] - ms["cost"])),
             "ms_max_physical_excess": float(ms["max_physical_excess"]),
             "ss_integral": float(ss["integral"]),
@@ -311,9 +328,12 @@ def provenance(args):
                                          "penalty": "paper does not report w_ep; CLI default 1e4",
                                          "prox": "paper does not report w_prox; CLI default 1",
                                          "x0": "paper does not report x0 numerically; default [-10,0,0,0]"},
-        "representation": "single user state y, dy = sum_i mask_i*pos(1-||S(r-c_i)||+delta)^2, y(0)=0, "
+        "constraint_mode": args.constraint_mode, "interval_budget_enforced": args.constraint_mode == "ctcs",
+        "representation": ("single user state y, dy = sum_i mask_i*pos(1-||S(r-c_i)||+delta)^2, y(0)=0, "
                           "native convex CrossNode rows y.at(k+1)-y.at(k)<=epsilon, k=0..N-2; "
-                          "no ox.ctcs augmentation; l(N) minimized.",
+                          "no ox.ctcs augmentation; l(N) minimized." if args.constraint_mode == "ctcs" else
+                          "Nonconvex mask_i*(g_i+delta)<=0 at all N nodes including terminal, "
+                          "no obstacle y state, no integral constraint; l(N) minimized."),
     }
 
 
@@ -348,7 +368,9 @@ def run(args, out):
         t_init = time.perf_counter(); problem.initialize()
         summary["initialize_seconds"] = time.perf_counter() - t_init
         sl = problem.slices
-        idx = {k: sl[k] for k in ("position", "velocity", "l", "y", "u")}
+        idx = {k: sl[k] for k in ("position", "velocity", "l", "u")}
+        if args.constraint_mode == "ctcs":
+            idx["y"] = sl["y"]
 
         plant = np.asarray(args.x0, float); tc = 0.; i = 0
         prev = None
@@ -361,7 +383,9 @@ def run(args, out):
             else:
                 gxi, gU, gl, gy = warm_start(prev[0], prev[1], root, tc, args, mask.astype(float), dt)
             h["position"].initial = root[:2]; h["velocity"].initial = root[2:]
-            h["l"].initial = [0.]; h["y"].initial = [0.]
+            h["l"].initial = [0.]
+            if args.constraint_mode == "ctcs":
+                h["y"].initial = [0.]
             set_guess(h, gxi, gU, gl, gy, args)
             problem.parameters["tc"] = float(tc)
             problem.parameters["obs_mask"] = mask.astype(float)
@@ -381,9 +405,11 @@ def run(args, out):
             cvx = getattr(getattr(problem, "_solver", None), "_problem", None)
             X = np.asarray(result.x, float); U = np.asarray(result.u, float)
             Xi = np.c_[X[:, idx["position"]], X[:, idx["velocity"]]]
-            L = X[:, idx["l"]].ravel(); Y = X[:, idx["y"]].ravel(); Uc = U[:, idx["u"]]
+            L = X[:, idx["l"]].ravel()
+            Y = X[:, idx["y"]].ravel() if args.constraint_mode == "ctcs" else None
+            Uc = U[:, idx["u"]]
             # Saved for every returned solve, including one that fails a later check.
-            for key, v in (("X", X), ("U", U), ("guess_X", np.c_[gxi, gl, gy]), ("guess_U", gU),
+            for key, v in (("X", X), ("U", U), ("guess_X", np.c_[gxi, gl, gy] if args.constraint_mode == "ctcs" else np.c_[gxi, gl]), ("guess_U", gU),
                            ("tc", tc), ("mask", mask), ("root", root)):
                 arrays[key].append(v)
             vc = np.asarray(result.VC_history[-1]) if len(result.VC_history) else np.array([np.nan])
@@ -395,8 +421,8 @@ def run(args, out):
                 "J_vc": float(np.ravel(result.J_vc_history)[-1]) if np.size(result.J_vc_history) else None,
                 "J_vb": float(np.ravel(result.J_vb_history)[-1]) if np.size(result.J_vb_history) else None,
                 "max_abs_virtual_control": float(np.nanmax(abs(vc))),
-                "l_N": float(L[-1]), "y_N": float(Y[-1]),
-                "solver_y_increment_max": float(np.max(np.diff(Y))),
+                "l_N": float(L[-1]), "y_N": float(Y[-1]) if Y is not None else None,
+                "solver_y_increment_max": float(np.max(np.diff(Y))) if Y is not None else None,
                 "max_u_norm": float(np.max(np.linalg.norm(Uc, axis=1))),
                 # builder.py always adds CTCS(time in [min, max]); with bounds [-1, t_h+1]
                 # its integrand is identically zero on the 0..t_h clock, so this must be 0.
@@ -420,7 +446,7 @@ def run(args, out):
                 "ms_integral_max": ms_int,
                 "ms_budget_met": bool(ms_int <= args.epsilon * (1 + 1e-6)),
                 "ms_phys_defect_max": max(r["ms_phys_defect_inf"] for r in rows),
-                "ms_y_defect_max": max(r["ms_y_defect"] for r in rows),
+                "ms_y_defect_max": max(r["ms_y_defect"] for r in rows) if Y is not None else None,
                 "ms_l_defect_max": max(r["ms_l_defect"] for r in rows),
                 "ss_integral_max": max(r["ss_integral"] for r in rows),
                 "ss_max_physical_excess": max(r["ss_max_physical_excess"] for r in rows),
@@ -428,11 +454,21 @@ def run(args, out):
                 "u_norm_excess": float(np.max(np.linalg.norm(Uc, axis=1)) - args.umax),
             })
             rec["defects_ok"] = bool(rec["ms_phys_defect_max"] <= args.defect_tol
-                                     and rec["ms_y_defect_max"] <= args.defect_tol * args.epsilon
+                                     and (Y is None or rec["ms_y_defect_max"] <= args.defect_tol * args.epsilon)
                                      and rec["ms_l_defect_max"] <= args.defect_tol)
             rec["certified"] = bool(rec["defects_ok"] and rec["ms_budget_met"]
                                     and rec["ss_max_physical_excess"] <= args.excess_tol
                                     and rec["u_norm_excess"] <= 1e-8)
+            node_rows = np.where(mask[None, :], g_np(Xi[:, :2]) + args.delta, -np.inf)
+            rec["max_modeled_nodal_constraint"] = float(np.max(node_rows)) if mask.any() else -1.
+            rec["root_defect_inf"] = float(np.max(abs(Xi[0] - root)))
+            if args.constraint_mode == "stage":
+                rec["certified"] = bool(rec["defects_ok"]
+                    and rec["root_defect_inf"] <= args.defect_tol
+                    and rec["max_modeled_nodal_constraint"] <= args.defect_tol
+                    and rec["u_norm_excess"] <= args.defect_tol)
+            rec["constraint_mode"] = args.constraint_mode
+            rec["interval_budget_enforced"] = args.constraint_mode == "ctcs"
             rec["status"] = "solved"
 
             # Apply first K intervals to the plant with the matching hold.
@@ -453,7 +489,7 @@ def run(args, out):
                     "violation_duration": float(rep["violation_duration"]),
                     "min_clearance": float(rep["min_clearance"]),
                     "predicted_minus_plant_inf": float(np.max(abs(Xi[k + 1] - end))),
-                    "solver_y_increment": float(Y[k + 1] - Y[k]),
+                    "solver_y_increment": float(Y[k + 1] - Y[k]) if Y is not None else None,
                     **{f"x_end_{j}": float(v) for j, v in enumerate(end)},
                 })
                 executed.append(rep)
@@ -507,10 +543,10 @@ def run(args, out):
         ok = (summary["stage"] == "done" and exec_rows
               and all(s.get("status") == "solved" for s in solves)
               and summary["physical_execution_pass"] and summary["useful_tracking_pass"]
-              and closed["interval_budgets_met"])
+              and (args.constraint_mode == "stage" or closed["interval_budgets_met"]))
         summary["status"] = "pass" if ok else "fail"
         summary["pass_definition"] = ("all solves completed with exactly the requested iterations, finite, "
-                                      "AND closed-loop physical/input limits, executed interval budgets, and mean tracking error <= tracking_tol. "
+                                      "AND closed-loop physical/input limits, executed interval budgets ONLY for CTCS mode, and mean tracking error <= tracking_tol. "
                                       "Per-solve 'certified' and interval budgets are reported separately.")
         common.save_json(out / "summary.json", summary)
         files = [out / f for f in ("config.json", "summary.json", "solves.csv", "plan_intervals.csv",
@@ -530,6 +566,8 @@ def run(args, out):
 def parse(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common.add_common_args(ap)  # shared defaults; --penalty -> lam_vc, --prox -> 2*lam_prox
+    ap.add_argument("--constraint-mode", choices=["ctcs", "stage"], default="ctcs",
+                    help="CTCS interval budgets, or ordinary nonconvex obstacle rows at all nodes (no y state)")
     ap.add_argument("--cost-scale", type=float, default=100., help="integrated cost state scale; lam_cost compensated to preserve physical objective")
     ap.add_argument("--umax", type=float, default=common.U_MAX)
     ap.add_argument("--ode-tol", type=float, default=1e-10)

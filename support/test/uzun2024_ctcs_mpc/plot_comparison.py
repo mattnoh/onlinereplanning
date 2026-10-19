@@ -1,4 +1,4 @@
-"""Compare continuous-time constraint maintenance: SCP CTCS vs DDP CTCS vs DDP nodal-only.
+"""Compare continuous-time constraint maintenance: {SCP, DDP} x {CTCS, nodal-only}.
 
 Reads only saved campaign outputs (no solving, no re-integration):
 
@@ -7,6 +7,7 @@ Reads only saved campaign outputs (no solving, no re-integration):
   <case>/summary.json            closed_loop.common_summarize and pass/fail flags
   <case>/config.json             epsilon, delta
   <case>/arrays.npz              per-solve sensed mask (only for the delta=0.05 cross-check)
+  <case>/solves.csv              per-solve timing / iteration counts (see PERF_DEFINITIONS)
 
 Physical constraint: g_i = 1 - ||S (r - c_i)||_2 for all five obstacles (common.obstacle_g);
 g_i > 0 is inside obstacle i.  Every "g" below is the signed max_i g_i, never the pointwise
@@ -16,7 +17,11 @@ Outputs (in --output-dir):
   fig_comparison.{png,pdf}    trajectories, max_i g_i(t) with node markers, tracking error,
                               audited per-interval integral / epsilon
   fig_intersample.{png,pdf}   worst observed nodal-only interval: dense g(t), node endpoints
-  comparison_stats.json       per-case extrema, durations, node-vs-dense evidence, run flags
+  fig_2x2.{png,pdf}           SCP CTCS | SCP nodal / DDP CTCS | DDP nodal, shared geometry and
+                              g axis (only when all four cases are loaded)
+  fig_performance.{png,pdf}   tracking error, physical max g, per-solve solver time
+  comparison_stats.json       per-case extrema, durations, node-vs-dense evidence, run flags,
+                              solver time / iteration statistics
   comparison_stats.csv        flat version of the per-case statistics
   executed_intervals_all.csv  per executed interval, all cases (node, dense and refined g)
   plotted_series.csv          dense series exactly as plotted (deduplicated junctions)
@@ -50,12 +55,16 @@ DEFAULT_LOGS = Path(__file__).resolve().parents[3] / "logs" / "uzun2024_ctcs_mpc
 # not part of the matched comparison, "supplementary" = statistics only.
 # nodal: constraint enforced only at nodes (candidate for intersample violation close-up).
 CASES = {
-    "SCP3FOH": dict(dir="P3_foh_costscale100", label="SCP CTCS, FOH, 3 it.",
+    "SCP3FOH": dict(dir="P3_foh_costscale100", label="SCP CTCS, FOH, 3 it. (supplementary FOH)",
                     role="supplementary", nodal=False, color="#56B4E9", ls="-"),
-    "SCP10FOH": dict(dir="P4_foh_10iters", label="SCP CTCS, FOH, 10 it.",
+    "SCP10FOH": dict(dir="P4_foh_10iters", label="SCP CTCS, FOH, 10 it. (supplementary FOH)",
                      role="supplementary", nodal=False, color="#E69F00", ls="-"),
     "SCP10ZOH": dict(dir="P5_zoh_10iters", label="SCP CTCS, ZOH, 10 it.",
                      role="main", nodal=False, color="#0072B2", ls="-"),
+    # same ZOH / 10 it. / cost scale 100 / delta 0.05 settings as P5, scp.py --constraint-mode stage
+    "SCPNodal": dict(dir="P10b_scp_stage_zoh_10iters", label=r"SCP nodal only, ZOH, 10 it., $g+0.05\leq 0$",
+                     short=r"SCP nodal, $g+0.05\leq 0$",
+                     role="main", nodal=True, color="#882255", ls="-"),
     "DDPCTCS": dict(dir="P7_ddp_zoh_reuse", label="DDP CTCS, ZOH",
                     role="main", nodal=False, color="#009E73", ls="-"),
     "DDPNodal": dict(dir="P8_ddp_stage_tightened", label=r"DDP nodal only, $g+0.05\leq 0$",
@@ -67,6 +76,11 @@ CASES = {
                       role="separate", nodal=True, color="#CC79A7", ls="--"),
 }
 DEFAULT_CASES = list(CASES)
+# fig_2x2 layout: (panel name, case key, title); rows = solver, columns = constraint handling
+PANELS = [("SCPCTCS", "SCP10ZOH", "SCP, CTCS (ZOH, 10 it.)"),
+          ("SCPNodal", "SCPNodal", r"SCP, nodal only, $g+0.05\leq 0$"),
+          ("DDPCTCS", "DDPCTCS", "DDP, CTCS (ZOH)"),
+          ("DDPNodal", "DDPNodal", r"DDP, nodal only, $g+0.05\leq 0$")]
 NODE_DT = 0.5
 TIME_TOL = 1e-7
 
@@ -283,6 +297,68 @@ def case_stats(c, iv):
     return st
 
 
+PERF_DEFINITIONS = {
+    "solve_time_s (SCP)": "solves.csv solve_seconds: Python perf_counter around problem.reset() + "
+                          "problem.solve(max_iters=J) in scp.py (Python + JAX + convex subproblem "
+                          "solver, fixed J iterations). Excludes problem.initialize() (JAX tracing / "
+                          "compilation, reported as initialize_seconds) and all audits/replays.",
+    "solve_time_s (DDP)": "solves.csv solver_seconds: the C++ ALIPDDP solver's own timer (diag.json "
+                          "solver.seconds), iterated to tolerance. Excludes process/IPC/file I/O and "
+                          "all audits/replays.",
+    "wall_time_s (DDP)": "solves.csv wall_seconds: Python perf_counter around the C++ call (process "
+                         "spawn or persistent-session IPC, CSV/JSON I/O); excludes audits.",
+    "first / warm": "solve 0 (cold seed, plus any residual first-call overhead) is reported alone; "
+                    "warm_* statistics exclude solve 0. p95 is numpy linear interpolation over few "
+                    "solves (one per executed MPC step), not a tail estimate.",
+    "comparability": "SCP (Python/JAX, fixed iteration count) and DDP (C++, converge-to-tolerance) "
+                     "times come from different implementations, languages and stopping rules in "
+                     "single non-dedicated runs; they show per-method cost scale only and do NOT "
+                     "support a speed ranking of the algorithms.",
+}
+
+
+def _dist(v, prefix):
+    v = np.asarray(v, float)
+    if v.size == 0:
+        return {f"{prefix}_{k}": None for k in ("n", "median", "p95", "max", "mean")}
+    return {f"{prefix}_n": int(v.size), f"{prefix}_median": float(np.median(v)),
+            f"{prefix}_p95": float(np.percentile(v, 95)), f"{prefix}_max": float(v.max()),
+            f"{prefix}_mean": float(v.mean())}
+
+
+def perf_stats(c):
+    """Solver timing / iterations from saved solves.csv (audits never included)."""
+    rows = c["solves"]
+    if rows and "solve_seconds" in rows[0]:
+        solver, tkey, ikey = "SCP (Python/JAX, openscvx)", "solve_seconds", "iterations"
+        note = PERF_DEFINITIONS["solve_time_s (SCP)"]
+    elif rows and "solver_seconds" in rows[0]:
+        solver, tkey, ikey = "DDP (C++, ALIPDDP)", "solver_seconds", "solver_iterations"
+        note = PERF_DEFINITIONS["solve_time_s (DDP)"]
+    else:
+        return {"perf_solver": None, "perf_timing_source": "solves.csv missing or without timing"}, None
+    ok = [r for r in rows if np.isfinite(_f(r, tkey))]
+    t = np.array([_f(r, tkey) for r in ok])
+    it = np.array([_f(r, ikey) for r in ok])
+    wall = np.array([_f(r, "wall_seconds") for r in ok])
+    p = {"perf_solver": solver, "perf_timing_source": f"solves.csv:{tkey}", "perf_timing_note": note,
+         "solve_time_first_s": float(t[0]) if t.size else None}
+    p.update(_dist(t, "solve_time_all_s"))
+    p.update(_dist(t[1:], "solve_time_warm_s"))
+    p["solve_time_total_s"] = float(t.sum()) if t.size else None
+    init = c["summary"].get("initialize_seconds")
+    p["initialize_seconds_excluded"] = init  # SCP JAX setup/compile; None for DDP
+    if np.isfinite(wall).any():
+        p["wall_time_first_s"] = float(wall[0])
+        p.update(_dist(wall[1:], "wall_time_warm_s"))
+    p["iterations_first"] = int(it[0]) if it.size and np.isfinite(it[0]) else None
+    p.update(_dist(it, "iterations_all"))
+    p.update(_dist(it[1:], "iterations_warm"))
+    p["iterations_total"] = int(np.nansum(it)) if it.size else None
+    series = dict(solve=np.array([int(_f(r, "solve")) for r in ok]), t=t, wall=wall, it=it)
+    return p, series
+
+
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
@@ -394,6 +470,123 @@ def fig_comparison(cases, ivs, out, glow):
     ]
     fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False)
     return _save(fig, out, "fig_comparison")
+
+
+def _node_times(iv):
+    return np.array([r["t0"] for r in iv] + [iv[-1]["t0"] + iv[-1]["duration"]])
+
+
+def fig_2x2(by_key, ivs, stats, out, glow):
+    """Rows: SCP, DDP; columns: CTCS, nodal only.  Identical xy limits and g axis in all panels."""
+    cases = [by_key[k] for _, k, _ in PANELS]
+    semi = (1.0 + common.DELTA_OBS) / common.SHAPE_DIAG
+    tr = np.linspace(0.0, common.PAPER_VALUES["duration"], 3001)
+    rr = common.reference(tr)
+    xs = np.concatenate([rr[:, 0]] + [c["X"][:, 0] for c in cases]
+                        + [common.CENTERS[:, 0] - semi[0], common.CENTERS[:, 0] + semi[0]])
+    ys = np.concatenate([rr[:, 1]] + [c["X"][:, 1] for c in cases]
+                        + [common.CENTERS[:, 1] - semi[1], common.CENTERS[:, 1] + semi[1]])
+    xlim, ylim = (xs.min() - 0.3, xs.max() + 0.3), (ys.min() - 0.3, ys.max() + 0.3)
+    gtop = max(0.05, max(float(c["gmax"].max()) for c in cases) * 1.15 + 0.02)
+    tmax = max(float(c["t"][-1]) for c in cases)
+
+    fig = plt.figure(figsize=(7.2, 7.4), layout="constrained")
+    subs = fig.subfigures(2, 2, wspace=0.02, hspace=0.02)
+    for n, ((name, key, title), sf) in enumerate(zip(PANELS, subs.ravel())):
+        c, iv, st = by_key[key], ivs[key], stats[key]
+        sp = c["spec"]
+        ax_xy, ax_g = sf.subplots(2, 1, gridspec_kw={"height_ratios": [2.3, 1.0]})
+        nt = _node_times(iv)
+        ni = [_idx_at(c["t"], x) for x in nt]
+        viol = c["gmax"] > 0.0
+
+        _ellipses(ax_xy)
+        ax_xy.plot(rr[:, 0], rr[:, 1], color="k", lw=0.9, ls=(0, (1.5, 1.5)), zorder=2)
+        ax_xy.plot(c["X"][:, 0], c["X"][:, 1], color=sp["color"], ls=sp["ls"], zorder=3)
+        ax_xy.plot(c["X"][ni, 0], c["X"][ni, 1], "o", ms=2.6, mfc="white", mec=sp["color"], mew=0.7,
+                   zorder=4)
+        _violation_overlay(ax_xy, c["X"][:, 0], c["X"][:, 1], viol, color="#C00000", lw=2.6, zorder=5)
+        ax_xy.set_xlim(*xlim)
+        ax_xy.set_ylim(*ylim)
+        ax_xy.set_aspect("equal", adjustable="box")
+        ax_xy.set(xlabel="$x$ [m]", ylabel="$y$ [m]", title=f"({chr(97 + n)}) {title}")
+
+        mpe = st["max_physical_excess"] or 0.0
+        txt = (rf"max $g$: refined {st['max_g_refined_audited']:+.4f}" "\n"
+               rf"  dense 1 ms {st['max_g_dense_1ms']:+.4f}, nodes {st['max_g_nodes_0p5s']:+.4f}" "\n"
+               + (f"VIOLATION {st['violation_duration_audited_s']:.3f} s, "
+                  f"{st['n_intervals_physical_violation']} int. "
+                  f"({st['n_intervals_intersample_only_violation']} intersample-only)"
+                  if mpe > 0.0 else r"no physical violation ($\max g\leq 0$)")
+               + f"\nmean tracking err. {st['mean_tracking_error_audited_m']:.3f} m")
+        ax_xy.text(0.02, 0.02, txt, transform=ax_xy.transAxes, fontsize=5.8, va="bottom", ha="left",
+                   color="#C00000" if mpe > 0.0 else "k", linespacing=1.3,
+                   bbox=dict(fc="white", ec="0.7", lw=0.4, alpha=0.9), zorder=6)
+
+        ax_g.axhspan(-common.DELTA_OBS, 0.0, color="#FFD27F", alpha=0.35, lw=0, zorder=0)
+        ax_g.axhline(0.0, color="k", lw=0.9)
+        ax_g.axhline(-common.DELTA_OBS, color="0.3", lw=0.8, ls=(0, (3, 2)))
+        ax_g.plot(c["t"], np.maximum(c["gmax"], glow - 1), color=sp["color"], ls=sp["ls"], zorder=3)
+        ax_g.plot(nt, c["gmax"][ni], "o", ms=2.4, mfc="white", mec=sp["color"], mew=0.7, zorder=4)
+        ax_g.fill_between(c["t"], 0.0, c["gmax"], where=viol, color="#C00000", alpha=0.45, lw=0, zorder=2)
+        ax_g.set_ylim(glow, gtop)
+        ax_g.set_xlim(0.0, tmax)
+        ax_g.set(xlabel="$t$ [s]", ylabel=r"$\max_i g_i(t)$")
+
+    handles = [
+        Line2D([], [], color="k", lw=0.9, ls=(0, (1.5, 1.5)), label=r"reference $r_{\rm ref}(t)$"),
+        Patch(fc="0.80", ec="0.25", label=r"obstacle ($g=0$)"),
+        Line2D([], [], color="0.25", lw=0.7, ls=(0, (3, 2)), label=r"tightened $g=-0.05$"),
+        Line2D([], [], marker="o", ls="none", ms=3, mfc="white", mec="0.2", label="executed nodes (0.5 s)"),
+        Patch(fc="#FFD27F", alpha=0.6, label="inside margin, physically safe"),
+        Patch(fc="#C00000", alpha=0.6, label=r"physical violation $g>0$ (dense 1 ms)"),
+    ]
+    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False,
+               title=rf"All five obstacles; $g$ axis clipped below {glow:g}; refined peaks from DOP853 audit",
+               title_fontsize=6.2)
+    return _save(fig, out, "fig_2x2")
+
+
+def fig_performance(cases, stats, series, out):
+    fig, axs = plt.subplots(1, 3, figsize=(7.2, 2.7), constrained_layout=True,
+                            gridspec_kw={"width_ratios": [1.0, 1.0, 1.5]})
+    ax_e, ax_g, ax_t = axs
+    names = [{"SCP10ZOH": "SCP CTCS", "SCPNodal": "SCP nodal",
+              "DDPCTCS": "DDP CTCS", "DDPNodal": "DDP nodal"}.get(c["key"], c["key"]) for c in cases]
+    cols = [c["spec"]["color"] for c in cases]
+    x = np.arange(len(cases))
+    track = [stats[c["key"]]["mean_tracking_error_audited_m"] for c in cases]
+    gref = [stats[c["key"]]["max_g_refined_audited"] for c in cases]
+    gref = [np.nan if v is None else v for v in gref]
+    ax_e.bar(x, track, color=cols)
+    ax_e.set(ylabel="mean tracking error [m]", title="(a) Tracking")
+    ax_g.bar(x, gref, color=cols)
+    ax_g.axhline(0.0, color="k", lw=0.9)
+    ax_g.axhline(-common.DELTA_OBS, color="0.3", lw=0.8, ls=(0, (3, 2)))
+    for xi, v in zip(x, gref):
+        if np.isfinite(v):
+            ax_g.annotate(f"{v:+.3f}", (xi, v), ha="center", va="bottom" if v > 0 else "top",
+                          fontsize=5.5, color="#C00000" if v > 0 else "k")
+    ax_g.set(ylabel=r"physical max $g$ (refined audit)", title=r"(b) Physical max $g$ ($>0$: violation)")
+    for ax in (ax_e, ax_g):
+        ax.set_xticks(x, names, rotation=35, ha="right")
+    for c in cases:
+        s = series.get(c["key"])
+        if s is None or s["t"].size == 0:
+            continue
+        sp = c["spec"]
+        ax_t.plot(s["solve"], s["t"], marker="o", ms=2.5, color=sp["color"], ls=sp["ls"],
+                  label=f"{c['key']} ({stats[c['key']]['perf_timing_source'].split(':')[1]})")
+        ax_t.plot(s["solve"][:1], s["t"][:1], marker="s", ms=5, mfc="none", mec=sp["color"], ls="none")
+    ax_t.set_yscale("log")
+    ax_t.set(xlabel="solve index (0 = first, cold)", ylabel="solver time per solve [s]",
+             title="(c) Solver time (audits excluded)")
+    ax_t.legend(fontsize=5.5, frameon=False)
+    ax_t.text(0.01, 0.01, "SCP: Python/JAX, fixed iterations, init/JIT excluded\n"
+              "DDP: C++ solver timer, to tolerance\ndifferent implementations: no speed ranking",
+              transform=ax_t.transAxes, fontsize=5.5, va="bottom",
+              bbox=dict(fc="white", ec="none", alpha=0.85))
+    return _save(fig, out, "fig_performance")
 
 
 def _closeup_target(c, iv):
@@ -559,9 +752,22 @@ def main(argv=None):
     a.output_dir.mkdir(parents=True, exist_ok=True)
     _style()
     ivs = {c["key"]: interval_table(c) for c in cases}
-    stats = [case_stats(c, ivs[c["key"]]) for c in cases]
+    stats, perf_series = [], {}
+    for c in cases:
+        st = case_stats(c, ivs[c["key"]])
+        perf, perf_series[c["key"]] = perf_stats(c)
+        st.update(perf)
+        stats.append(st)
+    by_stat = {s["case"]: s for s in stats}
 
     files = fig_comparison(plotted, ivs, a.output_dir, a.g_floor)
+    by_key = {c["key"]: c for c in cases}
+    absent = [k for _, k, _ in PANELS if k not in by_key]
+    if absent:
+        print(f"note: fig_2x2 not produced, missing case(s): {', '.join(absent)}", file=sys.stderr)
+    else:
+        files += fig_2x2(by_key, ivs, by_stat, a.output_dir, a.g_floor)
+    files += fig_performance([c for c in plotted if c["spec"]["role"] == "main"], by_stat, perf_series, a.output_dir)
     nodal = [c for c in plotted if c["spec"]["nodal"]]
     closeup_info = []
     if nodal:
@@ -605,8 +811,11 @@ def main(argv=None):
             "dense junctions": "duplicated interval-junction samples dropped (first kept, as "
                                "common.concat_dense)",
         },
+        "performance_definitions": PERF_DEFINITIONS,
         "roles": {"main": "matched comparison, delta=0.05 tightening",
-                  "separate": "plotted, NOT matched (margin 0)", "supplementary": "statistics only"},
+                  "separate": "plotted, NOT matched (margin 0)",
+                  "supplementary": "statistics only (FOH SCP runs)"},
+        "panels_2x2": {name: key for name, key, _ in PANELS},
         "logs_root": a.logs_root, "missing_cases": [k for k, _ in missing],
         "cases": stats, "closeups": closeup_info,
     })
@@ -618,6 +827,11 @@ def main(argv=None):
               f"dense={s['max_g_dense_1ms']:+.6f} nodes={s['max_g_nodes_0p5s']:+.6f} "
               f"viol={s['violation_duration_audited_s']:.4f}s "
               f"track={s['mean_tracking_error_audited_m']:.4f}m  {s['verdict']}")
+        if s.get("solve_time_first_s") is not None:
+            print(f"{'':10s} {s['perf_timing_source']}: first={s['solve_time_first_s']:.3f}s "
+                  f"warm median={s['solve_time_warm_s_median']}s p95={s['solve_time_warm_s_p95']}s "
+                  f"max={s['solve_time_warm_s_max']}s it(first/warm median)="
+                  f"{s['iterations_first']}/{s['iterations_warm_median']}")
     for f in files:
         print(f)
     return 0
