@@ -180,3 +180,12 @@ statistics are exported as CSV/JSON. Physical `max_i g_i(t)`, nodal feasibility,
 and tightened integral feasibility are separate quantities. The DDP CTCS
 result continues to work on this benchmark; the demanding landing case remains
 unfixed and cannot be declared solved from these plots.
+
+
+## Separate local 3-D point-mass open-loop comparison
+
+[POINT_MASS_OPEN_LOOP.md](POINT_MASS_OPEN_LOOP.md) records the local point-mass
+DDP/SCP × stage/CTCS comparison and preserves its original plotting style.
+This is a separate six-state sphere-avoidance OCP; its saved-policy comparisons
+are not the two-dimensional Uzun MPC campaign above. The versioned local
+comparison mirror supports `--plot-snapshot NEW_DIRECTORY` without solving.

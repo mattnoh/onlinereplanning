@@ -1,3 +1,28 @@
+# Current authorized task — local point-mass open-loop four-arm comparison
+
+2026-10-19 user requests review of the local point-mass open-loop comparison,
+SCP/DDP x CTCS/stage comparison, preserving its local plotting. Found canonical
+benchmark at /home/lab/projects/solver/benchmark/openscvx_point_mass_ctcs and
+original fixed/free plotting under DDP/ALIPDDP-ctstc-al/results/point_mass_ctcs_compare.
+Existing SCP sweeps are running in another local process; do not stop, alter or
+claim those runs. Freeze completed inputs before selection. No new optimization
+or landing work in this diagnostic; landing repair remains paused.
+
+Audit hypothesis: saved fixed N=6 four-arm policies expose nodal intersample
+penetration in DDP and SCP while CTCS policies avoid the sphere. Apply the
+existing selector unchanged, replay all selected controls from the common root
+with exact point-mass flow, independently audit extrema and CTCS integrals.
+Preserve physical OCP, CTCS budgets/margins and declared acceptance rules.
+Keep fixed/free original serif style, 3D geometry, clearance traces with node
+markers, mesh heatmap and timing/quality table. Do not replace original figures.
+Failed/missing accepted SCP free-time cells must remain explicit, with diagnostic
+paths clearly labeled and excluded from accepted comparisons. Snapshot settings,
+raw selected data, plotting source and SHA256 inventory under planner logs.
+Verify sampled traces against exact extrema; no speed claims from loaded timing.
+Older sections below are historical task records.
+
+---
+
 # Current authorized task — CTCS stopping efficiency and landing diagnosis
 
 User asks whether CTCS DDP stopping can be faster without losing safety, and
@@ -1109,3 +1134,26 @@ algorithm. BothcurrentDDPconstraintmethodandSCP'sconicbackend useIPM; they
 solve different nonlinear/quadratic versus convexifiedsubproblems. Innerconic
 feasibility doesnotremove outerSCP nonlinear/integraldefects. Fixedbudget,
 tightening, integration and finalnonlinearfeasibility remain necessary.
+
+
+## Point-mass open-loop four-arm review result — 2026-10-19
+
+Extended existing local compare_fair.py, preserved original fixed/free figures
+and reused their styling. Planner versioned mirror and POINT_MASS_OPEN_LOOP.md
+record the implementation and limitations. Froze and exactly replayed 34 saved
+policies, all saved obstacle grades reproduced within 1e-7 m, SCP replay arrays
+within 1e-10; <=1 ms plotted spacing. Snapshot v3 completed, visually inspected
+both figures, 324 file SHA256 inventory verified. Earlier plot-only failures
+are retained and labeled in the report; no new solver runs.
+Fixed N6 tf4: DDPstage +8.828351mm penetration/0.112693685s, SCPstage
++23.535304mm/0.169057703s with feasible nodes and negligible dynamics gaps;
+DDPCTCS clearance3.172080mm, SCPCTCS0.736495mm, both physical and integral
+checks pass. Both epsilon1e-11; individual speed-bound tightening differs.
+Free N10 SCPCTCS diagnostic has physical safety/budget .9996561763eps,
+gap1.41466533e-8 narrowly misses unchanged1e-8 gate. Saved free DDPCTCS N6
+fails matched integral replay at36.0518eps despite physical clearance; label
+failure rather than inherit old saved zero-integral grade. No causal claim.
+Review corrected the old local note's matched-seed claim: DDP consistent
+line velocity vs SCP zero velocity. Saved timing and seed differences preclude
+a controlled speed ranking. Existing active SCP sweeps remain untouched;
+missing accepted cells stay explicit. No landing or shared-solver changes.
