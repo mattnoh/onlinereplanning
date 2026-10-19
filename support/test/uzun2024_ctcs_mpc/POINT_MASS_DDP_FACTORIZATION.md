@@ -1,5 +1,9 @@
 # Normalized DDP/GN: actual factorization failure
 
+This historical diagnosis is followed by the
+[implemented NT/barrier repair and failed N=6 reruns](POINT_MASS_DDP_REPAIR.md).
+SOC is an input-constraint solver prerequisite; it is not a CTCS folding result.
+
 An isolated logging-only replay of the existing fixed-time N=6 normalized/GN
 pilot reproduces all 42 reported QUU_NOT_PD failures. All 301 optimizer records
 (iteration, X, U, mu, rho and optimality error) match the original exactly;

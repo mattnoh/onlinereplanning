@@ -65,17 +65,25 @@ particular, record the initial and adapted virtual-buffer/virtual-control
 weights, not just their initial values. The calibration work budget, profiles,
 native iteration caps and stationarity thresholds are still unresolved fields.
 
-DDP's current update already satisfies monotonicity for positive mu_min,
+DDP's historical scalar update satisfies monotonicity for positive mu_min,
 mu>=mu_min and 0<mu_mul<1:
 
     mu_next=max(mu_min,min(mu_mul*mu,mu**mu_exp)) <= mu.
 
-Check both mu and muT traces and reject invalid settings. Do not claim a
-nonmonotone-schedule fix without an offending trace. Normalization alone is
+This arithmetic property is distinct from the monotone barrier strategy:
+each fixed-barrier subproblem must be solved before decreasing mu. The old
+rho-weighted inner threshold failed that requirement. The
+[implemented repair and pilot reruns](POINT_MASS_DDP_REPAIR.md) remove the rho
+factor, cap effective kappa at 1, exclude inactive barriers, and prevent
+unsolved inner/pass exits from advancing mu or AL schedules. These fixes do
+not yet make the normalized/GN-on pilot converge.
+
+Check both mu and muT traces and reject invalid settings. Normalization alone is
 not a demonstrated repair: the existing normalized/GN pilot fails, whereas
 normalized/no-GN succeeds on one warm start. Its SOC stalls and QUU failures
 remain investigation gates. GN-off remains an ablation until independently
-calibrated. No production algorithm change is made by this protocol tool.
+calibrated. The protocol generator itself does not change production algorithms;
+the separately committed solver repair changes SOC scaling and inner gating.
 
 The four existing DDP ablation traces all have monotone mu. Their machine
 readable X/U traces omit muT, so that field remains explicitly unverified there.

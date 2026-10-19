@@ -18,7 +18,7 @@ private:
 };
 
 int main(int argc,char**argv){
-    if(argc!=10){std::cerr<<"N substeps epsilon margin_obs margin_glide seed_file trace_file normalized gauss_newton\n";return 2;}
+    if(argc!=10 && argc!=11){std::cerr<<"N substeps epsilon margin_obs margin_glide seed_file trace_file normalized gauss_newton [max_inner_iter]\n";return 2;}
     const int N=std::stoi(argv[1]),substeps=std::stoi(argv[2]);const double eps=std::stod(argv[3]);
     g_fixed_dt=4./N;g_row_norm=1/std::sqrt(g_fixed_dt);g_tight_obs=std::stod(argv[4]);g_tight_glide=std::stod(argv[5]);
     g_glide_tan=1.;
@@ -48,6 +48,7 @@ int main(int argc,char**argv){
     problem.addTerminalConstraint(std::make_shared<TerminalEquality>());
     ALIPDDP<double> solver(problem);Param param;
     param.max_iter=1200;param.max_inner_iter=60;param.tolerance=1e-8;param.inner_tolerance=10.;
+    if(argc==11){param.max_inner_iter=std::stoi(argv[10]);if(param.max_inner_iter<=0)return 2;}
     param.mu=param.muT=1e-3;param.mu_mul=.2;param.mu_min=1e-10;
     param.rho=param.rhoT=100.;param.rho_max=1e10;param.reg1_min=1e-6;param.reg2_min=1e-6;
     param.use_feasibility_ms=true;param.verbose=true;
@@ -62,6 +63,8 @@ int main(int argc,char**argv){
         const double elapsed=std::chrono::duration<double>(tick-start).count();
         trace<<"{\"event\":"<<count++<<",\"iteration\":"<<(count==1?0:solver.getNumIter())<<",\"wall_seconds\":"<<elapsed
              <<",\"solve_seconds_excluding_observer\":"<<elapsed-overhead<<",\"mu\":"<<settings.mu
+             <<",\"muT\":"<<settings.muT<<",\"rhoT\":"<<settings.rhoT
+             <<",\"effective_inner_kappa\":"<<std::min(1.,settings.inner_tolerance)
              <<",\"rho\":"<<settings.rho<<",\"opterror\":"<<(count==1?0.:solver.getOptError())<<",\"X\":[";
         for(size_t k=0;k<xs.size();++k){if(k)trace<<',';trace<<'[';for(int j=0;j<6;++j){if(j)trace<<',';trace<<xs[k](j);}trace<<']';}
         trace<<"],\"U\":[";for(size_t k=0;k<us.size();++k){if(k)trace<<',';trace<<'[';for(int j=0;j<3;++j){if(j)trace<<',';trace<<us[k](j);}trace<<']';}

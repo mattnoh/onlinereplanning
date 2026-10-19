@@ -27,3 +27,21 @@ verification, declared equal calibration work budget, one calibrated profile per
 method, accurate fixed quadrature, stationarity thresholds and pinned sources.
 Only then freeze the protocol before any test outcomes. Preserve failed and
 uncertified cases; no best-of-pool selection or post-hoc retries.
+
+## Subsequent explicit solver-repair request
+
+User explicitly authorized NT SOC scaling and the fixed-barrier inner gate.
+Core commit b994e4d4 implements symmetric NT H and consistent RHS for stage,
+terminal and coupling application, and removes rho from the barrier inner
+threshold. Unsolved caps do not advance schedules. Follow-up 4b99cc55 verifies
+full 3D cone central points. KKT, 10-check CTCS self-test, paper-model derivative
+check and 42 focused Python tests pass. No production debug logging was added.
+
+The original normalized/GN-on N6 warm pilot still fails: inner60 exits at84;
+inner600 diagnostic exits Forward Pass Failed at234. Both remain at mu=.001,
+rhoT=100, have zero backward failures, but fail physical/budget certificates
+in intervals2,3,4 and retain SOC boundary rejections. See POINT_MASS_DDP_REPAIR.md
+and raw logs/point_mass/audits/nt_barrier_repair_n6_20261020. Neither run is
+candidate calibration or paper evidence. Do not claim NT fixed all SOC stalls.
+Remaining readiness work: fixed-barrier globalization/row initialization and
+GN interaction investigation; no cause beyond the recorded evidence is proved.

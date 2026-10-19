@@ -7,6 +7,11 @@ The [matched paper protocol](POINT_MASS_PAPER_PROTOCOL.md) records the new
 shared-budget, shared-start campaign and its unresolved release gates. Its
 candidate settings and generated seeds have not been used for paper runs.
 
+The subsequent [NT/barrier repair and N=6 reruns](POINT_MASS_DDP_REPAIR.md)
+correct two solver prerequisites. Both repaired normalized/GN-on reruns still
+fail independent physical and budget checks. SOC defects must not be presented
+as a theoretical distinction of CTCS folding.
+
 **The formulation is shared; the optimization treatment differs.** The local Elango paper already defines direct interval-integral inequalities without y in Section 5, equations (47)–(49). The comparison here is its L1/prox-linear treatment in Section 5.1 versus our explicit primal-dual DDP treatment of the same CTCS rows. No accumulator metric or accumulator virtual control appears in this comparison.
 
 Local primary source: [Elango et al. PDF](</home/lab/Zotero/storage/FGP9CC2S/Elango et al. - 2024 - Successive Convexification for Trajectory Optimization with Continuous-Time Constraint Satisfaction.pdf>). Section 5 starts on printed page 14; equations (49)–(50) and Theorems 29–30 are on printed page 15. A source copy and hash are saved with the experiment.

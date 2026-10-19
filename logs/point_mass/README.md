@@ -1,5 +1,13 @@
 # Point-mass evidence
 
+## DDP prerequisite repairs
+
+[NT scaling, strict barrier gate and pilot results](../../support/test/uzun2024_ctcs_mpc/POINT_MASS_DDP_REPAIR.md) ·
+[raw repaired N=6 traces](audits/nt_barrier_repair_n6_20261020/).
+Both normalized/GN-on reruns fail independent path and integral checks.
+No backward failures occur in these reruns, but SOC line-search failures remain.
+The solver fixes do not establish a CTCS formulation difference or paper ranking.
+
 ## Matched paper campaign preparation
 
 [Protocol and release gates](../../support/test/uzun2024_ctcs_mpc/POINT_MASS_PAPER_PROTOCOL.md) ·
