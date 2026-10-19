@@ -1,3 +1,20 @@
+# Current task completed — log cleanup, important evidence retained
+
+2026-10-19 user requests decluttering while keeping point-mass and landing
+evidence. Reorganized logs into point_mass/, landing/ and archive/, with index
+and two recent-path compatibility symlinks. Retained current point-mass2x2,
+complete paper MPC, offline gates/identification, and nine key ROS1 campaigns.
+Archived705 superseded files only after SHA256 read-back; all3687 original
+files preserved, net about325MiB reclaimed, top-level entries41->6.
+Current/historical point-mass inventory checks PASS;114 index/evidence links
+resolve, review shortcuts repaired, paper plotter default root updated.
+Full plan .Codex/comando-logs-cleanup.md; mapping and verification under
+logs/archive/cleanup_20261019/. Raw snapshots unchanged; no optimizer, flight
+or live benchmark-pool changes. Landing remains paused and unresolved.
+Older task records follow, with maintained paths updated where appropriate.
+
+---
+
 # Current clarification — free-time SCP is physically successful at 1e-6
 
 2026-10-19: reconciled user's quoted Claude table with the actual local files.
@@ -9,7 +26,7 @@ physical and independent/native budget/consistency checks PASS. Physical gaps
 N20/10/6 selections were already in the old frozen pool; N40 completed later.
 Do not characterize rejection at1e-8 as failure to enforce physical CTCS.
 Detailed correction at top of POINT_MASS_OPEN_LOOP.md; raw source/tables/arrays
-and verified28-file inventory saved in logs/point_mass_scp_threshold_reconciliation_20261019.
+and verified28-file inventory saved in logs/point_mass/audits/threshold_reconciliation_20261019.
 No solves, code, safety-limit, epsilon or tightening changes. Previous stricter
 records remain historical, not the current physical-success interpretation.
 Landing remains paused.
@@ -232,7 +249,7 @@ Retained implementation commit: `5747e3acb1a96c23312cf45c8065c4bec2b0df47`.
 - Sequential focused builds include all six test targets and constraint_audit;
   temporary E6 linker override is removed. Solver tracked tree remains clean.
 - Exact settings, raw logs, isolated rejected override source and revisions are
-  archived under logs/constraint_gate_20261019/ (manifest.json and
+  archived under logs/landing/offline/ (manifest.json and
   source_revisions.txt). These include failed experiments, not just successes.
 
 Next unresolved work: convergence of the folded CTCS OCP from the production
@@ -424,11 +441,11 @@ Completion requires constraint satisfaction on simulated hardware in every reque
 - DDP-only control delivery and consistent pending-policy handoff committed as f863864; six tests and ROS1/ROS2 builds passed.
 - Moving startup position/velocity references are updated while the first DDP solve runs. RH transmits the DDP-derived acceleration feedforward instead of dropping it (d2183a7); six tests and ROS1 build passed. RH SITL validation is pending.
 - Configurable x500 motor-thrust inverse and consistent MPC actuator bounds implemented (5a5f2f9). Generic defaults remain linear; x500 launch selects squared motor speed with minimum-speed offset. Six tests and ROS1 build passed. Physical validation is still a failure, not a demonstrated fix.
-- Three new ordinary MPC straight cases are finalized under logs/ddp_only_landing_mpc, ddp_startup_landing_mpc, and ddp_motor_mapping_landing_mpc. All timed out cleanly after policy expiry. Physical audits and saved settings exist. Do not repeat them unnecessarily.
+- Three new ordinary MPC straight cases are finalized under logs/archive/landing_history_20261019.tar.gz::ddp_only_landing_mpc, ddp_startup_landing_mpc, and ddp_motor_mapping_landing_mpc. All timed out cleanly after policy expiry. Physical audits and saved settings exist. Do not repeat them unnecessarily.
 - The final case's target reverses velocity instantaneously during control; earlier cases do not. This invalidates a simple causal comparison of the actuator map. Inspect forecast consistency, target-motion continuity and rate-controller dynamics before further tuning. Preserve the user's non-ROS successful trajectories as the reference.
 - RH feedforward-only straight case landed but violated constraints. Dense OCP reference sampling, per-plan target forecasts and world-frame handoff conversion are now committed (d420def); six tests and ROS1/shared ROS2 builds passed. Publication is 100 Hz, separate from solver frequency.
 - RH circle case with consistent references landed cleanly. Measured speed/glideslope/LOS/floor excess was zero and tilt was within audit tolerance, but angular-rate excess remained 0.02414 rad/s for 1.03593 seconds. The 128 accepted horizons had zero predicted speed/tilt/rate/glideslope excess; small terminal floor/LOS spatial excess remained. It is not an isolated comparison with the earlier straight case.
-- A ROS1 parameter writer waited on each solve and could block replay; the recorded maximum command gap was 82.493 ms. The poll now uses a nonblocking session lock (86bd3f7). The sequential circle verification in logs/ddp_nonblocking_reference_landing_rh landed cleanly: maximum command gap 16.045 ms, zero measured speed/tilt/glideslope/LOS/floor excess, but angular-rate excess 0.00607 rad/s for 2.40060 seconds across 95.18 controlled seconds. No active flights/builds remain.
+- A ROS1 parameter writer waited on each solve and could block replay; the recorded maximum command gap was 82.493 ms. The poll now uses a nonblocking session lock (86bd3f7). The sequential circle verification in logs/archive/landing_history_20261019.tar.gz::ddp_nonblocking_reference_landing_rh landed cleanly: maximum command gap 16.045 ms, zero measured speed/tilt/glideslope/LOS/floor excess, but angular-rate excess 0.00607 rad/s for 2.40060 seconds across 95.18 controlled seconds. No active flights/builds remain.
 - PX4 inner-loop evidence is saved alongside the three MPC cases. Body-rate mode switching took approximately 148 ms in the motor-mapping case. The first-order rate model omits actual rate PID integrator/motor dynamics. RH seeds nominal attitude/rates instead of a measured-state PX4 tracking-model prediction, so its nominal feasibility is not physical feedback feasibility.
 - Next: trace reference handoff continuity, align measurement epochs, and model the relevant PX4 dynamics inside the full DDP OCP. No separate optimizer/controller, changed physical limits, or solve-approval shortcut. Full ordinary/CTCS RH/MPC validation and verified fast solve rate remain outstanding.
 
@@ -436,13 +453,13 @@ Completion requires constraint satisfaction on simulated hardware in every reque
 
 The follow-up attitude-demand audit uses a ROS/PX4 clock offset estimated from matching ENU/NED position/velocity (near handoff, residual timing spread about +/-4 ms). During the actual control interval, PX4 requested axis rates above 0.09 rad/s over 0.1-second windows, whereas the physical DDP-reference axis rate remained below 0.019 rad/s over that window. This is not a yaw error. Accepted initial DDP attitudes match the prior scheduled handoff nodes exactly in the saved precision.
 
-Native PositionControl decouples horizontal/vertical acceleration (`MPC_ACC_DECOUPLE=1`) and subtracts measured acceleration through D=0.2 horizontally. Raw DDP acceleration is therefore not the correct PX4 acceleration feedforward. The inverse conversion is now inside each complete ordinary/CTCS RH OCP, using DDP state/input only; shared typed parameters contain native FCU coefficients. Crazyflie retains physical acceleration. Independent tests reconstruct the PX4 attitude across thrust changes, including coupled/decoupled configurations. All six core tests and ROS1 build pass; ROS2 build also passed sequentially. The circle SITL validation landed but failed physical tilt/rate limits; startup rate peak at 0.169 seconds shows that the zero-error/zero-integrator conversion is insufficient. See logs/ddp_px4_inverse_landing_rh and README.
+Native PositionControl decouples horizontal/vertical acceleration (`MPC_ACC_DECOUPLE=1`) and subtracts measured acceleration through D=0.2 horizontally. Raw DDP acceleration is therefore not the correct PX4 acceleration feedforward. The inverse conversion is now inside each complete ordinary/CTCS RH OCP, using DDP state/input only; shared typed parameters contain native FCU coefficients. Crazyflie retains physical acceleration. Independent tests reconstruct the PX4 attitude across thrust changes, including coupled/decoupled configurations. All six core tests and ROS1 build pass; ROS2 build also passed sequentially. The circle SITL validation landed but failed physical tilt/rate limits; startup rate peak at 0.169 seconds shows that the zero-error/zero-integrator conversion is insufficient. See logs/archive/landing_history_20261019.tar.gz::ddp_px4_inverse_landing_rh and README.
 
 Exploratory physical torque fits failed held-out prediction and are not used as plant coefficients. They require better sampling/identification rather than hardcoding misleading fitted gains. Remaining work still includes actual tracking-state dynamics, MPC mode handoff, collective mapping, target forecasts, small terminal nominal excess, and all ordinary/CTCS RH/MPC motion cases at a measured fast solve cadence.
 
 Next data action: one ordinary MPC circle diagnostic with native SDLOG_PROFILE=147 (existing default 131 plus high-rate bit 16), preserving control settings. Full-rate actuator/rate topics are needed to validate native PID/rotor dynamics; sparse fits were rejected. No PX4 controller/source changes and no parallel flights. Then implement/validate native controller-state prediction in the complete OCPs.
 
-The high-rate MPC circle diagnostic is finalized LANDED/CLEAN (92 seconds) but failed rate/tilt/glideslope constraints; first controlled rate was already 0.03154 rad/s. Eight accepted horizons, 100 Hz exact DDP input publication, and full-rate native PID/actuator evidence are now saved with a copied ULog in logs/ddp_native_model_identification_landing_mpc/circle__zero__t0. The native mixing matrix is validated to RMS 4.25e-5 normalized motor signal. The logged mode-switch delay is 188 ms and varies from prior 148 ms; rate integral is nonzero.
+The high-rate MPC circle diagnostic is finalized LANDED/CLEAN (92 seconds) but failed rate/tilt/glideslope constraints; first controlled rate was already 0.03154 rad/s. Eight accepted horizons, 100 Hz exact DDP input publication, and full-rate native PID/actuator evidence are now saved with a copied ULog in logs/archive/landing_history_20261019.tar.gz::ddp_native_model_identification_landing_mpc/circle__zero__t0. The native mixing matrix is validated to RMS 4.25e-5 normalized motor signal. The logged mode-switch delay is 188 ms and varies from prior 148 ms; rate integral is nonzero.
 
 Next required implementation: replace the first-order/instantaneous-handoff prediction with validated native PID + rotor/controller-state dynamics in the complete MPC OCPs. First-plan projection currently assumes hover body-rate tracking while the actual PX4 position/attitude cascade remains active. Account for that phase mathematically and initialize native controller/actuator states from an estimator, rather than inserting post-solve correction or altering acceptance. Validate native dynamics/derivatives and closed-loop rollout against the full-rate dataset before another flight. Then address the RH physical/reference tracking-state model, forecast epochs/reversals, terminal nominal excess and warm-start cadence. Keep all physical limits and required formulations/motions intact.
 
@@ -1145,7 +1162,7 @@ allfive physicalobstacles and tightenedhalos, notpredictedhorizoncurves.
 Source/dataexport andvisualinspectionPASS. Plotdoesnotrerunoptimization.
 CreateaSHA256-inventoriedlocalarchive ofallavailablepaperlogs, archivedlanding
 gatelogs, canonicalreproductionsource/record, currentbinary/buildflags/revisions.
-Archiveandchecksum live underlogs/archives; verify everyarchivedfileagainst
+Archiveandchecksum live underlogs/archive/backups; verify everyarchivedfileagainst
 inventory. This doesnotrecover missing/tmpdata or claimremote backup.
 Clarabel0.11.1 installedprimaryMETADATA describesitsinterior-point conic
 algorithm. BothcurrentDDPconstraintmethodandSCP'sconicbackend useIPM; they
@@ -1187,7 +1204,7 @@ safe and budget-feasible replay. Variable interval duration makes the physical
 map nonlinear; fixed duration physical map affine. OpenSCvx stops on scaled
 step/linearizedVC/VB, not original independent replay defects. No isolated
 root-cause claim for every pool failure. Full result in POINT_MASS_OPEN_LOOP.md
-and ignored logs/point_mass_free_scp_review_20261019.json. Old snapshot stays
+and ignored logs/point_mass/audits/free_scp_strict_review.json. Old snapshot stays
 immutable. No landing work or solver changes.
 
 
@@ -1195,7 +1212,7 @@ immutable. No landing work or solver changes.
 User requests redo after threshold reconciliation. Regenerated both fixed and
 free figures from saved policies at SCP gap1e-6, original DDP selections1e-8
 explicit in footer. No optimizer runs. Preserve original local style and prior
-snapshots. New snapshot logs/point_mass_open_loop_2x2_gap1e6_20261019_v2:40
+snapshots. New snapshot logs/point_mass/open_loop:40
 exact saved-policy replays,394 SHA256-verified files, bothfigures visualPASS.
 Free SCP CTCS allfive meshes pass physical/budget/base audit; now includes
 completed N100 policy (clearance4.94mm, I0, gap6.76e-9), separate live sweep

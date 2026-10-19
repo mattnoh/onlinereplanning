@@ -49,7 +49,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Ellipse, Patch  # noqa: E402
 
-DEFAULT_LOGS = Path(__file__).resolve().parents[3] / "logs" / "uzun2024_ctcs_mpc"
+DEFAULT_LOGS = Path(__file__).resolve().parents[3] / "logs" / "point_mass" / "paper_mpc"
 
 # role: "main" = matched comparison (same delta=0.05 tightening), "separate" = shown but
 # not part of the matched comparison, "supplementary" = statistics only.

@@ -2,10 +2,10 @@
 
 ## Updated plots at the required 1e-6 dynamics threshold
 
-[Free-time PNG](../../../logs/point_mass_open_loop_2x2_gap1e6_20261019_v2/point_mass_2x2_free.png)
-([PDF](../../../logs/point_mass_open_loop_2x2_gap1e6_20261019_v2/point_mass_2x2_free.pdf));
-[fixed-time PNG](../../../logs/point_mass_open_loop_2x2_gap1e6_20261019_v2/point_mass_2x2_fixed.png)
-([PDF](../../../logs/point_mass_open_loop_2x2_gap1e6_20261019_v2/point_mass_2x2_fixed.pdf)).
+[Free-time PNG](../../../logs/point_mass/open_loop/point_mass_2x2_free.png)
+([PDF](../../../logs/point_mass/open_loop/point_mass_2x2_free.pdf));
+[fixed-time PNG](../../../logs/point_mass/open_loop/point_mass_2x2_fixed.png)
+([PDF](../../../logs/point_mass/open_loop/point_mass_2x2_fixed.pdf)).
 
 Regenerated with `--ox-gap-tol 1e-6 --plot-snapshot NEW_DIRECTORY`, keeping the
 original local figure style. Both figures now print the selection threshold.
@@ -56,7 +56,7 @@ this must remain explicit for precision/performance comparisons.
 
 Raw tables, selected settings/native arrays/replay arrays, grading source,
 reconciliation.json and a verified 28-file SHA256 inventory are saved under
-`logs/point_mass_scp_threshold_reconciliation_20261019/`. No optimizer was run
+`logs/point_mass/audits/threshold_reconciliation_20261019/`. No optimizer was run
 and no solver settings were changed. At inspection, the separate live free
 N=100 campaign was still running. The older snapshot and its stricter audit
 below remain historical evidence, with their original source and hashes intact.
@@ -73,7 +73,7 @@ running and were left alone. The comparison freezes completed saved policies.
 
 ## Saved evidence
 
-Evidence directory: `logs/point_mass_open_loop_2x2_20261019_v3/`.
+Evidence directory: `logs/archive/point_mass_history/point_mass_open_loop_2x2_20261019_v3/`.
 It contains fixed/free PNG and PDF figures, `comparison.csv`, `audit.json`,
 per-policy 1 ms dense CSVs, exact interval extrema and obstacle violation
 durations, raw selected inputs/settings/arrays, selection logs, source copies
@@ -198,7 +198,7 @@ A read-only rescore of the frozen pool finds 25 settings would pass the other
 unchanged gates with a 1e-6 physical-gap threshold instead of 1e-8 (5/11/9 at
 N=6/10/20). This is diagnostic sensitivity only; no production threshold,
 budget or tightening was relaxed. Detailed counts are saved separately as
-logs/point_mass_free_scp_review_20261019.json. The correct next diagnostic is
+logs/point_mass/audits/free_scp_strict_review.json. The correct next diagnostic is
 nonlinear-residual-aware stopping and accumulator conditioning, with physical
 limits, tightening and epsilon held fixed. No new optimization was authorized
 or run by this explanatory review.

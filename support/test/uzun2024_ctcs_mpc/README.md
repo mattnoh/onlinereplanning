@@ -39,7 +39,7 @@ per-interval CTCS and retained-state DDP MPC work on this original example**.
 It does not fix or validate the demanding landing OCP. FOH and ZOH give nearly
 the same physical result in the matched SCP ten-iteration comparison.
 
-Evidence: `../../../logs/uzun2024_ctcs_mpc/` contains `comparison.json`, complete
+Evidence: `../../../logs/point_mass/paper_mpc/` contains `comparison.json`, complete
 configs, source snapshots/hashes, per-solve trajectories and seeds, convergence
 and defect diagnostics, applied controls, and independent dense replays. P1/P2
 failed conditioning experiments are retained and identified in the authoritative
@@ -172,7 +172,7 @@ convergence caveats, plots and commands are in [RESULTS.md](RESULTS.md).
 python scp.py --constraint-mode stage --hold ZOH --iterations 10 --delta .05 --output-dir NEW_SCP_STAGE_005
 python ddp.py --constraint-mode stage --delta .05 --reuse-solver --output-dir NEW_STAGE_005
 python ddp.py --constraint-mode stage --delta 0 --reuse-solver --output-dir NEW_STAGE_0
-python plot_comparison.py --output-dir ../../../logs/uzun2024_ctcs_mpc/comparison_plots
+python plot_comparison.py --output-dir ../../../logs/point_mass/paper_mpc/comparison_plots
 ```
 
 Figures are standalone PNG and PDF; their exact dense and node series plus

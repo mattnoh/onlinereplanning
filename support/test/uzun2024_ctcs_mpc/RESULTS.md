@@ -21,8 +21,8 @@ initialization, tail feasibility and terminal behavior still require isolation.
 
 ## Actual executed CTCS paths and retained logs
 
-[Executed path overlay PNG](../../../logs/uzun2024_ctcs_mpc/ctcs_actual_paths_current/fig_ctcs_actual_paths.png)
-([PDF](../../../logs/uzun2024_ctcs_mpc/ctcs_actual_paths_current/fig_ctcs_actual_paths.pdf)).
+[Executed path overlay PNG](../../../logs/point_mass/paper_mpc/ctcs_actual_paths_current/fig_ctcs_actual_paths.png)
+([PDF](../../../logs/point_mass/paper_mpc/ctcs_actual_paths_current/fig_ctcs_actual_paths.pdf)).
 Blue: SCP CTCS ZOH10 (P5). Green: latest verified DDP CTCS M50/shared/inner100
 (P17). Dashed black: reference. Grey ellipses: physical obstacles; dashed
 outlines: .05 tightening. Hollow markers are .5s executed nodes. Curves are
@@ -34,7 +34,7 @@ in the exportedCSV/NPZ. SCP integral-budget residual remains separately reported
 
 Key recent run files/sourcehashes were checked. Canonical source and this report
 are committed; raw `logs/` is Gitignored. A checksummed local archive under
-`logs/archives/` captures available paper logs (including failed candidates),
+`logs/archive/backups/` captures available paper logs (including failed candidates),
 archived landing gate logs, canonical source/progress record and current solver
 binary/build flags. Archive index/checksum lists exact contents. This is local
 retention, not off-machine backup; older landing `/tmp` traces noted below are
@@ -91,12 +91,12 @@ Both CTCS runs have zero observed physical penetration in this benchmark.
 This is the expected enforcement-location distinction on these trajectories,
 not a universal safety guarantee from finite sampling or a positive budget.
 
-[2×2 figure PNG](../../../logs/uzun2024_ctcs_mpc/comparison_2x2/fig_2x2.png)
-([PDF](../../../logs/uzun2024_ctcs_mpc/comparison_2x2/fig_2x2.pdf)),
-[performance PNG](../../../logs/uzun2024_ctcs_mpc/comparison_2x2/fig_performance.png)
-([PDF](../../../logs/uzun2024_ctcs_mpc/comparison_2x2/fig_performance.pdf)),
-[node/dense close-ups](../../../logs/uzun2024_ctcs_mpc/comparison_2x2/fig_intersample.png),
-[full statistics](../../../logs/uzun2024_ctcs_mpc/comparison_2x2/comparison_stats.json).
+[2×2 figure PNG](../../../logs/point_mass/paper_mpc/comparison_2x2/fig_2x2.png)
+([PDF](../../../logs/point_mass/paper_mpc/comparison_2x2/fig_2x2.pdf)),
+[performance PNG](../../../logs/point_mass/paper_mpc/comparison_2x2/fig_performance.png)
+([PDF](../../../logs/point_mass/paper_mpc/comparison_2x2/fig_performance.pdf)),
+[node/dense close-ups](../../../logs/point_mass/paper_mpc/comparison_2x2/fig_intersample.png),
+[full statistics](../../../logs/point_mass/paper_mpc/comparison_2x2/comparison_stats.json).
 
 The 2×2 and performance figure contain the matched four cases. The overall
 comparison and close-up also preserve the separately labeled untightened DDP
@@ -185,13 +185,13 @@ excluded from warm statistics. Host load differs from previous timing tables;
 compare the two rows within this experiment, not139ms directly against earlier
 224ms or the historical SCP170ms.
 
-[Stopping comparison data](../../../logs/uzun2024_ctcs_mpc/ddp_stopping_comparison.json),
-[full MPC audit](../../../logs/uzun2024_ctcs_mpc/P17_ddp_ctcs_inner100/summary.json),
-[paired diagnostics](../../../logs/uzun2024_ctcs_mpc/P18_inner_stopping_paired/summary.json).
+[Stopping comparison data](../../../logs/point_mass/paper_mpc/ddp_stopping_comparison.json),
+[full MPC audit](../../../logs/point_mass/paper_mpc/P17_ddp_ctcs_inner100/summary.json),
+[paired diagnostics](../../../logs/point_mass/paper_mpc/P18_inner_stopping_paired/summary.json).
 
 ```bash
 python ddp.py --reuse-solver --substeps 50 --flow-cache shared --solver-arg=--inner-tol --solver-arg=100 --output-dir NEW_FAST_INNER100
-python ddp.py --replay-saved ../../../logs/uzun2024_ctcs_mpc/P17_ddp_ctcs_inner100 --replay-inner 100 --output-dir NEW_STOPPING_PAIR
+python ddp.py --replay-saved ../../../logs/point_mass/paper_mpc/P17_ddp_ctcs_inner100 --replay-inner 100 --output-dir NEW_STOPPING_PAIR
 ```
 
 ## What still fails in the stressed landing OCP
@@ -201,12 +201,12 @@ measured-root retained DDP MPC can work. It does **not** establish convergence
 for the landing OCP or rule out solver robustness problems at landing scales.
 No matched SCP landing reproduction has yet been validated.
 
-The retained [stressed E1 log](../../../logs/constraint_gate_20261019/comando-gate-e1-ctcs.log)
+The retained [stressed E1 log](../../../logs/landing/offline/comando-gate-e1-ctcs.log)
 starts with a feasible production seed but returns a physically unsafe plan:
 speed excess.29641648m/s, tilt excess1.18789182deg, spatial LOS excess.06767562m.
 Model dynamics gaps are zero and dense interval propagation discrepancy is
 1.96e-8. Thus these are substantial path-constraint failures, not an optimality
-label or plant tracking error. The [E3 iteration log](../../../logs/constraint_gate_20261019/comando-gate-e3-ctcs.log)
+label or plant tracking error. The [E3 iteration log](../../../logs/landing/offline/comando-gate-e3-ctcs.log)
 shows the first full step taking normalized residual from zero to1.75e10.
 
 Relevant mechanisms requiring isolated repair tests:
@@ -289,17 +289,17 @@ over the fixed budget). It is not recommended. No budget/tightening was relaxed
 to call it a pass. Initial-mu tuning was considered but not run; it is not part
 of the retained profile.
 
-[Speed statistics JSON](../../../logs/uzun2024_ctcs_mpc/ddp_speed_comparison.json)
-([CSV](../../../logs/uzun2024_ctcs_mpc/ddp_speed_comparison.csv));
-[100-step parity/timing](../../../logs/uzun2024_ctcs_mpc/P15_cache_replay_rk100/summary.json),
-[50-step parity/timing](../../../logs/uzun2024_ctcs_mpc/P16_cache_replay_rk50/summary.json).
+[Speed statistics JSON](../../../logs/point_mass/paper_mpc/ddp_speed_comparison.json)
+([CSV](../../../logs/point_mass/paper_mpc/ddp_speed_comparison.csv));
+[100-step parity/timing](../../../logs/point_mass/paper_mpc/P15_cache_replay_rk100/summary.json),
+[50-step parity/timing](../../../logs/point_mass/paper_mpc/P16_cache_replay_rk50/summary.json).
 Source snapshots/hashes, per-solve requests, returned plans, diagnostics and
 both complete dense-audited campaigns are saved with the runs.
 
 ```bash
 python ddp.py --constraint-mode ctcs --reuse-solver --substeps 50 --flow-cache shared --output-dir NEW_FAST_CTCS
-python ddp.py --replay-saved ../../../logs/uzun2024_ctcs_mpc/P7_ddp_zoh_reuse --output-dir NEW_CACHE100_PAIR
-python ddp.py --replay-saved ../../../logs/uzun2024_ctcs_mpc/P13_ddp_ctcs_rk50 --output-dir NEW_CACHE50_PAIR
+python ddp.py --replay-saved ../../../logs/point_mass/paper_mpc/P7_ddp_zoh_reuse --output-dir NEW_CACHE100_PAIR
+python ddp.py --replay-saved ../../../logs/point_mass/paper_mpc/P13_ddp_ctcs_rk50 --output-dir NEW_CACHE50_PAIR
 ```
 
 ## Executed results
@@ -351,20 +351,20 @@ keeps all executed nodes physically feasible, yet has a dense physical peak
 
 ## Figures and raw evidence
 
-[Overall comparison PNG](../../../logs/uzun2024_ctcs_mpc/comparison_plots/fig_comparison.png)
-([PDF](../../../logs/uzun2024_ctcs_mpc/comparison_plots/fig_comparison.pdf)):
+[Overall comparison PNG](../../../logs/point_mass/paper_mpc/comparison_plots/fig_comparison.png)
+([PDF](../../../logs/point_mass/paper_mpc/comparison_plots/fig_comparison.pdf)):
 executed trajectories, physical max g versus time with node markers, tracking
 error and audited interval integral. Values below -.3 in the physical-g panel
 are clipped and labeled; exact values remain in the exported CSV.
 
-[Intersample close-up PNG](../../../logs/uzun2024_ctcs_mpc/comparison_plots/fig_intersample.png)
-([PDF](../../../logs/uzun2024_ctcs_mpc/comparison_plots/fig_intersample.pdf)):
+[Intersample close-up PNG](../../../logs/point_mass/paper_mpc/comparison_plots/fig_intersample.png)
+([PDF](../../../logs/point_mass/paper_mpc/comparison_plots/fig_intersample.pdf)):
 worst intervals, node endpoints, dense physical violations and planar geometry.
 The close-up makes the node-feasible/dense-infeasible distinction explicit.
 
-[Statistics JSON](../../../logs/uzun2024_ctcs_mpc/comparison_plots/comparison_stats.json),
-[statistics CSV](../../../logs/uzun2024_ctcs_mpc/comparison_plots/comparison_stats.csv),
-[interval-by-interval evidence](../../../logs/uzun2024_ctcs_mpc/comparison_plots/executed_intervals_all.csv).
+[Statistics JSON](../../../logs/point_mass/paper_mpc/comparison_plots/comparison_stats.json),
+[statistics CSV](../../../logs/point_mass/paper_mpc/comparison_plots/comparison_stats.csv),
+[interval-by-interval evidence](../../../logs/point_mass/paper_mpc/comparison_plots/executed_intervals_all.csv).
 Exact plotted dense/node/close-up series, raw solves, seeds, controls, configs,
 source snapshots and hashes are under the same logs directory. The plotting
 code reads saved evidence; it does not resolve or alter trajectories.
@@ -384,7 +384,7 @@ bash build_ddp.sh
 python scp.py --constraint-mode stage --hold ZOH --iterations 10 --cost-scale 100 --delta .05 --output-dir NEW_P10b
 python ddp.py --constraint-mode stage --delta .05 --reuse-solver --output-dir NEW_P8
 python ddp.py --constraint-mode stage --delta 0 --reuse-solver --output-dir NEW_P9
-python plot_comparison.py --output-dir ../../../logs/uzun2024_ctcs_mpc/comparison_2x2
+python plot_comparison.py --output-dir ../../../logs/point_mass/paper_mpc/comparison_2x2
 ```
 
 The stage cases change the enforcement location, then the margin, explicitly.
