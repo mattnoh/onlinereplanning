@@ -7,8 +7,7 @@ only and retain the N=6 budget failure in their audit. A physically clear path
 does not excuse a tightened CTCS budget failure.
 
 The executable [protocol generator](point_mass_paper_protocol.py) records a
-**candidate**, shared seed arrays and a manifest. It deliberately leaves solver
-profiles and source pins unset. A candidate hash is not a preregistration or a
+**candidate**, shared seed arrays and a manifest. The DDP profile is now frozen by user selection; the complete campaign and other profiles remain candidates. A candidate hash is not a preregistration or a
 completed experiment. Current historical and N=6 pilot results cannot fill its
 cells: their budgets, margins, initialization and/or settings differ.
 
@@ -63,7 +62,7 @@ Freeze those profiles before any test solve. Adaptation within a solve is
 allowed only when its deterministic rule is part of that frozen profile. In
 particular, record the initial and adapted virtual-buffer/virtual-control
 weights, not just their initial values. The calibration work budget, profiles,
-native iteration caps and stationarity thresholds are still unresolved fields.
+native iteration caps and stationarity thresholds must be recorded. The first matched calibration uses one profile trial per primary method; see the [completed calibration](POINT_MASS_MATCHED_CALIBRATION.md).
 
 DDP's historical scalar update satisfies monotonicity for positive mu_min,
 mu>=mu_min and 0<mu_mul<1:
@@ -80,21 +79,7 @@ not yet make the normalized/GN-on pilot converge.
 Strict gating is now opt-in (`use_strict_barrier_gate=true`); production restores
 the legacy gate and `inner_tolerance=10` until validation. The
 [subsequent production tests and 2×2](POINT_MASS_DDP_ABLATION.md) retain two
-production failures and a SITL `NO_SETTLE`. Freeze no paper profile from these
-pilot outcomes.
-
-Check both mu and muT traces and reject invalid settings. Normalization alone is
-not a demonstrated repair: the existing normalized/GN pilot fails, whereas
-normalized/no-GN succeeds on one warm start. Its SOC stalls and QUU failures
-remain investigation gates. GN-off remains an ablation until independently
-calibrated. The protocol generator itself does not change production algorithms;
-the separately committed solver repair changes SOC scaling and inner gating.
-
-The four existing DDP ablation traces all have monotone mu. Their machine
-readable X/U traces omit muT, so that field remains explicitly unverified there.
-The [factorization replay](POINT_MASS_DDP_FACTORIZATION.md) now identifies an
-asymmetric SOC IPM contribution in the first normalized/GN LLT failure. It
-changes logging only and reproduces the original optimizer records exactly.
+production failures and a SITL `NO_SETTLE`. The user subsequently selected NT + legacy gate + CTCS GN off for the point-mass experiment and stopped solver/globalization work. The [frozen profile and twelve matched calibration solves](POINT_MASS_MATCHED_CALIBRATION.md) supersede further solver debugging as the next-step requirement. This selection is not a robustness claim. Production failures remain recorded separately. The complete campaign is still not frozen.
 
 Choose fixed optimizer integration settings from calibration accuracy tests,
 including inactive, grazing and narrow-positive-pocket cases. Sixteen substeps

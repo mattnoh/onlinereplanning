@@ -1,5 +1,10 @@
 # Point-mass evidence
 
+## Frozen-profile matched calibration
+
+[Completed twelve-solve calibration](../../support/test/uzun2024_ctcs_mpc/POINT_MASS_MATCHED_CALIBRATION.md) · [raw evidence](audits/frozen_profile_calibration_20261020/REPORT.md).
+User-selected DDP profile: NT, legacy gate, CTCS GN off. Both primary methods pass 2/3 fixed-time and 0/3 free-time cases. No test bearings solved. Solver/globalization work is stopped.
+
 ## Production validation and factor separation
 
 [Production regressions, SOC/gate 2×2 and fixed-barrier diagnostics](../../support/test/uzun2024_ctcs_mpc/POINT_MASS_DDP_ABLATION.md) ·

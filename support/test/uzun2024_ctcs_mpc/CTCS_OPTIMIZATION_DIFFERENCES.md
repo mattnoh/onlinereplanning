@@ -1,6 +1,8 @@
 # Paper non-augmented CTCS versus our folded DDP
 
-Latest [production checks, SOC/gate 2×2 and CTCS globalization evidence](POINT_MASS_DDP_ABLATION.md):
+Latest: [twelve matched calibration solves](POINT_MASS_MATCHED_CALIBRATION.md) use the user-selected NT/legacy/GN-off DDP profile. Both primary methods pass 2/3 fixed-time cases and 0/3 free-time cases. No held-out test runs have started; solver/globalization work is stopped.
+
+Earlier [production checks, SOC/gate 2×2 and CTCS globalization evidence](POINT_MASS_DDP_ABLATION.md):
 the successful normalized/GN-off pilot survives NT with the legacy gate. All
 four GN-on cells fail. A measured step is accepted with a huge CTCS increase
 because of the current-point barrier/AL acceptance rule; the direct pilot's

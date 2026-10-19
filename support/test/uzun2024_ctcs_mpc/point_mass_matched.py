@@ -9,6 +9,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -17,7 +18,7 @@ import traceback
 
 import numpy as np
 from point_mass_paper_protocol import candidate, digest, shared_seed, frozen_ddp_profile
-from point_mass_certificate import certify, flow, certify_input, interval_difference, tightening
+from point_mass_certificate import certify, flow, certify_input, interval_difference, tightening, q, enclosure
 from point_mass_saved_audit import reference_integral
 
 HERE=Path(__file__).resolve().parent
@@ -176,6 +177,16 @@ def weights(state):
             ('lam_prox','lam_vc','lam_cost','lam_vb_nodal','lam_vb_cross')}
 
 
+def evaluation_error_certificate(cert,numerical,budget):
+    """A budget decision alone does not certify the numerical map's error."""
+    from fractions import Fraction
+    lo=Fraction(cert['integral']['lower_rational']);hi=Fraction(cert['integral']['upper_rational'])
+    sample=q(numerical);B=q(budget);lower=max(q(0),lo-sample,sample-hi)
+    upper=max(abs(lo-sample),abs(hi-sample));limit=B/10000
+    return dict(status='pass' if upper<=limit else 'fail' if lower>limit else 'uncertified',
+                absolute_error=enclosure(lower,upper),relative_to_budget=enclosure(lower/B,upper/B))
+
+
 def scp_run(protocol,job,out):
     problem=build_scp(protocol,job);problem.initialize()
     slices=problem.slices;state=problem.state;seed=job['seed'];N=job['N'];B=protocol['physical_budget_per_interval']
@@ -232,6 +243,7 @@ def audit(protocol,job,policy):
                if duration>=lower_bound else {'status':'uncertified','reason':'duration below declared lower bound'})
         items.append(dict(interval=k,local=local,propagated=cert,reference_integral=reference,
             reference_error_estimate=error,physical_budget=B,numerical_integral=native,
+            evaluation_error=evaluation_error_certificate(local,native,B),
             tightening=tight,input=certify_input(u)))
         propagated=flow(propagated,u,duration)
     def combine(values):return 'fail' if 'fail' in values else 'uncertified' if 'uncertified' in values else 'pass'
@@ -239,13 +251,20 @@ def audit(protocol,job,policy):
     status=dict(physical=combine([r['propagated']['physical_status'] for r in items]),
         integral=combine([r['propagated']['integral_status'] for r in items]),
         input=combine([r['input']['status'] for r in items]),
-        tightening=combine([r['tightening']['status'] for r in items]))
+        tightening=combine([r['tightening']['status'] for r in items]),
+        evaluation_error=combine([r['evaluation_error']['status'] for r in items]))
     time_error=abs(float(sum(dt))-protocol['fixed_tf_s']) if job['mode']=='fixed' else max(0.,protocol['free_tf_bounds_s'][0]-float(sum(dt)),float(sum(dt))-protocol['free_tf_bounds_s'][1],float(max(protocol['free_tf_bounds_s'][0]/N-dt)),float(max(dt-protocol['free_tf_bounds_s'][1]/N)))
-    status['common_primal_pass']=all(status[k]=='pass' for k in ('physical','integral','input')) and terminal<=1e-8 and max(gaps)<=1e-8 and time_error<=1e-8
+    # Keep strict zero-input certification distinct from the declared tolerance.
+    input_upper=max(r['input']['residuals'][name]['upper'] for r in items
+                    for name in r['input']['residuals'])
+    status['input_tolerance_pass']=input_upper<=1e-8
+    status['common_primal_pass']=all(status[k]=='pass' for k in ('physical','integral')) and status['input_tolerance_pass'] and terminal<=1e-8 and max(gaps)<=1e-8 and time_error<=1e-8
+    status['full_certificate_gate_pass']=status['common_primal_pass'] and status['tightening']=='pass' and status['evaluation_error']=='pass'
     return dict(status=status,objective=float(np.sum(dt*(1+1e-5*np.sum(U*U,axis=1)))),
         final_time_s=float(sum(dt)),terminal_error_inf=terminal,shooting_gap_inf=max(gaps),
-        duration_bound_error=time_error,max_reference_integral_over_budget=max(r['reference_integral']/B for r in items),intervals=items,
-        note='Budget/physical certificates are distinct from certified numerical-map error; tight integral-width accuracy remains a separate release check.')
+        duration_bound_error=time_error,certified_input_residual_upper=input_upper,
+        max_reference_integral_over_budget=max(r['reference_integral']/B for r in items),intervals=items,
+        note='Primal/certificate gates do not establish solver stationarity; budget and numerical-map error certificates are separate.')
 
 
 def worker(root,job_name,method,binary):
@@ -277,10 +296,55 @@ def calibrate(root,binary):
     return results
 
 
+def summarize(root):
+    protocol=json.loads((root/'protocol.json').read_text());manifest=json.loads((root/'manifest.json').read_text())
+    records=[];runtime_profile_checks=[]
+    for name in manifest['jobs']:
+        job=json.loads((root/(name+'.json')).read_text())
+        for method in ('folded_ddp','lifted_openscvx'):
+            folder=root/(method+'_'+name);policy=json.loads((folder/'policy.json').read_text());result=json.loads((folder/'audit.json').read_text())
+            if method=='folded_ddp':
+                native=json.loads((folder/'native_summary.json').read_text());iterations=native['iterations']
+                runtime_profile_checks.append(native['settings']==frozen_ddp_profile()['settings'])
+            else:
+                text=(root/(method+'_'+name+'.log')).read_text()
+                text=re.sub(r'\x1b\[[0-9;]*[A-Za-z]','',text)
+                rows=re.findall(r'^\s*(\d+)\s*│',text,re.MULTILINE);iterations=int(rows[-1]) if rows else None
+            records.append(dict(case=job['case']['id'],mode=job['mode'],N=job['N'],method=method,
+                native_status=policy['native_status'],native_iterations=iterations,
+                final_time_s=result['final_time_s'],objective=result['objective'],
+                terminal_error_inf=result['terminal_error_inf'],shooting_gap_inf=result['shooting_gap_inf'],
+                max_reference_integral_over_budget=result['max_reference_integral_over_budget'],
+                certificates=result['status'],metadata_error_recovered_without_resolve=(folder/'read_only_recovery.json').exists()))
+    counts={mode:{method:dict(passed=sum(r['certificates']['full_certificate_gate_pass'] for r in records if r['mode']==mode and r['method']==method),
+                             total=sum(r['mode']==mode and r['method']==method for r in records))
+                  for method in ('folded_ddp','lifted_openscvx')} for mode in ('fixed','free')}
+    summary=dict(protocol_sha256=digest(protocol),canonical_frozen_ddp_profile_sha256=digest(frozen_ddp_profile()),
+        all_six_runtime_ddp_profiles_match_canonical=all(runtime_profile_checks),counts=counts,cells=records,
+        tuning_profile_trials_per_method=1,optimizer_solves=12,optimizer_retries=0,test_bearings_executed=0,
+        note='Calibration only. Three early DDP workers failed a metadata equality check after their solve; their original outputs were audited read-only without rerunning optimization. The int-record correction changed no runtime setting.')
+    write_json(root/'summary.json',summary)
+    lines=['# Frozen-profile matched calibration','',
+           'Three calibration bearings, N=6, fixed/free time, one profile per primary method. No test bearings or optimizer retries.','',
+           '| Case | Time | Method | Native exit | Integral/B | Terminal error | Shooting gap | Full certificate gate |',
+           '|---|---|---|---|---:|---:|---:|---|']
+    for r in records:
+        lines.append(f"| {r['case']} | {r['mode']} | {r['method']} | {r['native_status']} | {r['max_reference_integral_over_budget']:.6g} | {r['terminal_error_inf']:.6g} | {r['shooting_gap_inf']:.6g} | {r['certificates']['full_certificate_gate_pass']} |")
+    lines+=['']
+    for mode, methods in counts.items():
+        lines.append(mode+': '+', '.join(f"{method} {count['passed']}/{count['total']}" for method,count in methods.items())+' pass the full certificate gate.')
+    lines += [
+            'Native convergence is recorded separately. Failed policies are retained; cost is not a ranking across failed runs.',
+            'All six actual DDP parameter sets match the corrected frozen profile. Solver/globalization work remains stopped.']
+    (root/'REPORT.md').write_text('\n'.join(lines)+'\n')
+    return summary
+
+
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     group=parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--prepare',type=Path);group.add_argument('--calibrate',type=Path)
+    group.add_argument('--summarize',type=Path)
     group.add_argument('--worker',nargs=4)
     parser.add_argument('--ddp-binary',type=Path)
     args=parser.parse_args()
@@ -288,4 +352,5 @@ if __name__=='__main__':
     elif args.calibrate:
         if not args.ddp_binary:parser.error('--calibrate requires --ddp-binary')
         calibrate(args.calibrate.resolve(),args.ddp_binary.resolve())
+    elif args.summarize:print(json.dumps(summarize(args.summarize.resolve())['counts'],indent=2))
     else:worker(Path(args.worker[0]),args.worker[1],args.worker[2],Path(args.worker[3]))

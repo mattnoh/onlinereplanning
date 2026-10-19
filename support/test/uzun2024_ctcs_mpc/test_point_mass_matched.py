@@ -4,9 +4,18 @@ import sys
 import unittest
 import numpy as np
 from point_mass_paper_protocol import candidate, shared_seed
-from point_mass_matched import SCP, scp_profile, build_scp
+from point_mass_matched import SCP, scp_profile, build_scp, evaluation_error_certificate
 
 sys.path.insert(0,str(SCP))
+
+
+class EvaluationCertificateTest(unittest.TestCase):
+    def test_budget_pass_does_not_imply_accuracy(self):
+        cert={'integral':{'lower_rational':'0','upper_rational':'1/200000000000'}}
+        self.assertEqual(evaluation_error_certificate(cert,0.,1e-11)['status'],'uncertified')
+        zero={'integral':{'lower_rational':'0','upper_rational':'0'}}
+        self.assertEqual(evaluation_error_certificate(zero,0.,1e-11)['status'],'pass')
+        self.assertEqual(evaluation_error_certificate(zero,1e-12,1e-11)['status'],'fail')
 
 
 @unittest.skipUnless(importlib.util.find_spec('openscvx'),'requires pinned local OpenSCvx')
