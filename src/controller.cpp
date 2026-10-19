@@ -233,6 +233,11 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
         auto K_result = solver_->getResK();
         result.primal = auditPrimal(*problem_,X_result,U_result,solver_params_);
         result.termination = solver_->getTerminationReason();
+        result.optimality_error = solver_->getOptError();
+        result.converged = result.termination == "Optimal Solution" &&
+            std::isfinite(result.optimality_error) &&
+            result.optimality_error <= solver_params_.tolerance &&
+            result.primal.feasible(solver_params_.tolerance);
 
         const auto t_finish = chrono::steady_clock::now();
         result.solve_finish_time = t_finish;

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <functional>
 #include <map>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -211,6 +212,8 @@ struct SolverResult {
     double primal_constraint_violation = 0.0;
     double dynamics_error = 0.0;
     std::string solver_termination;
+    double optimality_error = std::numeric_limits<double>::infinity();
+    bool solver_converged = false;
     int solve_iters = 0;
     std::chrono::steady_clock::time_point solve_start_time;
     std::chrono::steady_clock::time_point solve_finish_time;

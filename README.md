@@ -348,3 +348,30 @@ case demonstrates tight CTCS feasibility, not superiority over nodal MPC.
 The inherited default raw budget remains 1.6e-3; the tighter results require
 `SZMUK_CTCS_STEP_EPS=1e-8` and used cold/warm iteration limits 120/24. Neither
 the original shared solver nor the active STC formulation was changed.
+
+The demanding matched near-cone benchmark is tracked in
+[the authoritative gate record](.Codex/comando-constraint-satisfaction-control.md).
+Run its production cold-start diagnostic after building `test_direct_mpc`:
+
+```sh
+env MPC_MAX_ITER=120 SZMUK_RH_N=40 SZMUK_SPD_STC_MAX=.25 \
+  SZMUK_TILT_STC_DEG=.1 SZMUK_OMEGA_STC_MAX=.019 SZMUK_GS_CONE_DEG=15 \
+  SZMUK_LOS_CONE_DEG=16 SZMUK_CTCS_STEP_EPS=1e-8 \
+  ./test_direct_mpc --open-loop landing_mpc
+# Then run the same command with landing_mpc_ctcs, sequentially.
+```
+
+The relative root is (.518,0,1.85), upright with zero relative velocity/rates.
+For the constant target (.455 m/s at heading .6), this is the measured world
+state with target position/velocity subtracted; target acceleration is zero.
+The diagnostic reports the actual production seed, solver termination and
+optimality, primal/dynamics residuals, and separate root/future-node/local
+interval/full-propagation physical audits at 1 ms. It exits nonzero unless all
+convergence, useful-progress and physical checks pass. Spatial LOS error is
+included alongside its angular error. Both production formulations currently
+fail this benchmark; later offline MPC, STC and SITL gates remain outstanding.
+`AUDIT_INNER`, `AUDIT_STEPS`, `AUDIT_MU`, `AUDIT_INNER_TOL` and `AUDIT_COST_SCALE`
+are isolated diagnostic overrides printed with each result; they do not alter
+production settings. The common cost scale defaults to one. Core solve results
+now expose `optimality_error` and `solver_converged` separately from primal
+feasibility, without changing first-input delivery or solve acceptance.

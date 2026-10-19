@@ -7,8 +7,102 @@
 #include <thread>
 #include <stdexcept>
 #include <map>
+#include "../tools/analysis/constraint_audit.hpp"
 static void check(bool b,const char* message){if(!b)throw std::runtime_error(message);}
+// A diagnostic scalar normalization preserves the physical objective's
+// minimizer. Apply the identical factor to its value and every derivative.
+class AuditStageScale : public StageCostBase<double> {
+    std::shared_ptr<StageCostBase<double>> cost_;double scale_;
+public:
+    AuditStageScale(std::shared_ptr<StageCostBase<double>> cost,double scale):cost_(std::move(cost)),scale_(scale){}
+    double q(const Eigen::VectorXd& x,const Eigen::VectorXd& u)const override{return scale_*cost_->q(x,u);}
+    Eigen::VectorXd qx(const Eigen::VectorXd& x,const Eigen::VectorXd& u)const override{return scale_*cost_->qx(x,u);}
+    Eigen::VectorXd qu(const Eigen::VectorXd& x,const Eigen::VectorXd& u)const override{return scale_*cost_->qu(x,u);}
+    Eigen::MatrixXd qxx(const Eigen::VectorXd& x,const Eigen::VectorXd& u)const override{return scale_*cost_->qxx(x,u);}
+    Eigen::MatrixXd qxu(const Eigen::VectorXd& x,const Eigen::VectorXd& u)const override{return scale_*cost_->qxu(x,u);}
+    Eigen::MatrixXd quu(const Eigen::VectorXd& x,const Eigen::VectorXd& u)const override{return scale_*cost_->quu(x,u);}
+};
+class AuditTerminalScale : public TerminalCostBase<double> {
+    std::shared_ptr<TerminalCostBase<double>> cost_;double scale_;
+public:
+    AuditTerminalScale(std::shared_ptr<TerminalCostBase<double>> cost,double scale):cost_(std::move(cost)),scale_(scale){}
+    double p(const Eigen::VectorXd& x)const override{return scale_*cost_->p(x);}
+    Eigen::VectorXd px(const Eigen::VectorXd& x)const override{return scale_*cost_->px(x);}
+    Eigen::MatrixXd pxx(const Eigen::VectorXd& x)const override{return scale_*cost_->pxx(x);}
+};
 int main(int argc,char** argv){try{
+    if(argc==3&&std::string(argv[1])=="--open-loop"){
+        using namespace constraint_audit;
+        const std::string type=argv[2];
+        check(type=="landing_mpc"||type=="landing_mpc_ctcs","open-loop audit requires a base MPC formulation");
+        const auto& descriptor=OCPRegistry::getDescriptor(type);
+        OCPCreateArgs args;args.current_state=Eigen::VectorXd::Zero(13);
+        args.current_state(0)=.518;args.current_state(2)=1.85;args.current_state(6)=1;
+        auto problem=descriptor.create(args);const auto model=descriptor.make_model(Eigen::Vector3d::Zero());
+        auto parameters=descriptor.getSolverParams();
+        // Diagnostic-only overrides, always printed with the result. Physical
+        // settings continue to come from the same production OCP factory.
+        parameters.max_inner_iter=comando_parameters::envOrInt("AUDIT_INNER",parameters.max_inner_iter);
+        parameters.max_step_iter=comando_parameters::envOrInt("AUDIT_STEPS",parameters.max_step_iter);
+        parameters.mu=parameters.muT=comando_parameters::envOrQ("AUDIT_MU",parameters.mu);
+        parameters.inner_tolerance=comando_parameters::envOrQ("AUDIT_INNER_TOL",parameters.inner_tolerance);
+        const double scale=comando_parameters::envOrQ("AUDIT_COST_SCALE",1.);
+        check(std::isfinite(scale)&&scale>0,"cost scale must be positive and finite");
+        if(scale!=1.){
+            for(int k=0;k<model.horizon;++k)problem->setStageCost(k,std::make_shared<AuditStageScale>(problem->getStageCost(k),scale));
+            problem->setTerminalCost(std::make_shared<AuditTerminalScale>(problem->getTerminalCost(),scale));
+        }
+        std::cout.precision(17);
+        const auto& limits=comando_parameters::defaults.constraints;
+        std::cout<<"CONFIG type="<<type<<" N="<<model.horizon<<" dt="<<model.dt
+            <<" speed="<<limits.spd_stc_max<<" tilt_deg="<<limits.alpha_theta_stc*limits.theta_stc_deg
+            <<" rate="<<limits.omega_stc_max<<" gs_deg="<<limits.gs_cone_half_angle_deg
+            <<" apex="<<limits.gs_apex_offset<<" los_deg="<<limits.los_cone_half_angle_deg
+            <<" ctcs_budget="<<limits.ctcs_step_eps<<" tolerance="<<parameters.tolerance
+            <<" max_iter="<<parameters.max_iter<<" inner="<<parameters.max_inner_iter
+            <<" steps="<<parameters.max_step_iter<<" mu="<<parameters.mu
+            <<" inner_tol="<<parameters.inner_tolerance<<" cost_scale="<<scale<<std::endl;
+        std::vector<Eigen::VectorXd> seed_x,seed_u;
+        for(int k=0;k<=model.horizon;++k)seed_x.push_back(problem->getInitialState(k));
+        for(int k=0;k<model.horizon;++k)seed_u.push_back(problem->getInitialControl(k));
+        const auto seed=auditPrimal(*problem,seed_x,seed_u,parameters);
+        std::cout<<"SEED constraints="<<seed.constraints<<" dynamics="<<seed.dynamics<<std::endl;
+        ALIPDDP<double> solver(*problem);solver.init(parameters);
+        const auto start=std::chrono::steady_clock::now();solver.solve();
+        const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+        std::cout<<std::defaultfloat<<std::setprecision(17);
+        const auto states=solver.getResX(),controls=solver.getResU();
+        const auto primal=auditPrimal(*problem,states,controls,parameters);
+        Stats root,nodes,local,rollout;root.add(residuals(states.front(),true),0);
+        auto continuous=states.front();double defect=0;
+        for(size_t k=0;k<controls.size();++k){
+            nodes.add(residuals(states[k+1],true),0);auto point=states[k];
+            for(double t=0;t<model.dt-1e-12;){
+                const double h=std::min(.001,model.dt-t);
+                point=model.flow(point,controls[k],h,false).x;
+                continuous=model.flow(continuous,controls[k],h,false).x;
+                local.add(residuals(point,true),h);rollout.add(residuals(continuous,true),h);t+=h;
+            }
+            defect=std::max(defect,(point.head(13)-states[k+1].head(13)).lpNorm<Eigen::Infinity>());
+        }
+        bool physical=true;
+        for(size_t j=0;j<NC;++j)physical=physical&&root.maxima[j]<=tolerances[j]&&nodes.maxima[j]<=tolerances[j]
+            &&local.maxima[j]<=tolerances[j]&&rollout.maxima[j]<=tolerances[j];
+        const bool converged=solver.getTerminationReason()=="Optimal Solution"&&std::isfinite(solver.getOptError())
+            &&solver.getOptError()<=parameters.tolerance;
+        const bool progress=states.back().head<3>().norm()<states.front().head<3>().norm()-.05;
+        const bool pass=converged&&primal.feasible(1e-6)&&physical&&progress;
+        std::cout<<"RESULT termination="<<solver.getTerminationReason()<<" iterations="<<solver.getNumIter()
+            <<" optimality="<<solver.getOptError()<<" internal_error="<<solver.getError()
+            <<" constraints="<<primal.constraints<<" dynamics="<<primal.dynamics<<" dense_defect="<<defect
+            <<" distance="<<states.front().head<3>().norm()<<" -> "<<states.back().head<3>().norm()
+            <<" solve_ms="<<ms<<" converged="<<converged<<" physical="<<physical<<" pass="<<pass<<'\n';
+        for(const auto& entry:{std::make_pair("root",root),std::make_pair("future_nodes",nodes),
+                std::make_pair("dense_intervals",local),std::make_pair("continuous_rollout",rollout)}){
+            std::cout<<entry.first<<' ';entry.second.write(std::cout);std::cout<<'\n';
+        }
+        return pass?0:1;
+    }
     if(argc==3&&std::string(argv[1])=="--initial-guess"){
         // Reproduce a feasible near-cone start with tightened limits, without
         // conflating an inadmissible seed with a failed optimizer iteration.
@@ -41,7 +135,16 @@ int main(int argc,char** argv){try{
         check(states.back().head<3>().norm()<states.front().head<3>().norm()-.05,"feasible initial guess must make nontrivial landing progress");
         return 0;
     }
-    check(argc==1,"usage: test_direct_mpc [--initial-guess landing_mpc|landing_mpc_ctcs]");
+    check(argc==1,"usage: test_direct_mpc [--initial-guess|--open-loop landing_mpc|landing_mpc_ctcs]");
+    {
+        // A diagnostic must fail closed on invalid physical states, including
+        // NaN quaternions that std::max(0, NaN) could otherwise hide.
+        auto invalid=Eigen::VectorXd::Zero(13).eval();
+        for(const auto& state:{invalid,Eigen::VectorXd::Constant(13,std::numeric_limits<double>::quiet_NaN()).eval()}){
+            const auto values=constraint_audit::residuals(state,true);
+            for(double value:values)check(std::isinf(value),"physical audit must reject invalid states");
+        }
+    }
     // A zero slack residual/returned trajectory must not certify an infeasible
     // primal. Check every cone type, terminal rows and exact-memory dynamics.
     {
@@ -86,6 +189,51 @@ int main(int argc,char** argv){try{
         Eigen::VectorXd physical=Eigen::VectorXd::Zero(13);
         physical(0)=.04;physical(1)=.03;physical(2)=1.85;physical(6)=1;physical(10)=.03;
         auto state=L::Dynamics::initialState(physical,L::hover());auto control=L::hover();control(1)=.03;
+        {
+            // Independent references for the shared base OCP: geometric
+            // residuals and central differences do not call its Jacobians.
+            auto probe=state;probe(0)=.4;probe(1)=.2;probe(2)=1.2;
+            probe.segment<3>(3)<<.08,-.06,-.1;
+            probe.segment<4>(6)<<.99,.02,-.03,.01;probe.segment<4>(6).normalize();
+            probe.segment<3>(10)<<.004,-.003,.002;
+            const auto rows=L::Ref::landingRows(L::NX,L::NU);
+            const Eigen::Quaterniond orientation(probe(6),probe(7),probe(8),probe(9));
+            const Eigen::Vector3d axis=orientation*Eigen::Vector3d::UnitZ();
+            const double axial=axis.dot(probe.head<3>());
+            const double tilt=2*std::asin(std::hypot(probe(7),probe(8)));
+            const auto& limits=comando_parameters::defaults.constraints;
+            const std::array<double,6> expected={-probe(2),probe.segment<3>(3).norm()/limits.spd_stc_max-1,
+                probe.segment<3>(10).norm()/limits.omega_stc_max-1,
+                probe.head<2>().norm()/std::tan(limits.gs_cone_half_angle_deg*M_PI/180)-probe(2)-limits.gs_apex_offset,
+                std::sin(tilt/2)/std::sin(limits.alpha_theta_stc*limits.theta_stc_deg*M_PI/360)-1,
+                (probe.head<3>()-axial*axis).norm()-std::tan(limits.los_cone_half_angle_deg*M_PI/180)*axial};
+            const auto fx=dynamics->fx(probe,control),fu=dynamics->fu(probe,control);
+            L::Cost stage;L::Terminal terminal;
+            for(size_t i=0;i<rows.size();++i){
+                const auto c=rows[i]->c(probe,control);
+                const double actual=c(0)+(rows[i]->getConstraintType()==ConstraintType::SOC?c.tail(c.size()-1).norm():0.);
+                check(std::abs(actual-expected[i])<1e-10,"ordinary constraint sign and physical scaling");
+            }
+            for(int j=0;j<L::NX+L::NU;++j){
+                auto xp=probe,xm=probe,up=control,um=control;const double h=1e-7;
+                if(j<L::NX){xp(j)+=h;xm(j)-=h;}else{up(j-L::NX)+=h;um(j-L::NX)-=h;}
+                const Eigen::VectorXd fd=(dynamics->f(xp,up)-dynamics->f(xm,um))/(2*h);
+                const Eigen::VectorXd analytic=j<L::NX?fx.col(j).eval():fu.col(j-L::NX).eval();
+                check((fd-analytic).norm()/(1+fd.norm())<1e-5,"ordinary dynamics Jacobian");
+                const double cost_fd=(stage.q(xp,up)-stage.q(xm,um))/(2*h);
+                const double cost_g=j<L::NX?stage.qx(probe,control)(j):stage.qu(probe,control)(j-L::NX);
+                check(std::abs(cost_fd-cost_g)/(1+std::abs(cost_fd))<1e-5,"ordinary stage objective gradient");
+                if(j<L::NX){
+                    const double term_fd=(terminal.p(xp)-terminal.p(xm))/(2*h);
+                    check(std::abs(term_fd-terminal.px(probe)(j))/(1+std::abs(term_fd))<1e-5,"ordinary terminal objective gradient");
+                }
+                for(const auto& row:rows){
+                    const Eigen::VectorXd row_fd=(row->c(xp,up)-row->c(xm,um))/(2*h);
+                    const Eigen::VectorXd row_g=j<L::NX?row->cx(probe,control).col(j).eval():row->cu(probe,control).col(j-L::NX).eval();
+                    check((row_fd-row_g).norm()/(1+row_fd.norm())<1e-5,"ordinary constraint Jacobian");
+                }
+            }
+        }
         auto folded=L::foldedLimits(dynamics);
         check(folded->getDimC()==1&&folded->numImplications()==6,"ordinary CTCS must fold all six limits into one row");
         check(folded->c(state,control)(0)>0,"always-active CTCS must detect an angular-rate violation above the STC trigger altitude");
@@ -299,6 +447,13 @@ int main(int argc,char** argv){try{
     for(int i=0;i<2500;++i){std::this_thread::sleep_for(std::chrono::milliseconds(2));input.now=std::chrono::steady_clock::now();auto attempt=controller.trySolve(input);if(attempt.solve_attempted)solved=attempt;if(solved.solve_accepted)break;}
     std::cout<<"cold solve: accepted="<<solved.solve_accepted<<" error="<<solved.solve_result.constraint_error<<" ms="<<solved.solve_result.solve_time_ms<<'\n';
     check(solved.solve_accepted,"cold direct MPC solve rejected");
+    check(std::isfinite(solved.solve_result.optimality_error),"solver optimality evidence must reach the core result");
+    check(solved.solve_result.solver_converged==
+        (solved.solve_result.solver_termination=="Optimal Solution"&&
+         solved.solve_result.optimality_error<=O::descriptor().getSolverParams().tolerance&&
+         solved.solve_result.primal_constraint_violation<=O::descriptor().getSolverParams().tolerance&&
+         solved.solve_result.dynamics_error<=O::descriptor().getSolverParams().tolerance),
+         "core convergence evidence must include termination, optimality and primal residuals");
     check(solved.x0_source=="measured","MPC must use measured initial state");
     Eigen::VectorXd expected=input.current_state;
     expected.head<3>()-=input.target_snapshot.position;

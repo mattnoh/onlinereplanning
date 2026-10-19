@@ -1,3 +1,170 @@
+# Authoritative gate record — reliable constrained DDP MPC
+
+Updated 2026-10-19. This ordered sequence supersedes the historical experiments
+below. Evidence of feasibility alone never passes the convergence gate.
+
+1. **Progress/checkpoint:** inspect planner and solver before each prompt;
+   commit task changes; run builds and scenarios sequentially. Planner starts
+   at `cd3fda9`, solver at `4d68a48b`, both without tracked modifications.
+   Unrelated solver untracked papers/results and CATKIN_IGNORE are left alone.
+2. **Shared OCP:** match dynamics, costs, prediction, root and physical limits;
+   independently verify derivatives/signs/scaling/quadrature. Preserve the
+   feasible witnesses and committed integration (`d1b41d4`) and cold-seed
+   (`cd3fda9`) fixes. Protect standalone/RH reference. Shared solver changes
+   require isolated reproduction plus regression evidence before retention.
+3. **Open loop (CURRENT):** both production cold starts must make useful
+   progress, primal/dynamics <= 1e-6, optimality <= configured tolerance and
+   Optimal Solution termination. Separately audit future nodes, local intervals
+   and full continuous propagation at 1 ms. Physical limits/budget stay fixed.
+4. **Offline MPC:** both modes, exact first-control hold for .1 s, 1-ms plant;
+   inspect root, shift, appended interval, defects and IPM initialization. No
+   failed solves/tolerance violations; allow 40 s, finish <3 mm and <.01 m/s.
+   Then actual latency/held-input timing; report publication, update intervals,
+   solve latency and policy expiry separately. Straight/circle/figure-eight
+   sequentially for each mode. NOT STARTED for the demanding converged case.
+5. **Triggered STC:** only after both base modes pass offline. Inactive,
+   active, crossing, altitude/LOS/capture/staging triggers; within-interval
+   activation and complete landings. No always-active surrogate. NOT STARTED.
+6. **ROS1 SITL then portability:** base modes then STC, three saved scenarios
+   sequentially; bags/CSVs/settings/revisions under logs; predicted and measured
+   audits separate; clean teardown. Crazyflie/ROS2 afterward. NOT STARTED.
+
+Fixed benchmark: relative root (.518,0,1.85), upright, zero relative velocity
+and rates; constant target .455 m/s at heading .6; N40, dt .1; speed .25 m/s,
+tilt .1 deg, rate .019 rad/s, GS 15 deg with .1-m apex, LOS 16 deg, floor 0,
+raw CTCS interval budget 1e-8. Floor is geometrically redundant under these
+cones. Physical audit tolerances remain 1e-4 m, m/s, rad/s and .01 deg,
+including spatial LOS error. Activity and one-limit counterfactuals are required.
+No separate optimizer/controller or post-solve command clipping is authorized.
+
+## Verified checkpoint (2026-10-19)
+
+- E7 PASS: test_direct_mpc passes with independent ordinary dynamics Jacobians,
+  all six constraint Jacobians/geometric signs/scales, and stage/terminal cost
+  gradients. Existing analytic rate response, folded RK quadrature, Jacobian,
+  Hessian, measured-state root/first-input hold and moving-target checks pass.
+  Configuration: MPC_MAX_ITER=120, MPC_WARM_ITER=24. Ordinary moving case accepts
+  50 updates, max warm solve 95.7455 ms. This regression is not the demanding
+  no-failed-solve/complete-landing acceptance gate.
+- Both final --initial-guess stress diagnostics PASS: primal/dynamics/dense
+  residual zero and distance 1.92115 -> 1.66210.
+- Final --open-loop checks use the benchmark environment in README and the
+  manifest. Both return exit 1 as required. Stage max-iteration optimality
+  .0011274245137822753, primal/dynamics zero; spatial LOS .00022214422768535025 m
+  for .074 s. CTCS Outer Max/Min, optimality 4.1469056741378148e13,
+  normalized row violation 1.4069693824087672e9. Gate 3 remains FAIL.
+- Existing trajectory_replayer, planner_core, stc_landing_noaug_ctcs and
+  controller CTest cases PASS. stc_landing_noaug FAILS its 30-iteration
+  staging-hover case. E8 reproduces the identical 1.65674 constraint residual,
+  zero dynamics gap and Max Iteration on pristine cd3fda9 with solver 4d68a48b.
+  No test limit or acceptance rule was changed to hide this inherited failure.
+- Sequential focused builds include all six test targets and constraint_audit;
+  temporary E6 linker override is removed. Solver tracked tree remains clean.
+- Exact settings, raw logs, isolated rejected override source and revisions are
+  archived under logs/constraint_gate_20261019/ (manifest.json and
+  source_revisions.txt). These include failed experiments, not just successes.
+
+Next unresolved work: convergence of the folded CTCS OCP from the production
+cold seed, plus the stage formulation's intersample spatial LOS violation.
+Objective scaling alone is insufficient and is not retained in production.
+No gate 4–6 validation is claimed. Gate 2's independent derivative/reference
+checks passed; full counterfactual activity assessment awaits a converged
+physically acceptable benchmark. The standalone/RH source remains protected.
+
+ROS1 comando_planner transport build also PASS after the diagnostic fields,
+with normal solver linkage. No SITL was launched before the offline gates.
+
+## Current experiment register
+
+E1 — Reproduce current production cold convergence with the committed feasible
+seed. No formulation or solver change. Extend the existing direct-MPC diagnostic
+with fail-closed convergence and separate physical audits. Pass: both modes
+meet gate 3, including raw optimality and 1-ms continuous propagation.
+FAIL at 120 iterations: stage optimality .0011274, primal/dynamics 0,
+continuous spatial LOS .000222144 m for .074 s (limit .0001 m).
+CTCS Outer Max/Min, optimality 4.1469e13, row violation 1.40697e9.
+Logs: /tmp/comando-gate-e1-{stage,ctcs}.log. Both seeds have zero residual.
+
+E2 — Test whether continuation advances before solving its inner subproblem.
+Change only inner-iteration budget 50 -> 2000 (total budget also 2000 to
+observe the inner solve), retain default 10 line-search trials. No retained
+parameter change. Pass: gate 3; compare termination/stationarity with E1.
+
+
+E2 FAIL: stage stalls at Outer Max/Min after 1211 iterations, optimality .025455,
+physical LOS failure persists. CTCS terminates at Outer Max/Min with large
+residuals. Logs /tmp/comando-gate-e2-{stage,ctcs}.log.
+
+E3 — Compared with E2, change only line-search trials 10 -> 30, testing whether
+short backtracking forces premature regularization/outer termination. Same
+budgets/limits/objective/seed. Pass: gate 3. Diagnostic only; result below.
+
+E3 stage FAIL: 336 iterations, Outer Max/Min, optimality .0159; line search
+reaches regularization ceiling at final barrier. CTCS result is recorded below.
+
+E4 — Hypothesis: raw objective and tight normalized CTCS row have mismatched
+numerical scales. Compared with E3, scale the entire objective and all of its
+derivatives by 1e-3 (same positive factor, both formulations). Preserve roots,
+physical limits, integral budget and initialization. Diagnostic wrappers only;
+production OCP unchanged. Pass: gate 3; report both scaled stationarity and
+factor, do not claim raw stationarity is equivalent. No tolerance relaxation.
+
+E3 CTCS FAIL: 2000-iteration cap, optimality about .0012, physical failure.
+E4 stage: Optimal Solution in 45 iterations, scaled optimality 1.10046e-7,
+primal/dynamics zero, distance 1.92115 -> 1.40365. Physical FAIL: continuous
+LOS .000222114 m for .074 s. CTCS FAIL with large residuals after 48 iterations.
+No production scaling retained. Logs /tmp/comando-gate-e4-{stage,ctcs}.log.
+
+E5 — Relative to E4 CTCS only, change initial barrier 1e-5 -> 1 to match stage
+continuation under the common normalized objective. Hypothesis: the low CTCS
+initial barrier permits an uncentralized first step. Pass: gate 3; all physical
+settings and integral budget fixed. Diagnostic only; result below.
+
+E5 FAIL: CTCS Outer Max/Min at 90 iterations, large primal/optimality.
+Evidence /tmp/comando-gate-e5-ctcs.log. Barrier increase alone is rejected.
+
+E6 — Isolated feasible-interior line search, coupled with E4 objective scale.
+Hypothesis: for a feasible root/trajectory the current filter accepts arbitrarily
+large nonlinear primal violations for a cost decrease; preserving the nonlinear
+interior and recentering slacks/duals restores a useful central path. Use the
+existing temporary forward-pass override /tmp/comando-mpc-feasible-barrier.o,
+MPC_FEASIBLE_BARRIER=1, with the current untouched production solver library.
+No shared source edits. Match E4 otherwise. Pass: gate 3; only consider retention
+following isolated reproduction AND standalone/RH regression. Prior unscaled
+version failed warm MPC; this experiment only checks open-loop scaling.
+
+E6 FAIL: isolated feasible-interior forward pass returns zero primal/dynamics
+but Outer Max/Min, optimality 6.01885e8, spatial LOS .000461326 m for .109 s.
+Log /tmp/comando-gate-e6-ctcs.log. Reject override; restore default linker flags.
+No shared solver change or objective normalization is retained.
+
+Retained implementation: extend test_direct_mpc --open-loop with exact settings,
+seed audit, termination/optimality, primal/dynamics, independent 1-ms interval
+and continuous audits, physical tolerances and nonzero failure exit. Share the
+existing physical audit definitions with constraint_audit, reject invalid
+physical states, and expose raw optimality/converged evidence through core
+results. Acceptance/control delivery behavior is unchanged. Full gate 3 still
+FAILS; gates 4–6 remain unstarted. Verification and evidence archival are recorded above.
+
+E7 — Verify the shared ordinary dynamics, stage/terminal objective gradients
+and all six constraint signs/scales/Jacobians against geometry and central
+finite differences in the existing direct-MPC test. No production change;
+require relative derivative error <1e-5 and geometric residual error <1e-10.
+Existing analytic actuator and folded quadrature/Jacobian/Hessian references
+remain in the same test. PASS in the final sequential build/test.
+
+E8 — Existing test_stc_landing_noaug fails staging-hover cold solve (30-iteration
+budget, constraint 1.65674) in a fresh sequential build. Four other core CTest
+cases pass; direct-MPC regression separately passed before E7's added checks.
+Hypothesis: this is pre-existing rather than caused by diagnostic fields.
+Build pristine planner cd3fda9 in detached /tmp/comando-baseline-ws worktree
+against unchanged solver 4d68a48b, run the identical unmodified test. Pass for
+non-regression: same failure/residual; any difference requires investigation.
+No change to test budgets or acceptance. Baseline reproduces the identical failure (see verified checkpoint).
+
+
+## Historical evidence (superseded as an execution sequence)
+
 # CoManDO DDP-to-PX4 constraint satisfaction
 
 The user requires DDP to compute the states and controls, with PX4 performing tracking. No separate LQR, QP, safety filter or invented tracking controller is authorized. The unflown QP experiment was checkpointed and removed.

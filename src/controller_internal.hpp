@@ -107,6 +107,10 @@ public:
         std::vector<Eigen::MatrixXd>  feedback_gains;
         double                        solve_time_ms = 0.0;
         double                        constraint_error = 0.0;
+        // Feasibility and optimal convergence are separate evidence. This
+        // diagnostic does not alter delivery of the returned first control.
+        double optimality_error = std::numeric_limits<double>::infinity();
+        bool converged = false;
         PrimalAudit primal;
         std::string termination;
         int                           solve_iters   = 0;
@@ -625,6 +629,8 @@ private:
         result.control_trajectory = r.control_trajectory;
         result.solve_time_ms = r.solve_time_ms;
         result.constraint_error = r.constraint_error;
+        result.optimality_error = r.optimality_error;
+        result.solver_converged = r.converged;
         result.primal_constraint_violation = r.primal.constraints;
         result.dynamics_error = r.primal.dynamics;
         result.solver_termination = r.termination;
@@ -1199,7 +1205,7 @@ class DirectMpcController {
             out.solve_result.success=raw.success;out.solve_result.state_trajectory=raw.state_trajectory;
             out.solve_result.control_trajectory=raw.control_trajectory;out.solve_result.feedback_gains=raw.feedback_gains;
             out.solve_result.solve_time_ms=raw.solve_time_ms;out.solve_result.solve_iters=raw.solve_iters;
-            out.solve_result.constraint_error=raw.constraint_error;out.solve_result.primal_constraint_violation=raw.primal.constraints;out.solve_result.dynamics_error=raw.primal.dynamics;out.solve_result.solver_termination=raw.termination;out.solve_result.solve_start_time=raw.solve_start_time;out.solve_result.solve_finish_time=raw.solve_finish_time;
+            out.solve_result.optimality_error=raw.optimality_error;out.solve_result.solver_converged=raw.converged;out.solve_result.constraint_error=raw.constraint_error;out.solve_result.primal_constraint_violation=raw.primal.constraints;out.solve_result.dynamics_error=raw.primal.dynamics;out.solve_result.solver_termination=raw.termination;out.solve_result.solve_start_time=raw.solve_start_time;out.solve_result.solve_finish_time=raw.solve_finish_time;
             out.solve_result.is_relative_plan=true;out.solve_result.target_snapshot_pos=input.target_snapshot.position;
             out.solve_result.target_snapshot_vel=input.target_snapshot.velocity;out.solve_result.target_snapshot_acc=input.target_snapshot.acceleration;
             bool valid=raw.success&&std::isfinite(raw.constraint_error)&&raw.constraint_error<=config_.max_constraint_error&&
