@@ -54,8 +54,11 @@ inline PrimalAudit auditPrimal(const OptimalControlProblem<double>& problem,
         return type==ConstraintType::EQ?c.cwiseAbs().maxCoeff():std::max(0.,c.maxCoeff());
     };
     for(int k=0;k<problem.getHorizon();++k){
-        if(x[k].size()!=problem.getInitialState(k).size()||u[k].size()!=problem.getInitialControl(k).size())return {invalid,invalid};
-        auto next=problem.getDynamics(k)->f(x[k],u[k]);
+        // Size against the stage dynamics: OCPs may seed only node 0 (hover),
+        // leaving later initial states empty.
+        const auto& dynamics=problem.getDynamics(k);
+        if(x[k].size()!=dynamics->getDimX()||u[k].size()!=dynamics->getDimU())return {invalid,invalid};
+        auto next=dynamics->f(x[k],u[k]);
         if(next.size()!=x[k+1].size()||!next.allFinite())return {invalid,invalid};
         if(parameters.is_quaternion_in_state){
             const int q=parameters.quaternion_idx;
