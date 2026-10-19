@@ -1,5 +1,42 @@
 # Local point-mass open-loop 2 × 2 comparison
 
+## Current interpretation: reconcile Claude's table (2026-10-19)
+
+**Free-time SCP CTCS works for the tested N=40,20,10,6 cases under the original
+1e-6 dynamics-residual requirement.** Claude's quoted table exactly matches
+`fair_gap1e-06/fair_tables.md`; the earlier figure in this report uses the
+stricter `fair/` selector's 1e-8 physical dynamics-gap threshold. Its grey
+"no accepted setting" cells are strict-accuracy classifications, not evidence
+that no physically safe, integral-feasible free-time policy exists. Presenting
+them as a general failure of free-time SCP was misleading and is corrected here.
+
+Independently regraded the four selected returned control policies and verified
+their saved replay arrays, physical constraints, terminal checks, native and
+independent budgets, and existing 0.1-epsilon integral-consistency check:
+
+| N | Maximum physical dynamics gap | Obstacle clearance | Independent I/epsilon | Physical and integral checks |
+|---|---:|---:|---:|---|
+| 40 | 2.08898e-7 | 4.61723 mm | 0.0791923 | pass |
+| 20 | 2.81490e-7 | 0.96973 mm | 0.911619 | pass |
+| 10 | 1.40805e-7 | 2.00181 mm | 0.939702 | pass |
+| 6 | 7.86512e-7 | 1.99575 mm | 0.990561 | pass |
+
+All four gaps are below 1e-6 and above 1e-8. Their physical limits, tightening
+and epsilon are the saved values; no safety budget was enlarged in this review.
+The N=20,10,6 selected runs already existed in the earlier frozen pool. N=40
+completed later. Changing the selection gate changes which run is selected,
+which also explains the different stage-only penetration numbers between the
+two tables. The quoted table labels DDP selections at 1e-8 and SCP at 1e-6;
+this must remain explicit for precision/performance comparisons.
+
+Raw tables, selected settings/native arrays/replay arrays, grading source,
+reconciliation.json and a verified 28-file SHA256 inventory are saved under
+`logs/point_mass_scp_threshold_reconciliation_20261019/`. No optimizer was run
+and no solver settings were changed. At inspection, the separate live free
+N=100 campaign was still running. The older snapshot and its stricter audit
+below remain historical evidence, with their original source and hashes intact.
+
+
 Reviewed the existing benchmark at
 `/home/lab/projects/solver/benchmark/openscvx_point_mass_ctcs` and its DDP
 reference under `/home/lab/projects/solver/DDP/ALIPDDP-ctstc-al`.

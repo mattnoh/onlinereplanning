@@ -1,3 +1,21 @@
+# Current clarification — free-time SCP is physically successful at 1e-6
+
+2026-10-19: reconciled user's quoted Claude table with the actual local files.
+It matches fair_gap1e-06/fair_tables.md, while the previous frozen plot used
+1e-8 physical-gap selection. Original task dynamics requirement is1e-6.
+Independently regraded all four selected free SCP CTCS policies N40/20/10/6:
+physical and independent/native budget/consistency checks PASS. Physical gaps
+2.08898e-7/2.81490e-7/1.40805e-7/7.86512e-7, all below1e-6, above1e-8.
+N20/10/6 selections were already in the old frozen pool; N40 completed later.
+Do not characterize rejection at1e-8 as failure to enforce physical CTCS.
+Detailed correction at top of POINT_MASS_OPEN_LOOP.md; raw source/tables/arrays
+and verified28-file inventory saved in logs/point_mass_scp_threshold_reconciliation_20261019.
+No solves, code, safety-limit, epsilon or tightening changes. Previous stricter
+records remain historical, not the current physical-success interpretation.
+Landing remains paused.
+
+---
+
 # Current authorized task — local point-mass open-loop four-arm comparison
 
 2026-10-19 user requests review of the local point-mass open-loop comparison,
