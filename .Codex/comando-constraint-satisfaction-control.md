@@ -1157,3 +1157,17 @@ Review corrected the old local note's matched-seed claim: DDP consistent
 line velocity vs SCP zero velocity. Saved timing and seed differences preclude
 a controlled speed ranking. Existing active SCP sweeps remain untouched;
 missing accepted cells stay explicit. No landing or shared-solver changes.
+
+
+## Free-time SCP rejection follow-up — 2026-10-19
+Read-only frozen-pool gate audit, no solves or formulation/tolerance changes.
+Correct prior gap-only explanation: displayed N10 is physically safe and
+independent-budget-feasible, but fails gap1.41466533e-8>1e-8 AND strict native
+budget residual+1.31724e-18>0 (1.31724e-9 of epsilon). N20 diagnostic instead
+fails native-vs-independent integral agreement (0.5724911eps>0.1eps) despite
+safe and budget-feasible replay. Variable interval duration makes the physical
+map nonlinear; fixed duration physical map affine. OpenSCvx stops on scaled
+step/linearizedVC/VB, not original independent replay defects. No isolated
+root-cause claim for every pool failure. Full result in POINT_MASS_OPEN_LOOP.md
+and ignored logs/point_mass_free_scp_review_20261019.json. Old snapshot stays
+immutable. No landing work or solver changes.

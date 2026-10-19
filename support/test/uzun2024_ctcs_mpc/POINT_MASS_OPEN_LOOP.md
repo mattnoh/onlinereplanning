@@ -102,3 +102,41 @@ This command only selects, independently audits and plots saved policies.
 snapshot includes the exact executed plotting source; its final portable
 lookup extension is also saved separately. Source of the original historical
 DDP campaign is not reconstructed from a current source revision.
+
+
+## Follow-up: why free-time SCP was labeled unaccepted
+
+This label does not mean the displayed CTCS path penetrates the obstacle.
+N=10 is physically safe (4.21446 mm obstacle clearance), independently budget
+feasible (I/eps=0.9996561763) and natively converged. Two strict comparisons
+reject it: the 1.41466533e-8 physical gap exceeds 1e-8, and its native interval
+budget is above epsilon by 1.31724e-18. The previous gap-only explanation was
+incomplete: the selector also requires native I-eps<=0 with no numerical
+allowance. That second residual is 1.31724e-9 of epsilon, while the independent
+physical replay remains below the actual budget. No criterion was changed.
+
+Other free-time CTCS diagnostics fail different gates. N=20 has a small physical
+gap (3.13689e-9), a safe path and I/eps=0.4275082, but the native-vs-independent
+maximum-integral difference is 0.5724911 epsilon, exceeding the existing 0.1
+epsilon consistency gate. N=6 is safe and budget feasible but has a 5.20176e-8
+physical gap. Thus the whole pool is not explained solely by a tiny strict-gap
+miss; some candidates have substantive augmented-integral inconsistency, and
+others fail convergence or actual replay budgets.
+
+Free duration makes the physical discrete map nonlinear in the decision
+variables (v_next=v+Theta*(a-g), p_next=p+Theta*v+0.5*Theta^2*(a-g)); fixed
+Theta makes that physical map affine in x,a. CTCS integration also depends on
+Theta. These couplings explain why the free-time transcription requires more
+nonlinear refinement, but do not establish the cause of every failed candidate.
+The pinned OpenSCvx stopping test uses scaled step/linearized virtual-control/
+buffer metrics, rather than independently replayed physical and CTCS defects.
+So native convergence and the stricter independent audit can disagree.
+
+A read-only rescore of the frozen pool finds 25 settings would pass the other
+unchanged gates with a 1e-6 physical-gap threshold instead of 1e-8 (5/11/9 at
+N=6/10/20). This is diagnostic sensitivity only; no production threshold,
+budget or tightening was relaxed. Detailed counts are saved separately as
+logs/point_mass_free_scp_review_20261019.json. The correct next diagnostic is
+nonlinear-residual-aware stopping and accumulator conditioning, with physical
+limits, tightening and epsilon held fixed. No new optimization was authorized
+or run by this explanatory review.
