@@ -1086,3 +1086,26 @@ No solverlibrarychanges. Pairedhelper snapshots forP18/P19matchtheirrecorded
 sourcehashes; laterCLIargumentguard onlyrejectsinvalidflagcombinations.
 WrittenRESULTS/README now separate testedstoppinggain fromunverifiedlanding
 repair andmarkmissinghistorical/tmptraces. LandingremainsPAUSED.
+
+
+## Logging audit, actual CTCS path overlay and solver distinction
+
+User asks whether logs are safe, to show actual SCP/DDP CTCS paths, and about
+interior-point versus conic enforcement. No optimization/landing experiment.
+Checked key runsP5/P7/P10b/P12/P13/P17/P18/P19: required configs/summary/solves,
+completecampaign arrays/denseplant/executedCSV and everyrecordedsourcehash
+match the saved snapshots. Rawlogs are Gitignored; localstorage is not an
+offmachinebackup. Known missing olderlanding/tmp traces remain disclosed.
+Extendexistingplotter with executedCTCS-only overlay, saveddataP5SCPZOH10
+andlatestverifiedP17DDPM50/shared/inner100; independent1ms actualplantpaths,
+allfive physicalobstacles and tightenedhalos, notpredictedhorizoncurves.
+Source/dataexport andvisualinspectionPASS. Plotdoesnotrerunoptimization.
+CreateaSHA256-inventoriedlocalarchive ofallavailablepaperlogs, archivedlanding
+gatelogs, canonicalreproductionsource/record, currentbinary/buildflags/revisions.
+Archiveandchecksum live underlogs/archives; verify everyarchivedfileagainst
+inventory. This doesnotrecover missing/tmpdata or claimremote backup.
+Clarabel0.11.1 installedprimaryMETADATA describesitsinterior-point conic
+algorithm. BothcurrentDDPconstraintmethodandSCP'sconicbackend useIPM; they
+solve different nonlinear/quadratic versus convexifiedsubproblems. Innerconic
+feasibility doesnotremove outerSCP nonlinear/integraldefects. Fixedbudget,
+tightening, integration and finalnonlinearfeasibility remain necessary.

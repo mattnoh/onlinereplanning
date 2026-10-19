@@ -19,6 +19,53 @@ OCP. It rules out a blanket claim that per-interval folded CTCS or the
 retained DDP MPC interface cannot work. Landing-specific densities/scales,
 initialization, tail feasibility and terminal behavior still require isolation.
 
+## Actual executed CTCS paths and retained logs
+
+[Executed path overlay PNG](../../../logs/uzun2024_ctcs_mpc/ctcs_actual_paths_current/fig_ctcs_actual_paths.png)
+([PDF](../../../logs/uzun2024_ctcs_mpc/ctcs_actual_paths_current/fig_ctcs_actual_paths.pdf)).
+Blue: SCP CTCS ZOH10 (P5). Green: latest verified DDP CTCS M50/shared/inner100
+(P17). Dashed black: reference. Grey ellipses: physical obstacles; dashed
+outlines: .05 tightening. Hollow markers are .5s executed nodes. Curves are
+actual simulated plant paths from saved independent1ms replay, not horizon
+predictions or physical-flight measurements. Both have zero physical violation;
+mean tracking is.403897m for SCP and.250055m for DDP. The lower panel shows
+physical maxg over allfive obstacles, clipped below-.15; exactseries remain
+in the exportedCSV/NPZ. SCP integral-budget residual remains separately reported.
+
+Key recent run files/sourcehashes were checked. Canonical source and this report
+are committed; raw `logs/` is Gitignored. A checksummed local archive under
+`logs/archives/` captures available paper logs (including failed candidates),
+archived landing gate logs, canonical source/progress record and current solver
+binary/build flags. Archive index/checksum lists exact contents. This is local
+retention, not off-machine backup; older landing `/tmp` traces noted below are
+still missing. The archive preserves evidence, not a declaration that every
+included experiment passed.
+
+## Interior point and conic solvers
+
+Clarabel0.11.1, used by this OpenSCvx reproduction, is itself an interior-point
+conic solver (see its installed package METADATA). Conic describes the problem
+class; interior point describes a solution algorithm. The paper used ECOS or
+MOSEK; our configured numerical backend is CLARABEL.
+
+DDP applies its structured primal-dual inequality method to the nonlinear OCP,
+using local quadratic models in its backward pass. Its CTCS row directly
+evaluates the folded interval integral. SCP instead constructs a convex
+subproblem from linearized augmented dynamics; its `y[k+1]-y[k]<=epsilon`
+rows are affine constraints solved by the conic backend. The current SCP
+subproblem can satisfy those rows while the original nonlinear accumulator
+dynamics retain defects. This accounts for why a conic `optimal` status alone
+does not prove feasibility of the original CTCS problem after finitely many
+SCP iterations. The entire SCP problem remains nonlinear despite convex inner
+subproblems. DDP also needs accurate integration and actual nonlinear primal
+checks; the rejected20-step experiment demonstrates that solver feasibility
+alone can miss an integral-budget excess.
+
+At exact dynamics/integration and convergence, the two CTCS representations
+have the same per-interval meaning. Their numerical conditioning, curvature,
+step acceptance and stopping differ; neither algorithm label alone establishes
+continuous-time physical safety or general performance superiority.
+
 ## Matched SCP/DDP × CTCS/nodal comparison
 
 The missing SCP nodal case is implemented and executed (P10b). All four

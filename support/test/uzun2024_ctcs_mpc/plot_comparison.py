@@ -472,6 +472,41 @@ def fig_comparison(cases, ivs, out, glow):
     return _save(fig, out, "fig_comparison")
 
 
+def fig_ctcs_paths(cases, ivs, out):
+    """Executed CTCS plant paths only; never horizon predictions or re-solving."""
+    selected = [c for c in cases if c["key"] in ("SCP10ZOH", "DDPCTCS")]
+    if len(selected) != 2:
+        return []
+    fig, (ax, ag) = plt.subplots(2, 1, figsize=(8.0, 6.3), layout="constrained",
+                                 gridspec_kw={"height_ratios": [3.3, 1.]})
+    _ellipses(ax)
+    times = selected[0]["t"]
+    ref = common.reference(times)
+    ax.plot(ref[:, 0], ref[:, 1], color="k", ls="--", lw=1.0, label="Reference")
+    for c in selected:
+        color = c["spec"]["color"]
+        label = "SCP CTCS (ZOH, 10 iterations)" if c["key"] == "SCP10ZOH" else "DDP CTCS (verified fast profile)"
+        ax.plot(c["X"][:, 0], c["X"][:, 1], color=color, lw=1.6, label=label)
+        nt = _node_times(ivs[c["key"]])
+        idx = [_idx_at(c["t"], t) for t in nt]
+        ax.plot(c["X"][idx, 0], c["X"][idx, 1], "o", ms=2.8, mfc="white", mec=color, mew=.8)
+        ax.plot(c["X"][-1, 0], c["X"][-1, 1], "s", ms=5, color=color)
+        ag.plot(c["t"], c["gmax"], color=color, lw=1.2)
+    start = selected[0]["X"][0]
+    ax.plot(start[0], start[1], "*", color="k", ms=9, label="Common start")
+    ax.set(xlabel="x [m]", ylabel="y [m]", title="Executed plant paths over 30 s (independent 1 ms replay)")
+    ax.set_aspect("equal", adjustable="box")
+    ax.legend(loc="upper right", framealpha=.95, fontsize=7)
+    ag.axhline(0, color="k", lw=.9, label="Physical obstacle boundary")
+    ag.axhline(-common.DELTA_OBS, color=".35", ls="--", lw=.8, label="Tightened boundary")
+    ag.axhspan(0, .025, color="#C00000", alpha=.12)
+    ag.set(xlim=(0, 30), ylim=(-.15, .025), xlabel="Time [s]", ylabel=r"Physical $\max_i g_i$",
+           title="All five obstacles; positive values mean penetration (lower axis clipped at -0.15)")
+    ag.legend(loc="lower right", fontsize=6.5, framealpha=.95)
+    fig.suptitle("SCP CTCS versus DDP CTCS: actual executed trajectories", fontsize=11)
+    return _save(fig, out, "fig_ctcs_actual_paths")
+
+
 def _node_times(iv):
     return np.array([r["t0"] for r in iv] + [iv[-1]["t0"] + iv[-1]["duration"]])
 
@@ -761,6 +796,7 @@ def main(argv=None):
     by_stat = {s["case"]: s for s in stats}
 
     files = fig_comparison(plotted, ivs, a.output_dir, a.g_floor)
+    files += fig_ctcs_paths(plotted, ivs, a.output_dir)
     by_key = {c["key"]: c for c in cases}
     absent = [k for _, k, _ in PANELS if k not in by_key]
     if absent:
