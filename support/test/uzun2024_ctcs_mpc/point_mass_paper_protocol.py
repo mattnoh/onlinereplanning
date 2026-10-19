@@ -10,6 +10,10 @@ import math
 from pathlib import Path
 
 
+def frozen_ddp_profile():
+    return json.loads((Path(__file__).parent/'point_mass_ddp_frozen_profile.json').read_text())
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, allow_nan=False,
                                     separators=(',', ':')).encode()).hexdigest()
@@ -62,14 +66,14 @@ def candidate():
         test_cases=[approach_case(f'test_{i:02d}', 2*math.pi*(i+.5)/32)
                     for i in range(32)],
         selection='one returned policy per method/time/mesh/case; no retries or best-of-pool',
-        profiles=None, source_pins=None,
-        optimizer_quadrature=None,
+        profiles={'folded_ddp': frozen_ddp_profile()}, source_pins=None,
+        optimizer_quadrature={'folded_ddp_rk4_substeps': 512},
         stopping='method-specific stationarity plus common certified feasibility; '
                  'Outer Max/Min and iteration limits are not optimality',
         timing='excluded from primary claims',
         release_blockers=[
             'Calibrate profiles once on calibration cases; archive every trial and work budget.',
-            'Resolve or explicitly scope DDP SOC stalls and normalized/GN backward failures.',
+            'DDP profile fixed by user: NT, legacy gate, CTCS GN off; solver/globalization research stopped.',
             'Choose fixed optimizer quadrature by accuracy calibration, not substep count alone.',
             'Verify shared cold seed and physical objective in all three adapters, fixed and free.',
             'Pin clean tracked sources, build settings, binaries, profiles and seed arrays.',
