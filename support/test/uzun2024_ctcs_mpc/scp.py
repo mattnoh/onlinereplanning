@@ -444,7 +444,8 @@ def run(args, out):
             ms_int = max(r["ms_integral"] for r in rows)
             rec.update({
                 "ms_integral_max": ms_int,
-                "ms_budget_met": bool(ms_int <= args.epsilon * (1 + 1e-6)),
+                "ms_budget_met": bool(ms_int <= common.theorem14_admissible_budget(args.delta, dt, args.umax)),
+                "ms_budget_met_strict": bool(ms_int <= args.epsilon * (1 + 1e-6)),
                 "ms_phys_defect_max": max(r["ms_phys_defect_inf"] for r in rows),
                 "ms_y_defect_max": max(r["ms_y_defect"] for r in rows) if Y is not None else None,
                 "ms_l_defect_max": max(r["ms_l_defect"] for r in rows),
@@ -484,7 +485,8 @@ def run(args, out):
                 exec_rows.append({
                     "solve": i, "k": k, "t0": tc + k * dt, "duration": applied_dt,
                     "integral": float(rep["integral"]), "cost": float(rep["cost"]),
-                    "budget_met": bool(rep["integral"] <= args.epsilon * (1 + 1e-6)),
+                    "budget_met": bool(rep["integral"] <= common.theorem14_admissible_budget(args.delta, applied_dt, args.umax)),
+                    "budget_met_strict": bool(rep["integral"] <= args.epsilon * (1 + 1e-6)),
                     "max_physical_excess": float(rep["max_physical_excess"]),
                     "violation_duration": float(rep["violation_duration"]),
                     "min_clearance": float(rep["min_clearance"]),
@@ -527,6 +529,8 @@ def run(args, out):
             "min_clearance": min((r["min_clearance"] for r in exec_rows), default=None),
             "max_interval_integral": max((r["integral"] for r in exec_rows), default=None),
             "interval_budgets_met": all(r["budget_met"] for r in exec_rows) if exec_rows else False,
+            "interval_budgets_met_strict": all(r["budget_met_strict"] for r in exec_rows) if exec_rows else False,
+            "theorem14_admissible_budget": common.theorem14_admissible_budget(args.delta, dt, args.umax),
             "max_predicted_minus_plant": max((r["predicted_minus_plant_inf"] for r in exec_rows), default=None),
             "tracking_cost_sum": sum(r["cost"] for r in exec_rows),
             "final_state": plant.tolist() if "plant" in locals() else None,
@@ -546,7 +550,7 @@ def run(args, out):
               and (args.constraint_mode == "stage" or closed["interval_budgets_met"]))
         summary["status"] = "pass" if ok else "fail"
         summary["pass_definition"] = ("all solves completed with exactly the requested iterations, finite, "
-                                      "AND closed-loop physical/input limits, executed interval budgets ONLY for CTCS mode, and mean tracking error <= tracking_tol. "
+                                      "AND closed-loop physical/input limits, executed interval budgets (Theorem-14 admissible budget; strict I_k<=epsilon reported separately) ONLY for CTCS mode, and mean tracking error <= tracking_tol. "
                                       "Per-solve 'certified' and interval budgets are reported separately.")
         common.save_json(out / "summary.json", summary)
         files = [out / f for f in ("config.json", "summary.json", "solves.csv", "plan_intervals.csv",

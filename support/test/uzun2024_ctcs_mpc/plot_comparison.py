@@ -277,6 +277,10 @@ def case_stats(c, iv):
         "max_interval_integral_audited": float(max(r["audited_integral"] for r in iv)),
         "max_interval_integral_over_epsilon": float(ratio.max()),
         "n_intervals_over_epsilon": int(np.sum(ratio > 1.0)),
+        # Acceptance threshold (Elango Thm 14 / Rem 15, common.theorem14_admissible_budget)
+        "theorem14_admissible_budget": B_ADM,
+        "theorem14_admissible_over_epsilon": B_ADM / c["epsilon"],
+        "n_intervals_over_admissible": int(sum(r["audited_integral"] > B_ADM for r in iv)),
         "executed_integral_max_from_solves": max(exec_budget) if exec_budget else None,
         "trapz1ms_vs_audited_integral_max_abs_diff": max(trap_err) if trap_err else None,
         # data-handling checks
@@ -289,12 +293,17 @@ def case_stats(c, iv):
     flags.append("physically safe (audited, all 5 obstacles)" if (st["max_physical_excess"] or 0.0) <= 0.0
                  else f"PHYSICAL VIOLATION: excess {st['max_physical_excess']:.3e}, "
                       f"{st['violation_duration_audited_s']:.4f} s")
-    flags.append(("diagnostic integral: " if st["nodal_only"] else "") + ("integral budget met" if st["n_intervals_over_epsilon"] == 0
-                 else f"integral budget NOT met in {st['n_intervals_over_epsilon']} intervals "
-                      f"(max I/eps={st['max_interval_integral_over_epsilon']:.3g})"))
+    flags.append(("diagnostic integral: " if st["nodal_only"] else "")
+                 + (f"integral within Theorem-14 budget (max I/eps={st['max_interval_integral_over_epsilon']:.3g}"
+                    f" <= {st['theorem14_admissible_over_epsilon']:.3g})" if st["n_intervals_over_admissible"] == 0
+                    else f"integral over Theorem-14 budget in {st['n_intervals_over_admissible']} intervals "
+                         f"(max I/eps={st['max_interval_integral_over_epsilon']:.3g} > {st['theorem14_admissible_over_epsilon']:.3g})"))
     flags.append(f"run status={st['summary_status']}")
     st["verdict"] = "; ".join(flags)
     return st
+
+
+B_ADM = common.theorem14_admissible_budget()  # delta=0.05, 0.5 s intervals
 
 
 PERF_DEFINITIONS = {
@@ -444,12 +453,14 @@ def fig_comparison(cases, ivs, out, glow):
     ax_e.set_ylim(bottom=0.0)
 
     ax_i.axhline(1.0, color="k", lw=0.9)
+    ax_i.axhline(B_ADM / cases[0]["epsilon"], color="#C00000", lw=0.9, ls=(0, (4, 2)))
     ax_i.set_yscale("symlog", linthresh=1e-3, linscale=0.6)
     ax_i.set_ylim(0.0, max(3.0, 2.5 * max(r["audited_integral_over_epsilon"]
                                           for c in cases for r in ivs[c["key"]])))
     ax_i.set(xlabel="$t$ [s]", ylabel=r"$I_k/\varepsilon$, executed interval",
              title=r"(d) Audited CTCS integral per interval (diagnostic)")
-    ax_i.text(0.01, 0.45, r"$I_k=\int\sum_{\rm sensed}[g_i+\delta]_+^2\,dt$, $\varepsilon=10^{-6}$;"
+    ax_i.text(0.01, 0.62, r"$I_k=\int\sum_{\rm sensed}[g_i+\delta]_+^2\,dt$, $\varepsilon=10^{-6}$ (solver target);"
+              "\nred dashed: Theorem-14 admissible budget (acceptance);"
               "\nnot the acceptance test of nodal-only cases", transform=ax_i.transAxes,
               va="center", fontsize=6.2, bbox=dict(fc="white", ec="none", alpha=0.85))
 

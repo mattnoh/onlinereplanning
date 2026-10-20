@@ -72,6 +72,8 @@ performance trial. [Full maintained report](../../support/test/uzun2024_ctcs_mpc
 
 ## Paper MPC
 
+**Current:** [rerun with Theorem-14 acceptance gate](paper_mpc_v2/) · [2×2 figure](paper_mpc_v2/comparison_2x2/fig_2x2.png) · [overview](paper_mpc_v2/comparison_2x2/fig_comparison.png). All four matched cells verified; both CTCS arms pass, both nodal arms violate between nodes. Original campaign below.
+
 [Complete campaign](paper_mpc/) ·
 [actual SCP/DDP CTCS paths](paper_mpc/ctcs_actual_paths_current/fig_ctcs_actual_paths.png) ·
 [matched four-arm figure](paper_mpc/comparison_2x2/fig_2x2.png) ·

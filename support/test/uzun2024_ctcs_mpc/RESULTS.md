@@ -6,6 +6,24 @@ ZOH/FOH as labeled and K=4 intervals per update. Plant time is frozen during
 optimization. Independent replay uses DOP853 at <=1ms, event-resolved
 violations and refined peaks. No tracking controller or control clipping.
 
+## Acceptance gate correction and rerun (2026-10-20)
+
+The CTCS acceptance test used the strict solver target `I_k <= epsilon`. That is not
+what the guarantee needs: Elango Thm 14 / Rem 15 give `g_i <= 0` whenever
+`I_k <= B_adm = delta^3/(4 omega)` (with `I_k <= omega^2 dt^3/4`). Here
+`omega = sigma_max(S) V = 2.4 * 10 = 24 /s`, with the a-priori speed bound
+`V = sqrt(u_max/c_d) = 10 m/s` (drag keeps `|v| <= V` from rest), so
+`B_adm = 1.302e-6 = 1.30 epsilon` (`common.theorem14_admissible_budget`).
+The strict test is still reported (`budget_met_strict`, `interval_budgets_met_strict`).
+All matched and supplementary cases were rerun with the corrected gate and the
+DDP binary rebuilt on the frozen solver (ALIPDDP 82b2da6) in
+`logs/point_mass/paper_mpc_v2/`; every trajectory reproduces the original.
+Verdicts: SCP CTCS ZOH10 (P5, max `I_k/epsilon` 1.26) **pass**; SCP CTCS FOH10 (P4, 1.27)
+pass; DDP CTCS (P7, P17, 1.00) pass; SCP CTCS FOH 3 it. (P3, 22.3) fails the
+budget although physically safe; both nodal-only cases violate physically.
+Figures: `paper_mpc_v2/comparison_2x2/`. Sections below describe the original
+campaign; where they call the SCP CTCS budget "not met", that is the strict test.
+
 ## What the comparison establishes
 
 Both SCP CTCS and DDP CTCS maintain **zero physical obstacle penetration**

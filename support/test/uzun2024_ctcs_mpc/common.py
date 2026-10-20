@@ -474,6 +474,23 @@ def summarize(results):
     }
 
 
+def theorem14_admissible_budget(delta=DELTA_OBS, duration=0.5, umax=U_MAX, c_d=C_D):
+    """Largest per-interval integral for which the delta tightening still gives g_i <= 0
+    (Elango Thm 14 / Rem 15; CTCS_MATH_BASE.md sec. 7 acceptance gate).
+
+    Speed bound: d|v|^2/dt = 2 v.u - 2 c_d |v|^3 <= 2|v|(umax - c_d |v|^2), so |v(0)| <= V
+    keeps |v| <= V = sqrt(umax/c_d) (10 m/s).  g_i = 1 - ||S(r - c_i)|| is Lipschitz in r
+    with constant sigma_max(S), hence |d g_i/dt| <= omega = sigma_max(S) V.  The density
+    sum_{sensed}[g_i + delta]_+^2 bounds each sensed term, so I_k <= delta^3/(4 omega)
+    gives [g_i]_+ = 0 on the interval, subject to I_k <= omega^2 duration^3 / 4.
+    The solver target epsilon is a separate, smaller number: an active row I_k = epsilon
+    must pass, which a strict I_k <= epsilon test cannot certify.
+    """
+    V = float(np.sqrt(umax / c_d))
+    omega = float(np.linalg.norm(SHAPE, 2)) * V
+    return min(delta ** 3 / (4.0 * omega), omega ** 2 * duration ** 3 / 4.0)
+
+
 def interval_budget_check(increments, epsilon):
     """Per-interval CTCS budget y_{k+1} - y_k <= epsilon (paper eq. 11). Returns dict."""
     inc = np.asarray(increments, dtype=float)
