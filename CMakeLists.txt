@@ -116,6 +116,10 @@ if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC)
  target_link_libraries(point_mass_matched_ddp PRIVATE alipddp_library)
  target_compile_definitions(point_mass_matched_ddp PRIVATE
   POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_SOLVER_DIR}/problem_examples/point_mass_ctcs_compare.cpp")
+ add_executable(point_mass_2x2_ddp support/test/uzun2024_ctcs_mpc/point_mass_2x2_ddp.cpp)
+ target_link_libraries(point_mass_2x2_ddp PRIVATE alipddp_library)
+ target_compile_definitions(point_mass_2x2_ddp PRIVATE
+  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_SOLVER_DIR}/problem_examples/point_mass_ctcs_compare.cpp")
 endif()
 
 # Optional isolated snapshot with logging-only factorization instrumentation.
