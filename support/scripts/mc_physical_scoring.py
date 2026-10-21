@@ -22,8 +22,12 @@ duration at the odometry resolution (excess above a reporting tolerance), and
 whether it was violated. Target truth comes from /target/odom_gt when the bag
 has it; otherwise /target/odom, which under estimate noise is the corrupted
 estimate (the historical MC2 bags) -- every row records which one was used.
+With --fixed-circle-truth, a noisy cell whose target was the MC2-era fixed
+circle (centre (0,0,0.2), R=1, omega=0.4, phase 0 at publisher start) is scored
+against that analytic circle with the publisher start time and constant
+horizontal bias fitted to the estimate; the fit residual is recorded.
 
-Usage: mc_physical_scoring.py <campaign_dir> [--out scores.csv]
+Usage: mc_physical_scoring.py <campaign_dir> [--out scores.csv] [--fixed-circle-truth]
 """
 import argparse
 import csv
@@ -77,6 +81,34 @@ def read_bag(path):
                 (target_gt if topic.endswith("_gt") else target).append(
                     (stamp_of(m, bt), p.x, p.y, p.z, v.x, v.y, v.z))
     return np.array(drone), np.array(target), np.array(target_gt), rosout
+
+
+def fixed_circle_truth(est, R=1.0, omega=0.4, centre=(0.0, 0.0, 0.2)):
+    """Analytic MC2 circle fitted to a noisy estimate: unknown publisher start
+    t0 and constant horizontal bias b. Returns truth on the estimate stamps and
+    the fit diagnostics."""
+    t, xy = est[:, 0], est[:, 1:3]-np.array(centre[:2])
+    def fit(t0):
+        ph = omega*(t-t0)
+        model = R*np.column_stack([np.cos(ph), np.sin(ph)])
+        b = (xy-model).mean(axis=0)
+        return float(((xy-model-b)**2).sum()), b
+    period = 2*math.pi/omega
+    grid = t[0]-np.linspace(0, period, 2000, endpoint=False)
+    best = min(grid, key=lambda t0: fit(t0)[0])
+    lo, hi = best-period/2000, best+period/2000
+    for _ in range(60):  # golden-section refinement
+        m1, m2 = lo+(hi-lo)*0.382, lo+(hi-lo)*0.618
+        if fit(m1)[0] < fit(m2)[0]:
+            hi = m2
+        else:
+            lo = m1
+    t0 = 0.5*(lo+hi)
+    sse, b = fit(t0)
+    ph = omega*(t-t0)
+    truth = np.column_stack([t, centre[0]+R*np.cos(ph), centre[1]+R*np.sin(ph), np.full(len(t), centre[2]),
+                             -R*omega*np.sin(ph), R*omega*np.cos(ph), np.zeros(len(t))])
+    return truth, dict(fit_rms_m=math.sqrt(sse/len(t)), bias_x=float(b[0]), bias_y=float(b[1]))
 
 
 def residuals(rel, vel, q, omega_b, c, window):
@@ -145,7 +177,7 @@ def solver_stats(cell):
                 solve_ms_max=max(ms) if ms else float("nan"))
 
 
-def score_cell(cell, c=ORIGINAL):
+def score_cell(cell, c=ORIGINAL, fixed_circle=False):
     meta = json.loads((cell/"cell.json").read_text())
     row = dict(motion=meta["motion"], level=meta["uncertainty"], trial=meta["trial"], seed=meta["seed"],
                result=meta["result"], teardown=meta.get("teardown", ""), cell=cell.name)
@@ -158,6 +190,10 @@ def score_cell(cell, c=ORIGINAL):
     noisy = meta.get("sigma", {}).get("target_noise_sigma_pos", 0.0) > 0
     if len(gt):
         truth, row["target_truth"] = gt, "odom_gt"
+    elif fixed_circle and meta["motion"] == "circle":
+        truth, diag = fixed_circle_truth(target)
+        row["target_truth"] = "fixed_circle_fit"
+        row.update({f"truth_{k}": v for k, v in diag.items()})
     else:
         truth, row["target_truth"] = target, ("odom_noisy_estimate" if noisy else "odom")
     t = drone[:, 0]
@@ -208,13 +244,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("campaign", type=pathlib.Path)
     ap.add_argument("--out", type=pathlib.Path)
+    ap.add_argument("--fixed-circle-truth", action="store_true",
+                    help="score historical MC2 circle cells against the fitted analytic circle")
     args = ap.parse_args()
     cells = sorted(p for p in args.campaign.iterdir()
                    if p.is_dir() and not p.name.startswith("_") and (p/"cell.json").exists())
     rows = []
     for cell in cells:
         try:
-            rows.append(score_cell(cell))
+            rows.append(score_cell(cell, fixed_circle=args.fixed_circle_truth))
         except Exception as e:  # keep the cell in the table with its error
             meta = json.loads((cell/"cell.json").read_text())
             rows.append(dict(motion=meta["motion"], level=meta["uncertainty"], trial=meta["trial"],
