@@ -143,5 +143,6 @@
         args="-o $(arg log_dir)/flight
               /mavros/local_position/odom /mavros/setpoint_raw/local /mavros/state
               /mavros/setpoint_raw/attitude /mavros/setpoint_raw/target_attitude
-              /target/odom /target/accel /$(arg drone_name)/planned_trajectory /rosout"/>
+              /target/odom /target/accel /target/odom_gt /target/accel_gt
+              /$(arg drone_name)/planned_trajectory /rosout"/>
 </launch>

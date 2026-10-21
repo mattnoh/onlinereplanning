@@ -195,8 +195,9 @@ public:
         accel_pub_ = nh_.advertise<geometry_msgs::AccelStamped>("/target/accel", 10);
 
         // In relative-estimate mode /target/odom carries the synthesized target,
-        // so ground truth is diverted to the _gt topics for round-trip checks.
-        if (synthesize_from_estimate_ && publish_gt_debug_) {
+        // and with estimate noise it carries the corrupted estimate, so ground
+        // truth is diverted to the _gt topics for scoring against the target.
+        if ((synthesize_from_estimate_ || noise_active_) && publish_gt_debug_) {
             gt_odom_pub_  = nh_.advertise<nav_msgs::Odometry>("/target/odom_gt", 10);
             gt_accel_pub_ = nh_.advertise<geometry_msgs::AccelStamped>("/target/accel_gt", 10);
         }

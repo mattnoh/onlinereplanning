@@ -20,6 +20,8 @@
   <arg name="target_accel_sigma"                  default="0.20"/>
   <arg name="target_random_hold"                  default="2.0"/>
   <arg name="target_motion_seed"                  default="1"/>
+  <!-- false: legacy fixed shape from the args above (MC2, 2026-08-20) -->
+  <arg name="target_shape_random"                 default="true"/>
   <!-- target-state estimate uncertainty (0 = noise-free) -->
   <arg name="target_noise_sigma_pos"              default="0.0"/>
   <arg name="target_noise_sigma_vel"              default="0.0"/>
@@ -69,6 +71,7 @@
     <param name="target_noise_sigma_acc"             type="double" value="$(arg target_noise_sigma_acc)"/>
     <param name="target_noise_bias_frac"             type="double" value="$(arg target_noise_bias_frac)"/>
     <param name="target_motion_seed"                 type="int" value="$(arg target_motion_seed)"/>
+    <param name="target_shape_random"                type="bool" value="$(arg target_shape_random)"/>
     <param name="target_noise_seed"                  type="int" value="$(arg target_noise_seed)"/>
     <param name="target_yaw_rate"                   type="double" value="$(arg target_yaw_rate)"/>
     <param name="publish_hz"                        type="double" value="$(arg publish_hz)"/>

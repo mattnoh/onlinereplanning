@@ -8,9 +8,14 @@ timeout, then tears the stack down in the documented order (planner SIGINT first
 so the bag finalizes; kill the rest by PID, never `pkill -f px4` which would
 match the runner's own shell).
 
-Resumable: a cell whose run directory already holds solver_events.csv is skipped,
-so the campaign can be interrupted and restarted. A hung or failed cell is
-recorded and the campaign continues -- failures must stay in the denominator.
+Resumable: a cell is skipped only when its cell.json holds a final result and
+the campaign configuration hash it was flown with matches the current one.
+Partial cells are moved to _attempts/ and rerun; every attempt is appended to
+ledger.csv. With --continue-on-failure a failed cell is recorded and the
+campaign continues -- failures must stay in the denominator. Failures before
+the landing profile is applied (no settle, never armed, harness errors) are
+infrastructure attempts: they are preserved and retried up to --infra-retries
+times. Failures after activation are final outcomes and are not retried.
 
 Usage:
   run_scenario_campaign.py --trials 4 --out logs/campaign_YYYYMMDD
@@ -19,6 +24,7 @@ Usage:
 import argparse
 import csv
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -61,6 +67,13 @@ PLANNER_ENV = {
     "SZMUK_RH_N": "40", "SZMUK_MAX_ITER": "120",
     "SZMUK_THH": "0.16", "SZMUK_W_LAND_GS": "20000",
 }
+
+# Controller outcomes that count in a campaign denominator. Anything else is an
+# infrastructure attempt (the controller under test never got the landing).
+VALID_RESULTS = ("LANDED", "TIMEOUT", "POLICY_EXPIRED", "STALE_STATE",
+                 "UNCOMMANDED_DISARM", "INITIALIZATION_FAILED", "NO_FEASIBLE_START")
+DEVEL = os.environ.get("COMANDO_DEVEL_LIB",
+                       "/home/lab/mavros_ws/devel/.private/comando_planner/lib/comando_planner")
 
 
 # Staging geometry. STAGE_R matches the |(1.4, 1.4)| engagement range the
@@ -174,6 +187,48 @@ def seed_for(motion, level, trial):
     """
     return (zlib.crc32(motion.encode()) % 1000) * 10000 \
         + list(UNCERT).index(level) * 100 + trial + 1
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def git_identity(repo, paths=()):
+    head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--", *paths],
+                           capture_output=True, text=True).stdout.strip()
+    return dict(commit=head, dirty_paths=dirty.splitlines())
+
+
+def campaign_identity(args):
+    """Everything that defines the flown controller and scenario. Commit ids
+    are recorded separately: checkpoint commits during a campaign must not
+    change the identity of an unchanged binary/configuration."""
+    env = {k: v for k, v in os.environ.items() if k.startswith(("SZMUK_", "MPC_", "PX4_"))}
+    clash = {k: (env[k], v) for k, v in PLANNER_ENV.items() if k in env and env[k] != v}
+    if clash:
+        raise SystemExit(f"runner PLANNER_ENV would override the sourced preset: {clash}")
+    env.update(PLANNER_ENV)
+    launch = os.path.join(PKG, "support/transport/ros1/launch")
+    ident = dict(
+        planner_environment=dict(sorted(env.items())),
+        profile_sha256=sha256(args.profile),
+        planner_binary_sha256=sha256(os.path.join(DEVEL, "comando_planner")),
+        target_publisher_sha256=sha256(os.path.join(DEVEL, "target_publisher")),
+        planner_launch_sha256=sha256(os.path.join(launch, "planner_launch.launch")),
+        target_launch_sha256=sha256(os.path.join(launch, "target_launch.launch")),
+        hover_thrust=args.hover_thrust, stc_z_stage=args.stc_z_stage,
+        stc_los_alt_trig=args.stc_los_alt_trig, start=args.start,
+        staging=args.staging, bearing_policy=args.bearing_policy,
+        shape_random=args.shape_random, landing_timeout=args.landing_timeout,
+        motions={m: MOTIONS[m] for m in args.motions.split(",")},
+        levels={l: UNCERT[l] for l in args.levels.split(",")})
+    blob = json.dumps(ident, sort_keys=True).encode()
+    return hashlib.sha256(blob).hexdigest()[:16], ident
 
 
 def sh(cmd, timeout=None, check=False):
@@ -331,12 +386,42 @@ def wait_landing(planner_log, timeout=300):
     return "TIMEOUT" if seen_armed else "NEVER_ARMED"
 
 
+def completed(cell, config_hash):
+    """A finished cell with the same campaign identity, or None."""
+    try:
+        meta = json.load(open(os.path.join(cell, "cell.json")))
+    except (OSError, ValueError):
+        return None
+    if meta.get("config_hash") == config_hash and meta.get("result") and meta.get("final", True):
+        return meta
+    return None
+
+
+def preserve_attempt(cell, outdir, label):
+    """Move an attempt out of the way without deleting it."""
+    if not os.path.isdir(cell):
+        return None
+    dst = os.path.join(outdir, "_attempts", f"{os.path.basename(cell)}__{label}")
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.move(cell, dst)
+    return dst
+
+
+def ledger(outdir, **row):
+    path = os.path.join(outdir, "ledger.csv")
+    fields = ["time", "tag", "attempt", "event", "result", "teardown", "activated",
+              "wall_s", "config_hash", "location"]
+    new = not os.path.exists(path)
+    with open(path, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        if new:
+            w.writeheader()
+        w.writerow({k: row.get(k, "") for k in fields})
+
+
 def run_cell(motion, level, trial, outdir, args):
     tag = f"{motion}__{level}__t{trial}"
     cell = os.path.join(outdir, tag)
-    if args.reuse and os.path.exists(os.path.join(cell, "solver_events.csv")):
-        print(f"  [skip] {tag} (already complete)", flush=True)
-        return json.load(open(os.path.join(cell,"cell.json")))
     os.makedirs(cell, exist_ok=True)
     seed = seed_for(motion, level, trial)
     logs = {k: os.path.join(cell, f"{k}.log") for k in
@@ -349,7 +434,10 @@ def run_cell(motion, level, trial, outdir, args):
     json.dump(env_snapshot, open(os.path.join(cell, "planner_environment.json"), "w"), indent=2)
     shutil.copyfile(args.profile, os.path.join(cell, "landing_profile.yaml"))
     revision = subprocess.run(["git", "-C", PKG, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    json.dump(dict(planner_commit=revision, setup=SETUP), open(os.path.join(cell, "source.json"), "w"), indent=2)
+    json.dump(dict(planner_commit=revision, setup=SETUP, config_hash=args.config_hash,
+                   solver=git_identity(args.solver_dir, ("alipddp", "problem_maker"))),
+              open(os.path.join(cell, "source.json"), "w"), indent=2)
+    activated = False
     print(f"  [run ] {tag} seed={seed}", flush=True)
 
     teardown()
@@ -373,6 +461,7 @@ def run_cell(motion, level, trial, outdir, args):
         tparams = dict(MOTIONS[motion]); tparams.update(UNCERT[level])
         tparams["target_motion_seed"] = seed
         tparams["target_noise_seed"] = seed
+        tparams["target_shape_random"] = "true" if args.shape_random else "false"
         targs = " ".join(f"{k}:={v}" for k, v in tparams.items())
         procs.append(spawn(
             f"{SETUP} && roslaunch comando_planner target_launch.launch "
@@ -414,6 +503,9 @@ def run_cell(motion, level, trial, outdir, args):
         psi = math.atan2(tvy, tvx) if math.hypot(tvx, tvy) > 1e-6 else 0.0
         hx = tx + STAGE_R * math.cos(psi + STAGE_ALPHA)
         hy = ty + STAGE_R * math.sin(psi + STAGE_ALPHA)
+        if args.staging == "offset":
+            # MC2 (runner 025351a): fixed world offset, no bearing gate.
+            hx, hy = tx + 1.4, ty + 1.4
         # Set the hover profile directly rather than via apply_profile.sh:
         # the script loads the yaml (which pins hover_target to a fixed 2,2) and
         # bumps command_seq, so overriding afterwards needs a second trigger --
@@ -439,9 +531,14 @@ def run_cell(motion, level, trial, outdir, args):
             # we staged at is not the bearing at activation. Wait (briefly)
             # for it to come back into the screened band rather than firing
             # blind; record what we actually got either way.
-            beta, beta_wait = (None,0.0) if getattr(args,"start","original")=="cone" else await_bearing(STAGE_ALPHA, BEARING_TOL,BEARING_WAIT_S,straight=motion=="straight")
-            if getattr(args,"start","original")!="cone" and (beta is None or abs(wrap_pi(beta-STAGE_ALPHA))>BEARING_TOL):
+            gated = getattr(args,"start","original")!="cone" and args.staging=="bearing"
+            # original: MC1's await_bearing (543424a) -- no straight-reversal
+            # wait, fire after the budget and record the bearing achieved.
+            beta, beta_wait = await_bearing(STAGE_ALPHA, BEARING_TOL, BEARING_WAIT_S,
+                                            straight=(motion=="straight" and args.bearing_policy=="strict")) if gated else (None,0.0)
+            if gated and args.bearing_policy=="strict" and (beta is None or abs(wrap_pi(beta-STAGE_ALPHA))>BEARING_TOL):
                 raise RuntimeError(f"Requested approach bearing unavailable: beta={beta}, requested={STAGE_ALPHA}")
+            activated = True
             sh(f"{SETUP} && rosrun comando_planner apply_profile.sh /comando_planner "
                f"{args.profile}",
                timeout=60)
@@ -454,11 +551,11 @@ def run_cell(motion, level, trial, outdir, args):
                                 if any(row.get("event")=="accepted" for row in csv.DictReader(open(os.path.join(folder,"solver_events.csv")))):return True
                         return False
                     ready=wait_for("ordinary first accepted plan",started,15,poll=.25)
-                    result=wait_landing(logs["planner"]) if ready<15 else "INITIALIZATION_FAILED"
+                    result=wait_landing(logs["planner"], args.landing_timeout) if ready<15 else "INITIALIZATION_FAILED"
                 else:
                     result="NO_FEASIBLE_START"
             else:
-                result = wait_landing(logs["planner"])
+                result = wait_landing(logs["planner"], args.landing_timeout)
     except Exception as e:                        # keep the campaign alive
         print(f"  [error] {e}",flush=True)
         result = f"HARNESS_FAILED:{type(e).__name__}"
@@ -499,6 +596,9 @@ def run_cell(motion, level, trial, outdir, args):
                 stage_beta_err=(round(abs(wrap_pi(beta - STAGE_ALPHA)), 4)
                                 if beta is not None else ""),
                 stage_beta_wait_s=round(beta_wait, 1),
+                activated=activated, config_hash=args.config_hash,
+                staging=args.staging, bearing_policy=args.bearing_policy,
+                shape_random=args.shape_random, landing_timeout=args.landing_timeout,
                 wall_s=round(time.time() - t0, 1),
                 sigma=UNCERT[level], motion_params=MOTIONS[motion])
     json.dump(meta, open(os.path.join(cell, "cell.json"), "w"), indent=2)
@@ -518,22 +618,71 @@ def main():
     ap.add_argument("--stc-los-alt-trig", type=float, default=1.2)
     ap.add_argument("--motions", default=",".join(MOTIONS))
     ap.add_argument("--levels", default=",".join(UNCERT))
+    ap.add_argument("--staging", choices=("bearing", "offset"), default="bearing",
+                    help="offset: MC2's target+(1.4,1.4) world offset without a bearing gate")
+    ap.add_argument("--bearing-policy", choices=("strict", "original"), default="strict",
+                    help="original: MC1's record-and-proceed bearing timing")
+    ap.add_argument("--shape-random", type=int, choices=(0, 1), default=1,
+                    help="0: legacy fixed target shape (MC2)")
+    ap.add_argument("--landing-timeout", type=float, default=300.0)
+    ap.add_argument("--continue-on-failure", action="store_true")
+    ap.add_argument("--infra-retries", type=int, default=2)
+    ap.add_argument("--trial-offset", type=int, default=0)
+    ap.add_argument("--solver-dir", default=os.environ.get("COMANDO_SOLVER_DIR",
+                    os.path.join(os.path.dirname(PKG), "ALIPDDP-main")))
     args = ap.parse_args()
+    args.profile = os.path.abspath(args.profile)
+    args.config_hash, identity = campaign_identity(args)
 
     out = os.path.abspath(args.out) if args.out else os.path.join(
         PKG, "logs", "campaign_" + datetime.datetime.now().strftime("%Y%m%d_%H%M"))
     os.makedirs(out, exist_ok=True)
     motions = args.motions.split(",")
     levels = args.levels.split(",")
-    cells = [(m, l, t) for m in motions for l in levels for t in range(args.trials)]
+    cells = [(m, l, t) for m in motions for l in levels
+             for t in range(args.trial_offset, args.trial_offset + args.trials)]
     print(f"campaign -> {out}\n{len(cells)} cells "
-          f"({len(motions)} motions x {len(levels)} levels x {args.trials} trials)\n",
-          flush=True)
+          f"({len(motions)} motions x {len(levels)} levels x {args.trials} trials)"
+          f"  config {args.config_hash}\n", flush=True)
+    manifest = os.path.join(out, "campaign_manifest.json")
+    previous = json.load(open(manifest)) if os.path.exists(manifest) else None
+    if previous and previous.get("config_hash") != args.config_hash and args.reuse:
+        raise SystemExit(f"--reuse with a different configuration: {previous.get('config_hash')} "
+                         f"!= {args.config_hash}; use a new --out")
+    json.dump(dict(config_hash=args.config_hash, identity=identity, argv=sys.argv,
+                   planner=git_identity(PKG), solver=git_identity(args.solver_dir, ("alipddp", "problem_maker")),
+                   started=previous.get("started") if previous else datetime.datetime.now().isoformat()),
+              open(manifest, "w"), indent=2)
 
     rows = []
     for i, (m, l, t) in enumerate(cells, 1):
         print(f"[{i}/{len(cells)}]", flush=True)
-        r = run_cell(m, l, t, out, args)
+        tag = f"{m}__{l}__t{t}"
+        cell = os.path.join(out, tag)
+        r = completed(cell, args.config_hash) if args.reuse else None
+        if r:
+            print(f"  [skip] {tag} ({r['result']})", flush=True)
+        else:
+            if os.path.isdir(cell):
+                dst = preserve_attempt(cell, out, "partial_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+                ledger(out, time=datetime.datetime.now().isoformat(), tag=tag, event="PARTIAL_PRESERVED",
+                       config_hash=args.config_hash, location=dst)
+            for attempt in range(1, args.infra_retries + 2):
+                r = run_cell(m, l, t, out, args)
+                # Retry only when the controller under test never received the
+                # landing command; a post-activation failure is an outcome.
+                infra = r["result"] not in VALID_RESULTS and not r["activated"]
+                last = attempt == args.infra_retries + 1
+                r["attempt"] = attempt
+                r["final"] = (not infra) or last
+                json.dump(r, open(os.path.join(cell, "cell.json"), "w"), indent=2)
+                ledger(out, time=datetime.datetime.now().isoformat(), tag=tag, attempt=attempt,
+                       event="INFRA_RETRY" if (infra and not last) else ("INFRA_FINAL" if infra else "OUTCOME"),
+                       result=r["result"], teardown=r["teardown"], activated=r["activated"],
+                       wall_s=r["wall_s"], config_hash=args.config_hash, location=cell)
+                if r["final"]:
+                    break
+                preserve_attempt(cell, out, f"a{attempt}")
         if r:
             rows.append(r)
             with open(os.path.join(out, "cells.csv"), "w", newline="") as f:
@@ -543,7 +692,7 @@ def main():
                 for row in rows:
                     w.writerow({k: v for k, v in row.items()
                                 if k not in ("sigma", "motion_params")})
-            if r["result"]!="LANDED" or r["teardown"]!="CLEAN":
+            if not args.continue_on_failure and (r["result"]!="LANDED" or r["teardown"]!="CLEAN"):
                 raise SystemExit(f"Stopped after {m}: {r['result']} / {r['teardown']}")
     print(f"\ncampaign complete -> {out}")
 
