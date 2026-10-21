@@ -9,7 +9,7 @@
 #       randomization, heading-relative staging, record-and-proceed bearing.
 #   MC2 (2026-08-20, runner 025351a): circle x {zero,nominal,high} x 20, legacy
 #       fixed circle (R=1, omega=0.4), staging at target+(1.4,1.4).
-# Usage: run_mc_current_mpc.sh {commission|commission_mc2|mc1|mc2}
+# Usage: run_mc_current_mpc.sh {commission|commission_mc2|tune|tune_mc2|mc1|mc2}
 # The controller is the circle-verified revision (planner e2f3fdd + solver
 # 2789d974, plus infrastructure-only commit 91ac726) built in the overlay
 # workspace /home/lab/mavros_ws_mc; the runner itself comes from this repository.
@@ -24,6 +24,8 @@ export COMANDO_DEVEL_LIB=$WS/devel/.private/comando_planner/lib/comando_planner
 source /opt/ros/noetic/setup.bash
 source $WS/devel/setup.bash
 source $P/config/ros1/tuning_stc_mpc_sitl.env
+# Optional candidate overrides layered on the preset (tuning only).
+[ -n "$MC_TUNE_ENV" ] && source "$MC_TUNE_ENV"
 RUN=(python3 -u $P/support/scripts/run_scenario_campaign.py
      --profile $P/config/ros1/profile_stc_landing_mpc_sitl.yaml
      --hover-thrust .7282821834 --stc-z-stage 1.5 --stc-los-alt-trig 1.2
@@ -35,6 +37,17 @@ case "$1" in
   commission_mc2)  # outside both denominators; checks fixed shape and truth topic
     "${RUN[@]}" --motions circle --levels high --trials 1 --staging offset \
       --shape-random 0 --out $OUT/mc_commissioning_20261021/mc2_high_e2f3fdd ;;
+  tune)  # held-out seeds (trial >= 50, disjoint from MC1 trials 0-49)
+    : "${MC_TUNE_NAME:?set MC_TUNE_NAME}"
+    "${RUN[@]}" --motions "${MC_TUNE_MOTIONS:-straight,figure8,stop_and_go,piecewise_accel,random_accel,circle}" \
+      --levels zero --trials "${MC_TUNE_TRIALS:-1}" --trial-offset "${MC_TUNE_OFFSET:-50}" \
+      --staging bearing --bearing-policy original --shape-random 1 \
+      --out $OUT/mc_tuning_20261021/$MC_TUNE_NAME ;;
+  tune_mc2)  # held-out trials >= 20 (MC2 uses 0-19)
+    : "${MC_TUNE_NAME:?set MC_TUNE_NAME}"
+    "${RUN[@]}" --motions circle --levels "${MC_TUNE_LEVELS:-nominal,high}" \
+      --trials "${MC_TUNE_TRIALS:-1}" --trial-offset "${MC_TUNE_OFFSET:-20}" \
+      --staging offset --shape-random 0 --out $OUT/mc_tuning_20261021/${MC_TUNE_NAME}_mc2 ;;
   mc1)
     "${RUN[@]}" --motions circle,figure8,straight,stop_and_go,piecewise_accel,random_accel \
       --levels zero --trials 50 --staging bearing --bearing-policy original \
@@ -42,5 +55,5 @@ case "$1" in
   mc2)
     "${RUN[@]}" --motions circle --levels zero,nominal,high --trials 20 --staging offset \
       --shape-random 0 --out $OUT/mc2_current_mpc_20261021 ;;
-  *) echo "usage: $0 {commission|commission_mc2|mc1|mc2}" >&2; exit 2 ;;
+  *) echo "usage: $0 {commission|commission_mc2|tune|tune_mc2|mc1|mc2}" >&2; exit 2 ;;
 esac
