@@ -37,6 +37,9 @@ import zlib
 
 PKG = os.environ.get("COMANDO_PACKAGE", os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 PX4 = "/home/lab/projects/px4/PX4-Autopilot"
+# Package actually launched (an overlay workspace may run another revision);
+# its launch files and commit define the campaign identity.
+RUNPKG = os.environ.get("COMANDO_RUN_PACKAGE", PKG)
 SETUP = os.environ.get("COMANDO_ROS_SETUP", "source /opt/ros/noetic/setup.bash && source /home/lab/mavros_ws/devel/setup.bash")
 
 # Motion shape params. Speeds are held near the flown circle (0.4 m/s) so the
@@ -209,11 +212,16 @@ def campaign_identity(args):
     are recorded separately: checkpoint commits during a campaign must not
     change the identity of an unchanged binary/configuration."""
     env = {k: v for k, v in os.environ.items() if k.startswith(("SZMUK_", "MPC_", "PX4_"))}
-    clash = {k: (env[k], v) for k, v in PLANNER_ENV.items() if k in env and env[k] != v}
+    def same(a, b):
+        try:
+            return float(a) == float(b)
+        except ValueError:
+            return a == b
+    clash = {k: (env[k], v) for k, v in PLANNER_ENV.items() if k in env and not same(env[k], v)}
     if clash:
         raise SystemExit(f"runner PLANNER_ENV would override the sourced preset: {clash}")
     env.update(PLANNER_ENV)
-    launch = os.path.join(PKG, "support/transport/ros1/launch")
+    launch = os.path.join(RUNPKG, "support/transport/ros1/launch")
     ident = dict(
         planner_environment=dict(sorted(env.items())),
         profile_sha256=sha256(args.profile),
@@ -287,6 +295,16 @@ def wait_for(desc, probe, timeout, poll=2.0):
         time.sleep(poll)
     print(f"  [warn] {desc} not ready after {timeout:.0f}s; continuing", flush=True)
     return time.time() - t0
+
+
+def live_exe(name):
+    """Resolved executable of the running node, from /proc (not the launch file)."""
+    r = sh(f"pgrep -f '/comando_planner/{name}' | head -1")
+    pid = r.stdout.strip()
+    try:
+        return os.path.realpath(f"/proc/{pid}/exe") if pid else ""
+    except OSError:
+        return ""
 
 
 def topic_alive(topic):
@@ -386,6 +404,10 @@ def wait_landing(planner_log, timeout=300):
     return "TIMEOUT" if seen_armed else "NEVER_ARMED"
 
 
+class BinaryMismatch(RuntimeError):
+    """The launched node is not the binary in the campaign identity."""
+
+
 def completed(cell, config_hash):
     """A finished cell with the same campaign identity, or None."""
     try:
@@ -433,7 +455,7 @@ def run_cell(motion, level, trial, outdir, args):
     env_snapshot.update(SZMUK_Z_STAGE=str(args.stc_z_stage), SZMUK_LOS_ALT_TRIG=str(args.stc_los_alt_trig))
     json.dump(env_snapshot, open(os.path.join(cell, "planner_environment.json"), "w"), indent=2)
     shutil.copyfile(args.profile, os.path.join(cell, "landing_profile.yaml"))
-    revision = subprocess.run(["git", "-C", PKG, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    revision = subprocess.run(["git", "-C", RUNPKG, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     json.dump(dict(planner_commit=revision, setup=SETUP, config_hash=args.config_hash,
                    solver=git_identity(args.solver_dir, ("alipddp", "problem_maker"))),
               open(os.path.join(cell, "source.json"), "w"), indent=2)
@@ -445,6 +467,7 @@ def run_cell(motion, level, trial, outdir, args):
     # Bound before the try: a NO_SETTLE run or an exception skips the gate
     # entirely, and meta below reads both unconditionally.
     beta, beta_wait = None, 0.0
+    planner_exe = target_exe = ""
     try:
         # Use the installed SITL binary; a campaign must not rebuild PX4.
         procs.append(spawn(f"cd {PX4}/build/px4_sitl_default/rootfs && "
@@ -476,6 +499,10 @@ def run_cell(motion, level, trial, outdir, args):
             f"platform:=mavros drone_name:=px4_drone hover_thrust:={args.hover_thrust} terminal_freeze_enter_vel:=0.30 "
             f"stc_z_stage:={args.stc_z_stage} stc_los_alt_trig:={args.stc_los_alt_trig} log_dir:={cell}", logs["planner"]))
         wait_for("planner node", lambda: node_alive("comando_planner"), 45)
+        planner_exe, target_exe = live_exe("comando_planner"), live_exe("target_publisher")
+        expected = [os.path.realpath(os.path.join(DEVEL, n)) for n in ("comando_planner", "target_publisher")]
+        if [planner_exe, target_exe] != expected:
+            raise BinaryMismatch(f"running {planner_exe}, {target_exe}; expected {expected}")
         # ...then wait for it to actually be flying-ready, and give the
         # position hold a moment to stabilise before overriding the target.
         wait_for("armed+offboard", fcu_armed_offboard, 60)
@@ -556,6 +583,10 @@ def run_cell(motion, level, trial, outdir, args):
                     result="NO_FEASIBLE_START"
             else:
                 result = wait_landing(logs["planner"], args.landing_timeout)
+    except BinaryMismatch as e:
+        print(f"  [error] {e}", flush=True)
+        result = "BINARY_MISMATCH"
+        z = vz = float("nan")
     except Exception as e:                        # keep the campaign alive
         print(f"  [error] {e}",flush=True)
         result = f"HARNESS_FAILED:{type(e).__name__}"
@@ -597,6 +628,7 @@ def run_cell(motion, level, trial, outdir, args):
                                 if beta is not None else ""),
                 stage_beta_wait_s=round(beta_wait, 1),
                 activated=activated, config_hash=args.config_hash,
+                planner_exe=planner_exe, target_exe=target_exe,
                 staging=args.staging, bearing_policy=args.bearing_policy,
                 shape_random=args.shape_random, landing_timeout=args.landing_timeout,
                 wall_s=round(time.time() - t0, 1),
@@ -650,7 +682,7 @@ def main():
         raise SystemExit(f"--reuse with a different configuration: {previous.get('config_hash')} "
                          f"!= {args.config_hash}; use a new --out")
     json.dump(dict(config_hash=args.config_hash, identity=identity, argv=sys.argv,
-                   planner=git_identity(PKG), solver=git_identity(args.solver_dir, ("alipddp", "problem_maker")),
+                   planner=git_identity(RUNPKG), runner=git_identity(PKG), setup=SETUP, solver=git_identity(args.solver_dir, ("alipddp", "problem_maker")),
                    started=previous.get("started") if previous else datetime.datetime.now().isoformat()),
               open(manifest, "w"), indent=2)
 
@@ -669,6 +701,11 @@ def main():
                        config_hash=args.config_hash, location=dst)
             for attempt in range(1, args.infra_retries + 2):
                 r = run_cell(m, l, t, out, args)
+                if r["result"] == "BINARY_MISMATCH":
+                    json.dump(r, open(os.path.join(cell, "cell.json"), "w"), indent=2)
+                    ledger(out, time=datetime.datetime.now().isoformat(), tag=tag, attempt=attempt,
+                           event="BINARY_MISMATCH", result=r["result"], config_hash=args.config_hash, location=cell)
+                    raise SystemExit("launched binary differs from the campaign identity; stopping")
                 # Retry only when the controller under test never received the
                 # landing command; a post-activation failure is an outcome.
                 infra = r["result"] not in VALID_RESULTS and not r["activated"]
