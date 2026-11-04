@@ -57,11 +57,13 @@ optimality error about 1.53e-5 against 1e-6).
 
 These CTCS runs use `stc_landing_noaug` and the original pointmass reference OCP
 through the same synchronous controller. Each request receives the measured
-plant state and fresh numerical solver state. Acceptance checks native rows and
-dynamics plus independent planned and executed interval integrals. The latter
-use the original physical density and composite Simpson integration at no more
-than 1 ms per segment. Finite integral budgets do not imply exact pointwise-zero
-STC consequences. Pointmass retains its original sensing mask: obstacles outside
+plant state and fresh numerical solver state. Loop checks cover native rows,
+dynamics, measured roots, execution schedule and mission progress. Overall CTCS
+acceptance additionally checks the executed physical implications, using their
+original triggers. Independent planned and executed integrals are quadrature
+diagnostics, not an additional acceptance budget. They use the original physical
+density and composite Simpson integration at no more than 1 ms per segment.
+Pointmass retains its original sensing mask: obstacles outside
 that mask are not constrained in the predicted horizon. Results and per-trigger
 activity are in `logs/frozen_node_baseline_20261104/ctcs_shared`; profiles and
 summaries are also tracked in the baseline JSON above.
@@ -88,14 +90,33 @@ state `(2.0, 1.5, Z_STAGE+0.05)` with zero velocity/rates and identity attitude.
 With the unchanged N40/120-iteration profile, staging starts active and switches
 off once: at 3.291 s for the matched plant, or 3.260 s for the 1 ms plant. Both
 land after 25 replans (13.344 s / 13.321 s), with zero native violations.
-**This is not a strict CTCS pass:** independent predicted interval ratios reach
-1.000358 / 1.000214. Executed interval ratios remain below one, but the finite
-budget permits staging-height shortfalls of 9.4 / 9.6 cm while the trigger is
-active. The test returns 2 and records the failure; it requires the executed
+**Overall physical CTCS acceptance fails:** staging-height shortfalls reach
+9.4 / 9.6 cm while the trigger is active; LOS and glideslope consequences also
+have positive residuals. Independent predicted integral ratios of
+1.000358 / 1.000214 remain reported diagnostics. The test returns 2 for the
+physical failure; it requires the executed
 on-to-off transition for this scenario. Run with the same command above, adding
 `--staging-initial`. Chronological events, summaries and raw run archive are in
 `logs/frozen_node_baseline_20261104/ctcs_staging`. Trial nominal-tail and hover-guess
 changes were removed; no production loop, solver or constraint edits are retained.
+
+`--audit-loop` compares every constructed RH request with a fresh standalone
+solve, rather than comparing only the first request. All 120 CTCS requests
+across pointmass, near-center quad and staging-start quad (matched and 1 ms
+plants) return exactly the same X/U as their standalone counterparts. The two
+NODE regressions also pass. Measured-root and initial-guess dynamics errors are
+zero; retained-control, duration and target-frame shift error is at most
+3.56e-15. The staging-start quad has `loop_pass=1` and
+`physical_stc_pass=0`; no runtime loop defect is established by these tests.
+Results are in `logs/frozen_node_baseline_20261104/ctcs_loop_audit`.
+
+Saved-request replay now selects the recorded OCP, including CTCS, and checks
+its recorded `SZMUK_*`, `MPC_*` and thread environment. It previously substituted
+the unrelated `landing_rh` problem for every quad request. Use
+`test_measured_root_rh --diagnose-request quad REQUEST_FILE` with the saved
+environment. Older requests without descriptor metadata require an explicit
+descriptor as the final argument; replay never guesses one. This corrects the
+diagnostic, not the solver or production RH algorithm.
 
 ## OCPs and execution
 

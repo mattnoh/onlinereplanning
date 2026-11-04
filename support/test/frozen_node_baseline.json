@@ -113,9 +113,9 @@
     "include/planner_core/controller.hpp": "707b969a4962160976e79a6d6314a7cf16e6712d008048d8606f0d0c44a1d564",
     "include/ocp/ocp_stc_landing_noaug.hpp": "4df6d4b3811fab642b53aa2c683d5ee971a0f21aabd8572ce9a588e5cd2ec5b5",
     "support/test/pointmass_reference_adapter.hpp": "6d96b7c3d9128da722c3e8ee9cff7c93472e98e414219d5bdae5e6314c660f50",
-    "support/test/test_measured_root_rh.cpp": "255207d00fc73b47a7c3bd7b11f7a3988fd47bd1f677c4f4b44e50cc2b486db6"
+    "support/test/test_measured_root_rh.cpp": "386b67971bc700e9c20dcb8a363027a6536aa66f97f34a4c66f1b60310ac6032"
   },
-  "scope_limit": "Original NODE baselines and near-center CTCS shared-controller baselines pass. Representative settled staging-start quad lands with executed staging on-to-off, but strict independent planned CTCS interval budgets fail and finite executed budget permits nonzero STC consequences. Far incoming-velocity quad start still fails first OCP. Quad CTCS RH is not claimed fully fixed. Real-time, hardware and100IC/MC1/MC2 robustness remain unvalidated.",
+  "scope_limit": "Both frozen CTCS loop contracts verified for all120 testedCTCSrequests and35NODErequests; fresh standalone trajectories identical. Saved-request diagnostic repaired. Pointmass and near-center quad physical checks pass; staging-start quad physical STC checks fail despite completedlanding. Far incoming-velocity firstOCP infeasible also standalone. Full quad CTCS physical enforcement,100IC/MC1/MC2 robustness,realtime andhardware not claimed fixed.",
   "ctcs_shared_controller": {
     "result_directory": "logs/frozen_node_baseline_20261104/ctcs_shared",
     "profile": {
@@ -962,5 +962,136 @@
       }
     },
     "archive": "raw_runs.tar.gz contains all profiles, rejected probes, reviews, per-request input/results and final source snapshot; diagnostic initial-guess probe patch is archived, not active."
+  },
+  "frozen_ctcs_loop_audit": {
+    "status": "Loop contracts verified; no production loop fix established. Saved-request diagnostic corrected.",
+    "result_directory": "logs/frozen_node_baseline_20261104/ctcs_loop_audit",
+    "solver_ocp_constraints_costs_budgets_runtime_unchanged": true,
+    "per_request_comparison_tolerance": 1e-12,
+    "ctcs_requests_compared": 120,
+    "all_requests_compared": 155,
+    "max_returned_X_U_difference": 0,
+    "max_shift_error": 3.552713678800501e-15,
+    "runs": {
+      "pointmass-matched": {
+        "accepted": 15,
+        "simulation_time": 30,
+        "loop_pass": 1,
+        "physical_stc_pass": 1,
+        "physical_stc_excess": 0,
+        "native_violation": 0,
+        "standalone_comparisons": 15,
+        "root_error": 0,
+        "shift_error": 0,
+        "initial_guess_dynamics_error": 0,
+        "anchor_difference": 0
+      },
+      "pointmass-fine": {
+        "accepted": 15,
+        "simulation_time": 30,
+        "loop_pass": 1,
+        "physical_stc_pass": 1,
+        "physical_stc_excess": 0,
+        "native_violation": 0,
+        "standalone_comparisons": 15,
+        "root_error": 0,
+        "shift_error": 0,
+        "initial_guess_dynamics_error": 0,
+        "anchor_difference": 0
+      },
+      "quad-staging-matched": {
+        "accepted": 25,
+        "simulation_time": 13.344379155895854,
+        "loop_pass": 1,
+        "physical_stc_pass": 0,
+        "physical_stc_excess": 0.42110432982803325,
+        "native_violation": 0,
+        "standalone_comparisons": 25,
+        "root_error": 0,
+        "shift_error": 3.552713678800501e-15,
+        "initial_guess_dynamics_error": 0,
+        "anchor_difference": 0
+      },
+      "quad-staging-fine": {
+        "accepted": 25,
+        "simulation_time": 13.320961728729815,
+        "loop_pass": 1,
+        "physical_stc_pass": 0,
+        "physical_stc_excess": 0.647945066872935,
+        "native_violation": 0,
+        "standalone_comparisons": 25,
+        "root_error": 0,
+        "shift_error": 3.552713678800501e-15,
+        "initial_guess_dynamics_error": 0,
+        "anchor_difference": 0
+      },
+      "quad-near-matched": {
+        "accepted": 20,
+        "simulation_time": 9.929042605170928,
+        "loop_pass": 1,
+        "physical_stc_pass": 1,
+        "physical_stc_excess": 0,
+        "native_violation": 0,
+        "standalone_comparisons": 20,
+        "root_error": 0,
+        "shift_error": 1.7763568394002505e-15,
+        "initial_guess_dynamics_error": 0,
+        "anchor_difference": 0
+      },
+      "quad-near-fine": {
+        "accepted": 20,
+        "simulation_time": 9.929042649106242,
+        "loop_pass": 1,
+        "physical_stc_pass": 1,
+        "physical_stc_excess": 0,
+        "native_violation": 0,
+        "standalone_comparisons": 20,
+        "root_error": 0,
+        "shift_error": 1.7763568394002505e-15,
+        "initial_guess_dynamics_error": 0,
+        "anchor_difference": 0
+      },
+      "pointmass-node": {
+        "accepted": 15,
+        "simulation_time": 30,
+        "loop_pass": 1,
+        "physical_stc_pass": 0,
+        "physical_stc_excess": 0,
+        "native_violation": 0,
+        "standalone_comparisons": 15,
+        "root_error": 0,
+        "shift_error": 0,
+        "initial_guess_dynamics_error": 0,
+        "anchor_difference": 0
+      },
+      "quad-node": {
+        "accepted": 20,
+        "simulation_time": 9.929042624733237,
+        "loop_pass": 1,
+        "physical_stc_pass": 1,
+        "physical_stc_excess": 0,
+        "native_violation": 0,
+        "standalone_comparisons": 20,
+        "root_error": 0,
+        "shift_error": 1.7763568394002505e-15,
+        "initial_guess_dynamics_error": 0,
+        "anchor_difference": 0
+      }
+    },
+    "diagnostic_fix": "Removed unrelated landing_rh substitution in quad replay. Save exact descriptor and SZMUK/MPC/thread environment; reject mismatches; legacy files require explicit correct descriptor. Saved pointmass and quad CTCS replays match original returned X/U bitwise.",
+    "acceptance": "Loop uses configured native CTCS row tolerance, dynamics, measured root, execution schedule and mission progress. Physical STC implications checked separately against original triggers. Independent integrals diagnostic only as requested; original internal epsilon unchanged.",
+    "far_first_solve": "Correct stc_landing_noaug replay of archived far-root request reproduces infeasible trajectory bitwise before any replanning (native residual about.00368503). This is not evidence of an RH-transition bug.",
+    "checks": {
+      "measured-root": 0,
+      "ordinary-node": 0,
+      "controller": 0,
+      "planner-core": 0,
+      "replayer": 0,
+      "ctcs-parity": 0,
+      "saved-quad-ctcs": 0,
+      "saved-pointmass-ctcs": 0,
+      "mismatched-environment-rejected": true
+    },
+    "remaining_failure": "Staging-start quad completes25replans and lands, but physical STC consequences fail. It is NOT claimed fully fixed. No OCP or solver change adopted."
   }
 }

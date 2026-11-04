@@ -9,6 +9,18 @@
 #include <cstring>
 #include <map>
 
+extern char** environ;
+static std::map<std::string,std::string> requestEnvironment(){
+    std::map<std::string,std::string> values;
+    for(char** entry=environ;*entry;++entry){
+        const std::string value(*entry);const auto equal=value.find('=');
+        const auto name=value.substr(0,equal);
+        if(name.rfind("SZMUK_",0)==0||name.rfind("MPC_",0)==0||name=="OMP_NUM_THREADS"||name=="OPENBLAS_NUM_THREADS")
+            values[name]=value.substr(equal+1);
+    }
+    return values;
+}
+
 static void requireRh(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 static void ordinaryNodeContract(){
     namespace Q=StcLandingNoAugOCP;
@@ -39,12 +51,15 @@ static void ordinaryNodeContract(){
 }
 // Diagnostic only: replay one saved, fully constructed request with console
 // logging enabled. Numerical parameters and trajectory data are unchanged.
-static void diagnoseSavedRequest(bool quad,const std::string& path){
+static void diagnoseSavedRequest(bool quad,const std::string& path,const std::string& legacy_ocp={}){
     std::ifstream input(path);requireRh(bool(input),"saved request missing");
     OCPCreateArgs args;std::vector<Vec> prepared_x,prepared_u,returned_x,returned_u;
-    std::string line;
+    std::string line,ocp=legacy_ocp;std::map<std::string,std::string> environment;bool environment_saved=false;
     while(std::getline(input,line)){
         std::stringstream row(line);std::string label;row>>label;
+        if(label=="ocp")row>>ocp;
+        if(label=="environment"){std::string name,value;row>>std::quoted(name)>>std::quoted(value);environment[name]=value;}
+        if(label=="environment_end")environment_saved=true;
         if(label=="epoch")row>>args.t_abs;
         if(label=="root"){args.current_state.resize(quad?14:4);for(int j=0;j<args.current_state.size();++j)row>>args.current_state(j);}
         if(label=="target_acceleration")for(int j=0;j<3;++j)row>>args.target_accel(j);
@@ -54,7 +69,12 @@ static void diagnoseSavedRequest(bool quad,const std::string& path){
             for(int k=0;k<count;++k){std::getline(input,line);std::stringstream data(line);int dim;data>>dim;Vec value(dim);for(int j=0;j<dim;++j)data>>value(j);values.push_back(value);}
         }
     }
-    auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor("landing_rh")):pointmassReferenceDescriptor(100,false,true);
+    requireRh(!ocp.empty(),"legacy request has no OCP metadata; specify the actual descriptor explicitly");
+    requireRh(!environment_saved||environment==requestEnvironment(),"saved request environment differs; replay with its recorded SZMUK/MPC/thread settings");
+    requireRh(quad?(ocp=="stc_landing_noaug"||ocp=="stc_landing_noaug_node"):
+        (ocp=="existing_pointmass_ctcs"||ocp=="existing_pointmass_node"),"saved OCP does not match requested model/family");
+    auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(ocp)):
+        pointmassReferenceDescriptor(100,false,ocp=="existing_pointmass_node");
     auto problem=descriptor->create(args);const int N=problem->getHorizon();
     requireRh(prepared_x.size()==size_t(N+1)&&prepared_u.size()==size_t(N),"saved request shape mismatch");
     for(int k=0;k<=N;++k)problem->setInitialState(k,prepared_x[k]);
@@ -62,7 +82,7 @@ static void diagnoseSavedRequest(bool quad,const std::string& path){
     auto parameters=descriptor->getSolverParams();parameters.verbose=true;
     ALIPDDP<double> solver(*problem);solver.init(parameters);
     const auto initial=auditPrimal(*problem,solver.getXTraj(),solver.getUTraj(),parameters);
-    std::cout<<std::setprecision(17)<<"REPLAY_INITIAL max_iter="<<parameters.max_iter<<" max_inner="<<parameters.max_inner_iter
+    std::cout<<std::setprecision(17)<<"REPLAY_INITIAL ocp="<<ocp<<" max_iter="<<parameters.max_iter<<" max_inner="<<parameters.max_inner_iter
         <<" mu="<<parameters.mu<<" muT="<<parameters.muT<<" mu_min="<<parameters.mu_min<<" rho="<<parameters.rho
         <<" rhoT="<<parameters.rhoT<<" rho_max="<<parameters.rho_max<<" tolerance="<<parameters.tolerance
         <<" native="<<initial.constraints<<" dynamics="<<initial.dynamics<<'\n';
@@ -105,19 +125,20 @@ static void measuredGuessContract(){
 }
 int main(int argc,char** argv){try{
     if(argc==2&&std::string(argv[1])=="--ordinary-node-contract"){ordinaryNodeContract();return 0;}
-    if(argc==4&&std::string(argv[1])=="--diagnose-request"){
+    if((argc==4||argc==5)&&std::string(argv[1])=="--diagnose-request"){
         requireRh(std::string(argv[2])=="quad"||std::string(argv[2])=="pointmass","unknown replay model");
-        diagnoseSavedRequest(std::string(argv[2])=="quad",argv[3]);return 0;
+        diagnoseSavedRequest(std::string(argv[2])=="quad",argv[3],argc==5?argv[4]:"");return 0;
     }
     if(argc==2&&std::string(argv[1])=="--root-consistency"){measuredGuessContract();return 0;}
-    if(argc<5||argc>8)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess]");
-    bool ctcs=false,native_guess=false,reference_initial=false,staging_initial=false;
+    if(argc<5||argc>9)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess] [--audit-loop]");
+    bool ctcs=false,native_guess=false,reference_initial=false,staging_initial=false,audit_loop=false;
     for(int i=5;i<argc;++i){
         const std::string option=argv[i];
         if(option=="--ctcs")ctcs=true;
         else if(option=="--reference-initial")reference_initial=true;
         else if(option=="--native-initial-guess")native_guess=true;
         else if(option=="--staging-initial")staging_initial=true;
+        else if(option=="--audit-loop")audit_loop=true;
         else throw std::invalid_argument("unknown option "+option);
     }
     const bool quad=std::string(argv[1])=="quad",fine=std::string(argv[2])=="fine";
@@ -165,7 +186,10 @@ int main(int argc,char** argv){try{
     if(model.initial_state)plant=model.initial_state(plant,model.hover);
     planner_core::PlannerCoreInput input;input.state_frame="world";input.target_snapshot.valid=true;
     double time=0.,root_error=0.,native_error=0.,executed_error=0.,predicted_dense_error=0.,prediction_error=0.;
-    bool reached=false;int accepted=0;double anchor_difference=0.;
+    bool reached=false;int accepted=0,standalone_comparisons=0;double anchor_difference=0.,shift_error=0.,guess_dynamics_error=0.;
+    std::vector<Vec> previous_x,previous_u;
+    TargetSnapshot previous_target;
+    double previous_prefix=0.;
     Problem audit_problem;
     double native_budget_ratio=0.,planned_budget_ratio=0.,executed_budget_ratio=0.,initial_budget_ratio=0.,density_parity_error=0.,dense_state_defect=0.;
     int ctcs_rows_seen=0;
@@ -239,7 +263,9 @@ int main(int argc,char** argv){try{
         auto result=controller.solveSynchronous(input);
         requireRh((plant-measured).norm()==0.,"plant advanced during frozen solve");
         std::ofstream request(out/("request-"+std::to_string(cycle)+".txt"));request<<std::setprecision(17);
-        request<<"epoch "<<time<<"\nroot "<<captured_args.current_state.transpose()<<"\ntarget_acceleration "<<acceleration.transpose()<<'\n';
+        request<<"ocp "<<descriptor->name<<"\nepoch "<<time<<"\nroot "<<captured_args.current_state.transpose()<<"\ntarget_acceleration "<<acceleration.transpose()<<'\n';
+        for(const auto& [name,value]:requestEnvironment())request<<"environment "<<std::quoted(name)<<' '<<std::quoted(value)<<'\n';
+        request<<"environment_end\n";
         if(captured_problem){
             for(int k=0;k<=model.horizon;++k)requireRh((prepared_x[k]-captured_problem->getInitialState(k)).norm()==0.,"solve mutated the constructed state initial guess");
             for(int k=0;k<model.horizon;++k)requireRh((prepared_u[k]-captured_problem->getInitialControl(k)).norm()==0.,"solve mutated the constructed control initial guess");
@@ -279,6 +305,30 @@ int main(int argc,char** argv){try{
         const auto relative=planner_core::prepareOcpState(*descriptor,measured,input.target_snapshot);
         root_error=std::max(root_error,(xs.front().head(descriptor->state_dim)-relative.head(descriptor->state_dim)).lpNorm<Eigen::Infinity>());
         requireRh(root_error<=1e-12&&result.x0_source=="measured","root changed/projected/predicted");
+        if(audit_loop){
+            requireRh((prepared_x.front()-captured_args.current_state).lpNorm<Eigen::Infinity>()<=1e-12,"constructed initial guess replaced measured root");
+            if(!previous_u.empty()&&!native_guess){
+                requireRh(captured_args.prev_U.size()==previous_u.size(),"shift changed initial-guess control count");
+                for(size_t k=0;k<previous_u.size();++k){
+                    const auto& expected=previous_u[std::min(k+size_t(K),previous_u.size()-1)];
+                    shift_error=std::max(shift_error,(captured_args.prev_U[k]-expected).lpNorm<Eigen::Infinity>());
+                }
+                if(quad){
+                    double old_time=previous_prefix;
+                    for(size_t k=0;k+K<previous_x.size();++k){
+                        auto expected=previous_x[k+K];const double new_time=old_time-previous_prefix;
+                        expected.head<3>()+=previous_target.position+previous_target.velocity*old_time+.5*previous_target.acceleration*old_time*old_time-
+                            (input.target_snapshot.position+input.target_snapshot.velocity*new_time+.5*input.target_snapshot.acceleration*new_time*new_time);
+                        expected.segment<3>(3)+=previous_target.velocity+previous_target.acceleration*old_time-
+                            (input.target_snapshot.velocity+input.target_snapshot.acceleration*new_time);
+                        shift_error=std::max(shift_error,(captured_args.prev_X[k]-expected).lpNorm<Eigen::Infinity>());
+                        if(k+K<previous_u.size())old_time+=model.stage_duration(previous_x[k+K],previous_u[k+K]);
+                    }
+                }
+                requireRh(shift_error<=1e-12,"RH shift changed retained controls, durations or target frame");
+            }
+            guess_dynamics_error=std::max(guess_dynamics_error,auditPrimal(*captured_problem,prepared_x,prepared_u,params).dynamics);
+        }
         if(ctcs){
             for(int j=0;j<NOBS;++j)audit_problem.mask[j]=(audit_problem.s_diag.cwiseProduct(relative.head<2>()-audit_problem.centers[j])).norm()<=6.;
             const auto row=rowAt(0);
@@ -303,12 +353,13 @@ int main(int argc,char** argv){try{
         const auto audit=auditPrimal(*problem,xs,us,params);
         native_error=std::max(native_error,audit.constraints);
         requireRh(audit.feasible(params.tolerance),"returned trajectory violates native constraints/dynamics");
-        if(cycle==0){
+        if(cycle==0||audit_loop){
             ALIPDDP<double> single(*problem);single.init(params);single.solve();
             const auto ax=single.getResX(),au=single.getResU();
             for(size_t k=0;k<xs.size();++k)anchor_difference=std::max(anchor_difference,(ax[k]-xs[k]).lpNorm<Eigen::Infinity>());
             for(size_t k=0;k<us.size();++k)anchor_difference=std::max(anchor_difference,(au[k]-us[k]).lpNorm<Eigen::Infinity>());
-            requireRh(anchor_difference<=1e-12,"first RH solve differs from identical single-horizon control");
+            requireRh(anchor_difference<=1e-12,"RH solve differs from fresh standalone solve of identical constructed request");
+            ++standalone_comparisons;
         }
         std::vector<double> durations;double horizon=0.;
         for(size_t k=0;k<us.size();++k){
@@ -374,6 +425,7 @@ int main(int argc,char** argv){try{
             prefix+=durations[k];
         }
         time+=prefix;++accepted;input.absolute_time_sec=time;
+        previous_x=xs;previous_u=us;previous_target=input.target_snapshot;previous_prefix=prefix;
         requireRh(controller.sample(input).stale,"completed prefix silently extended");
         const auto measured_relative=planner_core::prepareOcpState(*descriptor,plant,targetAt(time));
         reached=quad&&measured_relative.head<3>().norm()<=.1&&measured_relative.segment<3>(3).norm()<=.3;
@@ -381,6 +433,7 @@ int main(int argc,char** argv){try{
            <<",\"native_violation\":"<<audit.constraints<<",\"root_error\":"<<root_error<<",\"native_initial_guess\":"<<native_guess
            <<",\"ctcs\":"<<ctcs<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
            <<",\"optimality_error\":"<<result.solve_result.optimality_error
+           <<",\"termination\":"<<jstr(result.solve_result.solver_termination)
            <<",\"solve_ms\":"<<result.solve_result.solve_time_ms<<",\"iterations\":"<<result.solve_result.solve_iters<<",\"executed_physical_excess\":"<<executed_error
            <<",\"planned_dense_excess\":"<<predicted_dense_error<<",\"distance\":"<<plant.head(quad?3:2).norm()<<"}\n";log.flush();
         std::cout<<"MEASURED_RH model="<<(quad?"quad":"pointmass")<<" cycle="<<cycle<<" t="<<time<<" ctcs="<<ctcs<<" native="<<audit.constraints<<" budget_native="<<native_budget_ratio<<" budget_planned="<<planned_budget_ratio<<" budget_executed="<<executed_budget_ratio<<" executed="<<executed_error<<" planned_dense="<<predicted_dense_error<<std::endl;
@@ -390,9 +443,15 @@ int main(int argc,char** argv){try{
     // NODE acceptance covers shooting nodes. Dense checks remain diagnostics.
     const bool node_pass=native_pass;
     const bool staging_transition_pass=ctcs&&quad&&initial_trigger["staging"]&&deactivations["staging"]>0&&!last_trigger["staging"]&&trigger_time["staging"]>0.&&inactive_time["staging"]>0.;
-    const bool ctcs_pass=ctcs&&native_pass&&ctcs_rows_seen>0&&native_budget_ratio<=1.+1e-6&&planned_budget_ratio<=1.+1e-6&&executed_budget_ratio<=1.+1e-6&&executed_error<=params.tolerance&&(!(reference_initial||staging_initial)||staging_transition_pass);
+    const bool loop_pass=native_pass&&(!audit_loop||standalone_comparisons==accepted)&&shift_error<=1e-12;
+    double physical_stc_excess=0.;if(quad)for(const auto& [name,value]:triggered_consequence)physical_stc_excess=std::max(physical_stc_excess,value);
+    const bool physical_stc_pass=executed_error<=params.tolerance&&physical_stc_excess<=params.tolerance;
+    // Independent integrals diagnose quadrature. They do not redefine the
+    // native CTCS row or substitute for checking the physical implications.
+    const bool ctcs_pass=ctcs&&loop_pass&&ctcs_rows_seen>0&&physical_stc_pass&&(!(reference_initial||staging_initial)||staging_transition_pass);
     std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"model\":"<<jstr(quad?"quad":"pointmass")<<",\"plant_execution\":"<<jstr(fine?"refined_1ms":"matched_discrete")<<",\"reference_initial\":"<<reference_initial<<",\"staging_initial\":"<<staging_initial<<",\"initial_ctcs_ratio\":"<<initial_budget_ratio<<",\"accepted\":"<<accepted<<",\"reached\":"<<reached<<",\"simulation_time\":"<<time
         <<",\"ctcs\":"<<ctcs<<",\"ctcs_loop_pass\":"<<ctcs_pass<<",\"staging_transition_pass\":"<<staging_transition_pass<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
+        <<",\"loop_pass\":"<<loop_pass<<",\"physical_stc_pass\":"<<physical_stc_pass<<",\"physical_stc_excess\":"<<physical_stc_excess<<",\"standalone_comparisons\":"<<standalone_comparisons<<",\"shift_error\":"<<shift_error<<",\"initial_guess_dynamics_error\":"<<guess_dynamics_error
         <<",\"physical_interval_budget\":"<<physical_budget<<",\"density_parity_error\":"<<density_parity_error<<",\"planned_dense_state_defect\":"<<dense_state_defect
         <<",\"native_solve_pass\":"<<native_pass<<",\"node_loop_pass\":"<<node_pass<<",\"planned_continuous_pass\":"<<(predicted_dense_error<=1e-6)<<",\"planned_dense_excess\":"<<predicted_dense_error
         <<",\"executed_continuous_pass\":"<<(executed_error<=1e-6)<<",\"executed_physical_excess\":"<<executed_error<<",\"native_violation\":"<<native_error<<",\"root_error\":"<<root_error<<",\"anchor_difference\":"<<anchor_difference
