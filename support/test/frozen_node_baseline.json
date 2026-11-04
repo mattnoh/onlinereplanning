@@ -2142,5 +2142,28 @@
       "src/synchronous_mpc_internal.hpp": "c8cfb4ddf40a382d74300cca5ed43d7c935c57b15ee81b89592679783fa0860d",
       "README.md": "c2bc080d199107da77b913830495ecf816c5e829ba3454d6a97dead4efd5f38d"
     }
+  },
+  "fixed_dt_parameter_sweep_20261105": {
+    "total_cases": 480,
+    "single_total": 120,
+    "rh_total": 360,
+    "rh_native_landings": 45,
+    "physical_passes": 0,
+    "timeouts": 6,
+    "interpretation": "Initial barrier tuning removes the returned native inequality failure in the tested fixed-dt RH case. All native-feasible trajectories still fail the physical STC audit. No production default, solver equation, constraint or trigger was changed. This campaign does not identify or reproduce the historical clean fixed-dt baseline.",
+    "results": "logs/frozen_node_baseline_20261104/fixed_dt_comparison_20261105/parameter-sweep-results.json",
+    "native_feasible_barrier_only_profile": {
+      "budget": 0.0016,
+      "scale": 10,
+      "reg2": 0.1,
+      "mu": 0.01,
+      "muT": 0.01,
+      "mu_mul": 0.1,
+      "cadence_intervals": 4,
+      "accepted": 51,
+      "landing_simulation_time": 20.4,
+      "max_native_violation": 0,
+      "physical_stc_pass": false
+    }
   }
 }

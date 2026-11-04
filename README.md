@@ -91,6 +91,29 @@ control completes40requests with zero native violations. Raw requests, profiles,
 full-horizon trajectories, independent replays and checks are in
 `logs/frozen_node_baseline_20261104/fixed_dt_comparison_20261105`.
 
+Parameter sweep (2026-11-05): 480 fixed-duration quad runs cover interval budgets
+`[1e-6,1e-5,1e-4,.0016,.016]`, row scales `[1,10]`, regularization minima
+`[.01,.1,1]`, fresh initial barriers `[.01,1]`, barrier reductions `[.1,.5]`,
+and a full-horizon solve plus RH execution prefixes `[1,4,16]`. Each RH case
+allows 20 simulated seconds; six cases reach the separate 60-second wall-time
+cap. Of 360 RH cases, 45 land with native feasibility; none passes the physical
+STC audit. The three smaller budgets yield no complete native-feasible RH
+landings. Budget `.0016` yields 21 and `.016` yields 24, all at prefix 16.
+
+Longer validation removes the 20-second classification limit: prefix 1 lands
+after 207 replans / 20.7 s, and prefix 4 after 51 replans / 20.4 s, with zero native
+inequality violation at budget `.0016`, scale 1, reg2 `.01`, initial mu `.01` and
+mu_mul `.1`. A controlled follow-up keeps the original scale 10 / reg2 `.1` profile
+and changes **only the fresh initial mu/muT from 1 to .01**: prefix 4 likewise
+lands after 51 replans / 20.4 s with zero native inequality violation. All three
+still fail physical STC checks; this is not a completed CTCS fix. Production
+defaults and the solver remain unchanged. The resumable runner is
+`support/test/run_quad_ctcs_parameter_sweep.py --binary PATH --output DIRECTORY`;
+all settings, per-case results and extended validations are recorded in
+`logs/frozen_node_baseline_20261104/fixed_dt_comparison_20261105/parameter-sweep-results.json`.
+The sweep uses the recent test adapter, not an identified historical clean
+fixed-dt baseline.
+
 Paper check: Uzun et al. (2024), Sec.2.4, Eq.(11)-(12), impose a separate
 violation-integrator increment bound on each interval, and reset the auxiliary
 initial values through xc=(physical state,0,0) at each new OCP. Rebasing a shifted
