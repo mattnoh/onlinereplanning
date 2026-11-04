@@ -15,6 +15,7 @@ const std::map<std::string, OCPDescriptor>& getTable() {
         {"landing_mpc", LandingMpcOCP::descriptor()},
         {"landing_mpc_ctcs", LandingMpcOCP::ctcsDescriptor()},
         {"stc_landing_noaug", StcLandingNoAugOCP::descriptor()},
+        {"stc_landing_noaug_node", StcLandingNoAugOCP::ordinaryNodeDescriptor()},
         {"stc_landing_mpc", StcLandingMpcOCP::descriptor()},
     };
     return table;

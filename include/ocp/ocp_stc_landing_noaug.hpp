@@ -1261,6 +1261,10 @@ inline OCPDescriptor descriptor() {
         dyn->setMass(MASS);dyn->setGravity(GRAVITY);dyn->setJb(J_B);
         OCPDescriptor::Model model;model.nx=NX_SS;model.nu=NU_SS;model.horizon=HORIZON;model.dt=TH0;
         model.hover=Eigen::VectorXd::Zero(NU_SS);model.hover(0)=HOVER_THRUST;model.hover(IDX_THETA)=TH0;
+        model.stage_duration=[](const Eigen::VectorXd&,const Eigen::VectorXd& u){return u(IDX_THETA);};
+        model.initial_state=[](const Eigen::VectorXd& physical,const Eigen::VectorXd&){
+            Eigen::VectorXd x=Eigen::VectorXd::Zero(NX_SS);x.head(NX)=physical.head(NX);return x;
+        };
         model.bounded=[](Eigen::VectorXd u){clampWarmControl(u);return u;};
         model.flow=[dyn](const Eigen::VectorXd& x,const Eigen::VectorXd& u,double h,bool jac) {
             auto control=u;control(IDX_THETA)=h;
@@ -1287,4 +1291,38 @@ inline OCPDescriptor descriptor() {
     return d;
 }
 
+// Ordinary NODE baseline on this same landing model/cost. Keep the original
+// unconditional input, floor, duration and global-speed rows. Exclude the STC
+// interval row rather than making its conditional consequences unconditional.
+inline std::shared_ptr<OptimalControlProblem<double>> ordinaryNodeProblem(
+    const OptimalControlProblem<double>& source) {
+    const int n=source.getHorizon();
+    auto problem=std::make_shared<OptimalControlProblem<double>>(n);
+    for(int k=0;k<n;++k){
+        problem->setStageDynamics(k,source.getDynamics(k));
+        problem->setStageCost(k,source.getStageCost(k));
+        problem->setInitialState(k,source.getInitialState(k));
+        problem->setInitialControl(k,source.getInitialControl(k));
+        int excluded=0;
+        for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
+            for(const auto& row:source.getStageConstraints(k,type)){
+                if(std::dynamic_pointer_cast<StcStageConstraint<double>>(row))++excluded;
+                else problem->addStageConstraint(k,row);
+            }
+        if(excluded!=1)throw std::runtime_error("ordinary NODE expects exactly one original STC row");
+    }
+    problem->setInitialState(n,source.getInitialState(n));
+    problem->setTerminalCost(source.getTerminalCost());
+    for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
+        if(!source.getTerminalConstraints(type).empty())
+            throw std::runtime_error("ordinary NODE baseline must not introduce terminal constraints");
+    return problem;
+}
+
+inline OCPDescriptor ordinaryNodeDescriptor(){
+    auto d=descriptor();d.name="stc_landing_noaug_node";
+    const auto original=d.create;
+    d.create=[original](const OCPCreateArgs& args){return ordinaryNodeProblem(*original(args));};
+    return d;
+}
 }  // namespace StcLandingNoAugOCP

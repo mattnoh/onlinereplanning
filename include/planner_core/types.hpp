@@ -297,6 +297,7 @@ struct OCPDescriptor {
         int nx = 0, nu = 4, horizon = 0;
         double dt = 0.1;
         std::function<Flow(const Eigen::VectorXd&, const Eigen::VectorXd&, double, bool)> flow;
+        std::function<double(const Eigen::VectorXd&,const Eigen::VectorXd&)> stage_duration;
         std::function<Eigen::VectorXd(Eigen::VectorXd)> bounded;
         std::function<Eigen::VectorXd(const Eigen::VectorXd&,const Eigen::VectorXd&)> initial_state;
         Eigen::VectorXd hover;
@@ -464,6 +465,7 @@ struct PlannerCoreStepResult {
     bool solve_attempted = false;
     bool solve_accepted = false;
     bool has_replay_sample = false;
+    int applied_control_index = -1;
     bool terminal_freeze_engaged = false;
     bool terminal_freeze_released = false;
     bool stale = false;

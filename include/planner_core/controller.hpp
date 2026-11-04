@@ -10,6 +10,9 @@ public:
     Controller(const Controller&)=delete;
     Controller& operator=(const Controller&)=delete;
     void configure(const PlannerCoreConfig&);
+    // Frozen simulation time during solves; execute whole stages between solves.
+    void configureSynchronous(const PlannerCoreConfig&, std::shared_ptr<const OCPDescriptor> descriptor={});
+    PlannerCoreStepResult solveSynchronous(const PlannerCoreInput&);
     void reset();
     void stop();
     void setTerminalTarget(const Eigen::Vector3d&);

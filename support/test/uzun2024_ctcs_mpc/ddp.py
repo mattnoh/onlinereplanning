@@ -50,9 +50,11 @@ import numpy as np
 
 import common  # shared contract (reference, obstacle_g, sensed_mask, rhs, replay_interval)
 
-ALIPDDP_ROOT = Path("/home/lab/mavros_ws/src/ALIPDDP-main")
+PLANNER_ROOT = HERE.parents[2]
+ALIPDDP_ROOT = Path(os.environ.get("COMANDO_SOLVER_DIR", PLANNER_ROOT.parent / "ALIPDDP-main")).resolve()
 CPP_SOURCE = ALIPDDP_ROOT / "problem_examples/uzun2024_ctcs_mpc.cpp"
-DEFAULT_BINARY = Path("/home/lab/mavros_ws/build/comando_planner/alipddp/uzun2024_ctcs_mpc")
+BUILD_ROOT = Path(os.environ.get("COMANDO_BUILD_DIR", PLANNER_ROOT / "build")).resolve()
+DEFAULT_BINARY = BUILD_ROOT / "alipddp/uzun2024_ctcs_mpc"
 
 ASSUMPTIONS = {
     "hold": "ZOH: the DDP stage control is held over the interval; the paper uses FOH (eq. 8). "
@@ -76,7 +78,7 @@ ASSUMPTIONS = {
 
 
 class SolverSession:
-    """Retain the actual ALIPDDP instance between CLI-compatible horizon requests."""
+    """Reuse the CLI process; the restored native binary initializes each solve afresh."""
     def __init__(self, binary, out):
         self.stderr = (out / "server_stderr.txt").open("w")
         self.process = subprocess.Popen([str(binary), "--serve"], stdin=subprocess.PIPE,
@@ -670,7 +672,7 @@ def parse(argv=None):
     ap.add_argument("--defect-tol", type=float, default=1e-6)
     ap.add_argument("--excess-tol", type=float, default=1e-6)
     ap.add_argument("--tracking-tol", type=float, default=1.)
-    ap.add_argument("--reuse-solver", action="store_true", help="retain the ALIPDDP instance and call production updateProblem between horizons")
+    ap.add_argument("--reuse-solver", action="store_true", help="reuse the CLI process; the restored native binary initializes fresh numerical state for every horizon")
     ap.add_argument("--binary", type=Path, default=DEFAULT_BINARY)
     ap.add_argument("--replay-inner", type=float, help="with --replay-saved, compare inner tolerance 10 versus this value; saved campaign must use the candidate setting")
     ap.add_argument("--replay-saved", type=Path, help="paired legacy/shared cache replay of saved retained MPC requests; no plant re-integration")

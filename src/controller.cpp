@@ -1,5 +1,6 @@
 #include "planner_core/controller.hpp"
 #include "controller_internal.hpp"
+#include "synchronous_mpc_internal.hpp"
 #include <shared_mutex>
 namespace planner_core {
 struct Controller::Impl {
@@ -8,6 +9,8 @@ struct Controller::Impl {
     PlannerCoreConfig config;
     PlannerCore rh;
     DirectMpcController direct;
+    SynchronousMpcController synchronous;
+    bool synchronous_mode=false;
     ExecutionMode mode=ExecutionMode::RhReplanning;
     int accepted=0;
     bool configured=false;
@@ -16,24 +19,38 @@ Controller::Controller():impl_(std::make_unique<Impl>()){}
 Controller::~Controller()=default;
 void Controller::configure(const PlannerCoreConfig& c) {
     std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);
-    impl_->direct.stop();impl_->config=c;impl_->accepted=0;
+    impl_->direct.stop();impl_->synchronous.stop();impl_->synchronous_mode=false;impl_->config=c;impl_->accepted=0;
     impl_->mode=OCPRegistry::getDescriptor(c.ocp_type).execution_mode;
     if(impl_->mode==ExecutionMode::DirectMpc) impl_->direct.configure(c);
     else impl_->rh.configure(c);
     impl_->configured=true;
 }
-void Controller::reset(){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);impl_->accepted=0;if(!impl_->configured)return;if(impl_->mode==ExecutionMode::DirectMpc)impl_->direct.reset();else impl_->rh.reset();}
-void Controller::stop(){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);impl_->direct.stop();impl_->rh.reset();impl_->configured=false;}
+void Controller::configureSynchronous(const PlannerCoreConfig& c,std::shared_ptr<const OCPDescriptor> descriptor) {
+    std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);
+    impl_->direct.stop();impl_->synchronous.stop();impl_->rh.reset();impl_->config=c;impl_->accepted=0;
+    impl_->synchronous_mode=false;impl_->configured=false;
+    impl_->synchronous.configure(c,std::move(descriptor));
+    impl_->synchronous_mode=true;impl_->mode=impl_->synchronous.executionMode();impl_->configured=true;
+}
+PlannerCoreStepResult Controller::solveSynchronous(const PlannerCoreInput& input) {
+    std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);
+    std::lock_guard<std::mutex> solve(impl_->solver);
+    if(!impl_->configured||!impl_->synchronous_mode){PlannerCoreStepResult out;out.rejection_reason="synchronous_mpc_not_configured";return out;}
+    auto out=impl_->synchronous.solve(input);if(out.solve_accepted)++impl_->accepted;return out;
+}
+void Controller::reset(){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);impl_->accepted=0;if(!impl_->configured)return;if(impl_->synchronous_mode)impl_->synchronous.reset();else if(impl_->mode==ExecutionMode::DirectMpc)impl_->direct.reset();else impl_->rh.reset();}
+void Controller::stop(){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);impl_->direct.stop();impl_->synchronous.stop();impl_->rh.reset();impl_->configured=false;}
 void Controller::setTerminalTarget(const Eigen::Vector3d& p){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);impl_->config.terminal_position_abs=p;if(impl_->configured && impl_->mode==ExecutionMode::RhReplanning)impl_->rh.setTerminalTarget(p);}
 PlannerCoreStepResult Controller::trySolve(const PlannerCoreInput& in){
     std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);if(!impl_->configured)return {};
     std::lock_guard<std::mutex> solve(impl_->solver);
+    if(impl_->synchronous_mode){PlannerCoreStepResult out;out.rejection_reason="use_solveSynchronous";return out;}
     auto out=impl_->mode==ExecutionMode::DirectMpc?impl_->direct.trySolve(in):impl_->rh.trySolve(in);
     if(out.solve_accepted)++impl_->accepted;
     return out;
 }
 PlannerCoreStepResult Controller::solveOpenLoop(const PlannerCoreInput& in){std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);std::lock_guard<std::mutex> solve(impl_->solver);if(impl_->mode==ExecutionMode::DirectMpc){PlannerCoreStepResult out;out.rejection_reason="direct_mpc_requires_feedback";return out;}return impl_->rh.solveOpenLoop(in);}
-PlannerCoreStepResult Controller::sample(const PlannerCoreInput& in){std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);if(!impl_->configured)return {};return impl_->mode==ExecutionMode::DirectMpc?impl_->direct.sample(in.now,in.current_state,in.target_snapshot):impl_->rh.sampleReplay(in.now,in.target_snapshot);}
+PlannerCoreStepResult Controller::sample(const PlannerCoreInput& in){std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);if(!impl_->configured)return {};if(impl_->synchronous_mode){std::lock_guard<std::mutex> solve(impl_->solver);return impl_->synchronous.sample(in);}return impl_->mode==ExecutionMode::DirectMpc?impl_->direct.sample(in.now,in.current_state,in.target_snapshot):impl_->rh.sampleReplay(in.now,in.target_snapshot);}
 ExecutionMode Controller::executionMode() const {std::shared_lock<std::shared_mutex> guard(impl_->lifecycle);return impl_->mode;}
 double Controller::commandPeriod() const {return comando_parameters::HorizonParameters::command_dt;}
 double Controller::solvePollPeriod() const {return .001;}
@@ -50,15 +67,19 @@ using namespace std;
 
 OcpSolver::OcpSolver(const Config& config) : config_(config) {
     try {
-        solver_params_ = OCPRegistry::getSolverParams(config_.ocp_type);
+        solver_params_ = descriptor().getSolverParams();
     } catch (const std::runtime_error& e) {
         std::cerr << "ERROR: " << e.what() << "\n";
         throw;
     }
 }
 
+const OCPDescriptor& OcpSolver::descriptor() const {
+    return config_.descriptor?*config_.descriptor:OCPRegistry::getDescriptor(config_.ocp_type);
+}
+
 double OcpSolver::getOcpDt() const {
-    return OCPRegistry::getDT(config_.ocp_type);
+    return descriptor().dt;
 }
 
 OcpSolver::WarmStartSnapshot OcpSolver::snapshotWarmStart() const {
@@ -90,7 +111,7 @@ std::vector<Eigen::VectorXd> OcpSolver::makeUwarm(int n_shift) const {
     if (N == 1) return prev_U_;
 
     const int NEX = std::max(0, std::min(n_shift, N - 1));
-    const auto desc = OCPRegistry::getDescriptor(config_.ocp_type);
+    const auto desc = descriptor();
     if (NEX == 0) {
         std::vector<Eigen::VectorXd> uw = prev_U_;
         for (auto& u : uw) {
@@ -158,8 +179,8 @@ std::vector<Eigen::MatrixXd> OcpSolver::makeKshifted(int n_shift) const {
 
 void OcpSolver::setupProblem(const OCPCreateArgs& args) {
     try {
-        if (!config_.reuse_solver) solver_.reset();
-        problem_ = OCPRegistry::create(config_.ocp_type, args);
+        solver_.reset();
+        problem_ = descriptor().create(args);
     } catch (const std::runtime_error& e) {
         std::cerr << "ERROR: " << e.what() << "\n";
         throw;
@@ -185,7 +206,7 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
         std::vector<Eigen::MatrixXd> warm_k = prev_K_;
 
         if (!prev_U_.empty()) {
-            auto desc = OCPRegistry::getDescriptor(config_.ocp_type);
+            auto desc = descriptor();
             const int warm_shift = next_warm_start_unshifted_ ? 0 :
                 (next_warm_start_shift_ >= 0 ? next_warm_start_shift_ : config_.n_shift);
             if (desc.warm_start == OCPDescriptor::WarmStart::Feedback) {
@@ -221,11 +242,9 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
 
         setupProblem(args);
 
-        if (config_.reuse_solver && solver_ && !warm_u.empty()) solver_->updateProblem(*problem_, comando_parameters::defaults.mpc.warm_iterations);
-        else {
-            solver_ = make_shared<ALIPDDP<double>>(*problem_);
-            solver_->init(solver_params_);
-        }
+        // Each measured-root request starts fresh IP/AL numerical state.
+        solver_ = make_shared<ALIPDDP<double>>(*problem_);
+        solver_->init(solver_params_);
         solver_->solve();
 
         auto X_result = solver_->getResX();
@@ -250,7 +269,7 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
         last_solve_ms_ = result.solve_time_ms;
 
         if (X_result.size() > 1) {
-            auto desc = OCPRegistry::getDescriptor(config_.ocp_type);
+            auto desc = descriptor();
             int state_dim = desc.state_dim;
             if (X_result[1].size() >= state_dim) {
                 result.next_state = X_result[1].head(state_dim);

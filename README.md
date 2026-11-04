@@ -17,6 +17,22 @@ Current documentation for the active `mpc` branch, updated 2026-10-14. The MAVRO
 | `support/rviz/`, `support/test/` | Retained viewer settings and six opt-in regressions. |
 | `logs/` | Bags, CSVs, applied profiles, source/environment manifests, results, plots and GIFs. |
 
+## Frozen-time measured-state NODE baseline
+
+The native solver comes from `../ALIPDDP-main`. The same compiled planner core
+runs pointmass and the `stc_landing_noaug_node` quad variant through
+`Controller::configureSynchronous()` and `solveSynchronous()`. Simulation time
+freezes during each solve; the caller executes four whole optimized intervals
+before supplying the next measured root. Nodal constraints, dynamics and mission
+progress determine acceptance. Dense between-node violations remain diagnostics.
+The quad variant retains the original noaug dynamics, costs and ordinary stage
+constraints, excludes its STC interval row, and adds no terminal constraints.
+
+```bash
+cmake -S . -B build -DCOMANDO_ROS_VERSION=0 -DCOMANDO_BUILD_TESTS=ON
+cmake --build build --target test_measured_root_rh -j1
+```
+
 ## OCPs and execution
 
 | OCP | Coordinates | Execution and constraints |
@@ -27,7 +43,7 @@ Current documentation for the active `mpc` branch, updated 2026-10-14. The MAVRO
 | `landing_rh` | Target-relative | RH with ordinary constraints active throughout the horizon and terminal node. |
 | `landing_mpc` | Target-relative | Direct MPC with ordinary constraints on every future state and the terminal node; the fixed measured initial state is recorded separately. |
 
-RH sends planned position, velocity, yaw and acceleration feedforward to PX4's tracking controller. Direct MPC starts each DDP solve from measured state and sends only its first optimized thrust/body-rate input on MAVROS `setpoint_raw/attitude`; PX4's rate controller remains active. The publication loop repeats that first input until the next measured-state solve completes. It never advances through the remaining controls of a solution. The command path contains no separate LQR/QP correction or post-solve slew shaping. The fixed-grid prediction horizon has 40 intervals of 0.1 seconds. Node zero is fixed measured data: input bounds remain there, while pointwise state constraints apply to predicted nodes 1 through N. CTCS also constrains the first predicted interval. This permits a recovery solve after a measured limit excursion without changing the measured initial state or relaxing future bounds. Warm MPC updates retain the solver barrier/penalty continuation and use the previous state/control trajectory as an FDDP seed with a measured initial state. `MPC_MAX_ITER` controls the cold solve; `MPC_WARM_ITER` controls warm updates (default 8). Solve runtime and publication rate are distinct: 100 Hz publication does not establish a 100 Hz MPC update rate. Stale state or command expiry pauses into hold. Touchdown hands the landing action to PX4.
+RH sends planned position, velocity, yaw and acceleration feedforward to PX4's tracking controller. Direct MPC starts each DDP solve from measured state and sends only its first optimized thrust/body-rate input on MAVROS `setpoint_raw/attitude`; PX4's rate controller remains active. The publication loop repeats that first input until the next measured-state solve completes. It never advances through the remaining controls of a solution. The command path contains no separate LQR/QP correction or post-solve slew shaping. The fixed-grid prediction horizon has 40 intervals of 0.1 seconds. Node zero is fixed measured data: input bounds remain there, while pointwise state constraints apply to predicted nodes 1 through N. CTCS also constrains the first predicted interval. This permits a recovery solve after a measured limit excursion without changing the measured initial state or relaxing future bounds. Each request constructs and initializes a fresh native solver from its configured parameters. Only the previous state/control trajectory supplies an initial guess; barrier, penalty, slack, multiplier and iteration state are not carried between requests. The legacy `reuse_solver` flag does not enable numerical continuation. `MPC_MAX_ITER` controls the configured solve allowance. Solve runtime and publication rate are distinct: 100 Hz publication does not establish a 100 Hz MPC update rate. Stale state or command expiry pauses into hold. Touchdown hands the landing action to PX4.
 
 Both CTCS OCPs use `StcStageConstraint` in density form with analytic trigger/consequence derivatives. Noaug preserves its 14-state layout, original eight implications and scaled interval budget. The migration parity checks compared the shared row with the independent density/integral, including free-time derivatives, settle/capture/disabled-STC modes and nonzero trigger floors.
 

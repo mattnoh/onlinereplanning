@@ -93,7 +93,9 @@ public:
 
         // Warm-start shift count (PlannerNode sets this from replay settings).
         int n_shift = 1;
+        // Legacy flag: numerical state is always initialized for each request.
         bool reuse_solver = false;
+        std::shared_ptr<const OCPDescriptor> descriptor;
 
         Config() {
             terminal_state = Eigen::VectorXd::Zero(13);
@@ -147,6 +149,7 @@ public:
     void setNextWarmStartShift(int shift) { next_warm_start_shift_ = std::max(0, shift); }
 
 private:
+    const OCPDescriptor& descriptor() const;
     void setupProblem(const OCPCreateArgs& args);
 
     std::vector<Eigen::VectorXd> makeUwarm(int n_shift) const;

@@ -46,6 +46,21 @@ failed conditioning experiments are retained and identified in the authoritative
 `.Codex/comando-constraint-satisfaction-control.md` record. Their lack of obstacle
 penetration was not a useful tracking success.
 
+The current native build uses this checkout and its sibling `ALIPDDP-main`:
+
+```bash
+bash support/test/uzun2024_ctcs_mpc/build_ddp.sh
+python3 support/test/uzun2024_ctcs_mpc/ddp.py --constraint-mode stage --output-dir /tmp/pointmass-native-node
+```
+
+`COMANDO_BUILD_DIR` and `COMANDO_SOLVER_DIR` select the build and solver source
+directories for both commands. The default executable is now
+`build/alipddp/uzun2024_ctcs_mpc` within this checkout. The historical ROS binary
+is untouched and requires an explicit `--binary` argument. The restored native
+binary initializes numerical state for every request, including `--serve`;
+`--reuse-solver` now reuses only that process. The results above describe the
+archived versions, not a newly verified run on the restored solver.
+
 ## Paper formulation and explicit assumptions
 
 Local source: Uzun et al., IFAC PapersOnLine 58-18 (2024), pp.421-429,

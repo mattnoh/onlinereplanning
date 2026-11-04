@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
-# Build one target sequentially through the planner workspace, with normal linkage.
+# Build the native example against this planner's selected solver checkout.
 set -euo pipefail
-workspace=${MAVROS_WORKSPACE:-/home/lab/mavros_ws}
-if [[ -z ${ROS_DISTRO:-} && -f /opt/ros/noetic/setup.bash ]]; then
-    set +u
-    source /opt/ros/noetic/setup.bash
-    set -u
-fi
-cd "$workspace"
-catkin build comando_planner --no-deps -j1 -p1 \
-    --cmake-args -DBUILD_UZUN_PAPER_MPC=ON -DCMAKE_EXE_LINKER_FLAGS:STRING= \
-    --make-args uzun2024_ctcs_mpc
+planner_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
+build_root=${COMANDO_BUILD_DIR:-"$planner_root/build"}
+solver_root=${COMANDO_SOLVER_DIR:-"$planner_root/../ALIPDDP-main"}
+cmake -S "$planner_root" -B "$build_root" \
+    -DCMAKE_BUILD_TYPE=Release -DCOMANDO_SOLVER_DIR="$solver_root" \
+    -DBUILD_UZUN_PAPER_MPC=ON
+cmake --build "$build_root" --target uzun2024_ctcs_mpc -j1
