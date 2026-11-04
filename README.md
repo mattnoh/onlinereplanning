@@ -83,6 +83,20 @@ feasibility failure, not rejection solely for `Outer Max/Min`. The passing
 near-center result does not establish robustness for this farther start or the
 100IC/MC1/MC2 campaigns. No solver or constraint changes were made for these tests.
 
+The `--staging-initial` case starts from the existing settled staging-hover
+state `(2.0, 1.5, Z_STAGE+0.05)` with zero velocity/rates and identity attitude.
+With the unchanged N40/120-iteration profile, staging starts active and switches
+off once: at 3.291 s for the matched plant, or 3.260 s for the 1 ms plant. Both
+land after 25 replans (13.344 s / 13.321 s), with zero native violations.
+**This is not a strict CTCS pass:** independent predicted interval ratios reach
+1.000358 / 1.000214. Executed interval ratios remain below one, but the finite
+budget permits staging-height shortfalls of 9.4 / 9.6 cm while the trigger is
+active. The test returns 2 and records the failure; it requires the executed
+on-to-off transition for this scenario. Run with the same command above, adding
+`--staging-initial`. Chronological events, summaries and raw run archive are in
+`logs/frozen_node_baseline_20261104/ctcs_staging`. Trial nominal-tail and hover-guess
+changes were removed; no production loop, solver or constraint edits are retained.
+
 ## OCPs and execution
 
 | OCP | Coordinates | Execution and constraints |

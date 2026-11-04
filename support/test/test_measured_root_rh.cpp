@@ -110,18 +110,20 @@ int main(int argc,char** argv){try{
         diagnoseSavedRequest(std::string(argv[2])=="quad",argv[3]);return 0;
     }
     if(argc==2&&std::string(argv[1])=="--root-consistency"){measuredGuessContract();return 0;}
-    if(argc<5||argc>8)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial] [--native-initial-guess]");
-    bool ctcs=false,native_guess=false,reference_initial=false;
+    if(argc<5||argc>8)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess]");
+    bool ctcs=false,native_guess=false,reference_initial=false,staging_initial=false;
     for(int i=5;i<argc;++i){
         const std::string option=argv[i];
         if(option=="--ctcs")ctcs=true;
         else if(option=="--reference-initial")reference_initial=true;
         else if(option=="--native-initial-guess")native_guess=true;
+        else if(option=="--staging-initial")staging_initial=true;
         else throw std::invalid_argument("unknown option "+option);
     }
     const bool quad=std::string(argv[1])=="quad",fine=std::string(argv[2])=="fine";
     requireRh(quad||std::string(argv[1])=="pointmass","unknown model");
     requireRh(!reference_initial||quad,"reference initial condition is quad-only");
+    requireRh(!staging_initial||(quad&&!reference_initial),"staging initial condition is quad-only and excludes reference initial");
     requireRh(fine||std::string(argv[2])=="matched","unknown plant");
     const int bound=std::stoi(argv[3]),K=4;
     const std::filesystem::path out(argv[4]);
@@ -131,11 +133,18 @@ int main(int argc,char** argv){try{
     const auto params=descriptor->getSolverParams();
     std::shared_ptr<OptimalControlProblem<double>> captured_problem;
     OCPCreateArgs captured_args;
+    std::vector<Vec> prepared_x,prepared_u;
     const auto create=descriptor->create;
     descriptor->create=[&](const OCPCreateArgs& args){
         captured_args=args;
         if(native_guess){captured_args.prev_X.clear();captured_args.prev_U.clear();captured_args.prev_K.clear();}
-        captured_problem=create(captured_args);return captured_problem;
+        captured_problem=create(captured_args);
+        prepared_x.clear();prepared_u.clear();
+        for(int k=0;k<=captured_problem->getHorizon();++k){
+            prepared_x.push_back(captured_problem->getInitialState(k));
+            if(k<captured_problem->getHorizon())prepared_u.push_back(captured_problem->getInitialControl(k));
+        }
+        return captured_problem;
     };
     // Exact nonzero measured-root SH control already recorded by test_controller.
     const Eigen::Vector3d acceleration=quad?Eigen::Vector3d(.04306807449,.07358261346,0):Eigen::Vector3d::Zero();
@@ -148,6 +157,8 @@ int main(int argc,char** argv){try{
     Eigen::VectorXd plant=Eigen::VectorXd::Zero(quad?13:4);
     if(quad){
         if(reference_initial)plant<<2.4,2.,2.,0.,-2.,0.,1.,0.,0.,0.,0.,0.,0.;
+        // Existing noaug activation test's settled staging-hover start.
+        else if(staging_initial)plant<<2.,1.5,StcLandingNoAugOCP::Z_STAGE+.05,0.,0.,0.,1.,0.,0.,0.,0.,0.,0.;
         else plant<<-.07320069131,-.04604300079,1.832031775,.07864153001,-.004976944706,.008655228599,
         .999980267207,-.004416340294,.003462269278,-.00282379661,.01105888095,.001028963132,-.002000458539;
         plant.segment<4>(6).normalize();}else plant<<-10,0,0,0;
@@ -158,10 +169,15 @@ int main(int argc,char** argv){try{
     Problem audit_problem;
     double native_budget_ratio=0.,planned_budget_ratio=0.,executed_budget_ratio=0.,initial_budget_ratio=0.,density_parity_error=0.,dense_state_defect=0.;
     int ctcs_rows_seen=0;
-    std::map<std::string,double> trigger_time,triggered_consequence;
-    std::ofstream budgets;
+    std::map<std::string,double> trigger_time,inactive_time,triggered_consequence;
+    std::map<std::string,bool> initial_trigger,last_trigger;
+    std::map<std::string,int> activations,deactivations;
+    std::ofstream budgets,trigger_events;
     if(ctcs){budgets.open(out/"ctcs_intervals.csv");budgets<<std::setprecision(17)
-        <<"cycle,phase,stage,duration,physical_budget,native_budget,native_integral_ratio,independent_integral_ratio\n";}
+        <<"cycle,phase,stage,duration,physical_budget,native_budget,native_integral_ratio,independent_integral_ratio\n";
+        trigger_events.open(out/"trigger_events.csv");trigger_events<<std::setprecision(17)
+            <<"cycle,t,implication,active,consequence,lateral_radius,relative_altitude\n";
+    }
     const auto rowAt=[&](int k){
         std::shared_ptr<StcStageConstraint<double>> result;
         for(const auto& row:captured_problem->getStageConstraints(k,ConstraintType::NO))
@@ -169,6 +185,23 @@ int main(int argc,char** argv){try{
                 requireRh(!result,"more than one CTCS interval row");result=std::move(stc);
             }
         return result;
+    };
+    const auto observeTriggers=[&](const Vec& x,const Vec& u,int cycle,double epoch,double duration){
+        const auto row=rowAt(0);if(!row)return;
+        for(int j=0;j<row->numImplications();++j){
+            const auto& im=row->implication(j);const bool active=row->triggered(j,x);
+            const bool first=initial_trigger.count(im.name)==0;
+            if(first)initial_trigger[im.name]=active;
+            if(first||last_trigger[im.name]!=active){
+                if(!first){if(active)++activations[im.name];else ++deactivations[im.name];}
+                trigger_events<<cycle<<','<<epoch<<','<<im.name<<','<<active<<','<<im.consequence(x,u)<<','<<x.head<2>().norm()<<','<<(quad?x(2):0.)<<'\n';
+            }
+            last_trigger[im.name]=active;
+            if(active){
+                trigger_time[im.name]+=duration;
+                triggered_consequence[im.name]=std::max(triggered_consequence[im.name],std::max(0.,im.consequence(x,u)));
+            }else inactive_time[im.name]+=duration;
+        }
     };
     const auto densityRatio=[&](const Vec& x,const Vec& u){
         if(quad)return StcLandingNoAugOCP::evalCtcsIntegrand<double>(x,u)/StcLandingNoAugOCP::CTCS_STEP_EPS;
@@ -207,9 +240,10 @@ int main(int argc,char** argv){try{
         requireRh((plant-measured).norm()==0.,"plant advanced during frozen solve");
         std::ofstream request(out/("request-"+std::to_string(cycle)+".txt"));request<<std::setprecision(17);
         request<<"epoch "<<time<<"\nroot "<<captured_args.current_state.transpose()<<"\ntarget_acceleration "<<acceleration.transpose()<<'\n';
-        std::vector<Eigen::VectorXd> prepared_x,prepared_u;
-        if(captured_problem){for(int k=0;k<=model.horizon;++k)prepared_x.push_back(captured_problem->getInitialState(k));
-            for(int k=0;k<model.horizon;++k)prepared_u.push_back(captured_problem->getInitialControl(k));}
+        if(captured_problem){
+            for(int k=0;k<=model.horizon;++k)requireRh((prepared_x[k]-captured_problem->getInitialState(k)).norm()==0.,"solve mutated the constructed state initial guess");
+            for(int k=0;k<model.horizon;++k)requireRh((prepared_u[k]-captured_problem->getInitialControl(k)).norm()==0.,"solve mutated the constructed control initial guess");
+        }
         saveVectors(request,"prepared_X",prepared_x);saveVectors(request,"prepared_U",prepared_u);
         saveVectors(request,"returned_X",result.solve_result.state_trajectory);saveVectors(request,"returned_U",result.solve_result.control_trajectory);
         if(ctcs&&captured_problem)for(int k=0;k<model.horizon;++k)if(const auto row=rowAt(k)){
@@ -217,6 +251,7 @@ int main(int argc,char** argv){try{
             initial_budget_ratio=std::max(initial_budget_ratio,ratio);
             budgets<<cycle<<",initial_guess,"<<k<<','<<(model.stage_duration?model.stage_duration(prepared_x[k],prepared_u[k]):model.dt)<<','<<physical_budget<<','<<row->getEpsilon()<<','<<ratio<<",\n";
         }
+        if(ctcs&&captured_problem&&cycle==0)observeTriggers(captured_args.current_state,prepared_u.front(),cycle,time,0.);
         if(!result.solve_accepted&&captured_problem){
             request<<"rejected_native "<<result.solve_result.primal_constraint_violation<<" tolerance "<<params.tolerance<<'\n';
             const auto& rejected_x=result.solve_result.state_trajectory;
@@ -256,11 +291,15 @@ int main(int argc,char** argv){try{
                 for(int j=0;j<row->numImplications();++j)requireRh(row->implication(j).weight>=0.,"negative CTCS density weight");
                 ++ctcs_rows_seen;
             }
+            observeTriggers(relative,us.front(),cycle,time,0.);
+            if(quad&&(reference_initial||staging_initial)&&cycle==0)
+                requireRh(StcLandingNoAugOCP::stageTriggerMode()=="radius"&&initial_trigger["staging"],"reference case must start with radius-based staging active");
         }
         if(quad)requireRh(xs.front()(13)==0.,"quad per-solve time state was not reset");
         requireRh(result.path.states.size()==xs.size(),"public interface omitted full state trajectory");
-        OCPCreateArgs args;args.current_state=relative;args.target_accel=acceleration;args.t_abs=time;
-        auto problem=create(args);
+        // Audit and anchor against the exact constructed request, including
+        // its initial guess, rather than rebuilding a different cold guess.
+        const auto problem=captured_problem;
         const auto audit=auditPrimal(*problem,xs,us,params);
         native_error=std::max(native_error,audit.constraints);
         requireRh(audit.feasible(params.tolerance),"returned trajectory violates native constraints/dynamics");
@@ -316,13 +355,7 @@ int main(int argc,char** argv){try{
                     const auto c=planner_core::prepareOcpState(*descriptor,next,targetAt(time+prefix+(q+1)*h));
                     integral+=h*(densityRatio(a,us[k])+4.*densityRatio(b,us[k])+densityRatio(c,us[k]))/6.;
                     executed_error=std::max(executed_error,physical(b,us[k]));
-                    if(row)for(int j=0;j<row->numImplications();++j){
-                        const auto& im=row->implication(j);
-                        if(row->triggered(j,b)){
-                            trigger_time[im.name]+=h;
-                            triggered_consequence[im.name]=std::max(triggered_consequence[im.name],std::max(0.,im.consequence(b,us[k])));
-                        }
-                    }
+                    observeTriggers(b,us[k],cycle,time+prefix+(q+.5)*h,h);
                 }
                 plant=next;
                 executed_error=std::max(executed_error,physical(planner_core::prepareOcpState(*descriptor,plant,targetAt(time+prefix+(q+1)*h)),us[k]));
@@ -334,6 +367,7 @@ int main(int argc,char** argv){try{
             prediction_error=std::max(prediction_error,(plant.head(descriptor->state_dim)-predicted_world.head(descriptor->state_dim)).lpNorm<Eigen::Infinity>());
             if(!fine)requireRh(prediction_error<=params.tolerance,"model-matched independent plant disagrees at node");
             if(ctcs){
+                observeTriggers(planner_core::prepareOcpState(*descriptor,plant,targetAt(time+prefix+durations[k])),us[k],cycle,time+prefix+durations[k],0.);
                 executed_budget_ratio=std::max(executed_budget_ratio,integral);
                 budgets<<cycle<<",executed,"<<k<<','<<durations[k]<<','<<physical_budget<<','<<(row?row->getEpsilon():0.)<<','<<(row?row->intervalIntegral(xs[k],us[k])/row->getEpsilon():0.)<<','<<integral<<'\n';budgets.flush();
             }
@@ -355,9 +389,10 @@ int main(int argc,char** argv){try{
     const bool native_pass=accepted>0&&(quad?reached:accepted==bound)&&progress&&root_error<=1e-12&&native_error<=params.tolerance;
     // NODE acceptance covers shooting nodes. Dense checks remain diagnostics.
     const bool node_pass=native_pass;
-    const bool ctcs_pass=ctcs&&native_pass&&ctcs_rows_seen>0&&native_budget_ratio<=1.+1e-6&&planned_budget_ratio<=1.+1e-6&&executed_budget_ratio<=1.+1e-6&&executed_error<=params.tolerance;
-    std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"model\":"<<jstr(quad?"quad":"pointmass")<<",\"plant_execution\":"<<jstr(fine?"refined_1ms":"matched_discrete")<<",\"reference_initial\":"<<reference_initial<<",\"initial_ctcs_ratio\":"<<initial_budget_ratio<<",\"accepted\":"<<accepted<<",\"reached\":"<<reached<<",\"simulation_time\":"<<time
-        <<",\"ctcs\":"<<ctcs<<",\"ctcs_loop_pass\":"<<ctcs_pass<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
+    const bool staging_transition_pass=ctcs&&quad&&initial_trigger["staging"]&&deactivations["staging"]>0&&!last_trigger["staging"]&&trigger_time["staging"]>0.&&inactive_time["staging"]>0.;
+    const bool ctcs_pass=ctcs&&native_pass&&ctcs_rows_seen>0&&native_budget_ratio<=1.+1e-6&&planned_budget_ratio<=1.+1e-6&&executed_budget_ratio<=1.+1e-6&&executed_error<=params.tolerance&&(!(reference_initial||staging_initial)||staging_transition_pass);
+    std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"model\":"<<jstr(quad?"quad":"pointmass")<<",\"plant_execution\":"<<jstr(fine?"refined_1ms":"matched_discrete")<<",\"reference_initial\":"<<reference_initial<<",\"staging_initial\":"<<staging_initial<<",\"initial_ctcs_ratio\":"<<initial_budget_ratio<<",\"accepted\":"<<accepted<<",\"reached\":"<<reached<<",\"simulation_time\":"<<time
+        <<",\"ctcs\":"<<ctcs<<",\"ctcs_loop_pass\":"<<ctcs_pass<<",\"staging_transition_pass\":"<<staging_transition_pass<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
         <<",\"physical_interval_budget\":"<<physical_budget<<",\"density_parity_error\":"<<density_parity_error<<",\"planned_dense_state_defect\":"<<dense_state_defect
         <<",\"native_solve_pass\":"<<native_pass<<",\"node_loop_pass\":"<<node_pass<<",\"planned_continuous_pass\":"<<(predicted_dense_error<=1e-6)<<",\"planned_dense_excess\":"<<predicted_dense_error
         <<",\"executed_continuous_pass\":"<<(executed_error<=1e-6)<<",\"executed_physical_excess\":"<<executed_error<<",\"native_violation\":"<<native_error<<",\"root_error\":"<<root_error<<",\"anchor_difference\":"<<anchor_difference
@@ -367,6 +402,10 @@ int main(int argc,char** argv){try{
         for(const auto& [name,value]:trigger_time){if(comma)triggers<<',';comma=true;triggers<<jstr(name)<<':'<<value;}
         triggers<<"},\"max_positive_consequence_while_triggered\":{";comma=false;
         for(const auto& [name,value]:triggered_consequence){if(comma)triggers<<',';comma=true;triggers<<jstr(name)<<':'<<value;}
+        const auto field=[&](const char* name,const auto& values){triggers<<"},\""<<name<<"\":{";comma=false;
+            for(const auto& [key,value]:values){if(comma)triggers<<',';comma=true;triggers<<jstr(key)<<':'<<value;}};
+        field("inactive_seconds",inactive_time);field("initial_active",initial_trigger);field("final_active",last_trigger);
+        field("activations",activations);field("deactivations",deactivations);
         triggers<<"}}\n";
     }
     return (ctcs?ctcs_pass:node_pass)?0:2;

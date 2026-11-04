@@ -113,9 +113,9 @@
     "include/planner_core/controller.hpp": "707b969a4962160976e79a6d6314a7cf16e6712d008048d8606f0d0c44a1d564",
     "include/ocp/ocp_stc_landing_noaug.hpp": "4df6d4b3811fab642b53aa2c683d5ee971a0f21aabd8572ce9a588e5cd2ec5b5",
     "support/test/pointmass_reference_adapter.hpp": "6d96b7c3d9128da722c3e8ee9cff7c93472e98e414219d5bdae5e6314c660f50",
-    "support/test/test_measured_root_rh.cpp": "3e3003496ebfe29a88cc93a4f8724f2ee6f511392c38f1baa155ff2a469e6528"
+    "support/test/test_measured_root_rh.cpp": "255207d00fc73b47a7c3bd7b11f7a3988fd47bd1f677c4f4b44e50cc2b486db6"
   },
-  "scope_limit": "Both original NODE frozen-time baselines and CTCS shared-controller baselines pass with matched and refined plants. Quad CTCS passing case has zero densities and does not exercise staging. Additional far quad start fails first OCP. Real-time delay handling, hardware and 100IC/MC1/MC2 robustness are unvalidated. Separate legacy quad SH budget-certificate failure remains unclaimed.",
+  "scope_limit": "Original NODE baselines and near-center CTCS shared-controller baselines pass. Representative settled staging-start quad lands with executed staging on-to-off, but strict independent planned CTCS interval budgets fail and finite executed budget permits nonzero STC consequences. Far incoming-velocity quad start still fails first OCP. Quad CTCS RH is not claimed fully fixed. Real-time, hardware and100IC/MC1/MC2 robustness remain unvalidated.",
   "ctcs_shared_controller": {
     "result_directory": "logs/frozen_node_baseline_20261104/ctcs_shared",
     "profile": {
@@ -480,5 +480,487 @@
       "source": "logs/frozen_node_baseline_20261104/ctcs_shared/final-review.json"
     },
     "optimality_scope": "Acceptance certifies recorded primal feasibility and mission progress; reaching an iteration cap or Outer Max/Min is allowed. Some quad CTCS requests hit120 and have optimality error up to1.53e-5 versus1e-6, so not every return is claimed optimal."
+  },
+  "ctcs_staging_validation": {
+    "status": "strict CTCS audit FAIL; executed staging on-to-off and landing PASS",
+    "result_directory": "logs/frozen_node_baseline_20261104/ctcs_staging",
+    "scenario": "Existing settled staging-hover activation IC: position(2,1.5,Z_STAGE+.05), velocity0, identity attitude, angular rate0; moving target acceleration(.04306807449,.07358261346,0)",
+    "profile": {
+      "N": 40,
+      "K": 4,
+      "THH": 0.16,
+      "max_iter": 120,
+      "physical_interval_budget": 0.0016,
+      "Y_scale": 10,
+      "stage_radius": 1.1,
+      "stage_altitude": 1.8,
+      "unchanged_default_initial_guess": true,
+      "fresh_numerical_state_each_request": true
+    },
+    "runs": {
+      "matched": {
+        "returncode": 2,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "staging_initial": 1,
+          "initial_ctcs_ratio": 3.2148529930840963,
+          "accepted": 25,
+          "reached": 1,
+          "simulation_time": 13.344379155895854,
+          "ctcs": 1,
+          "ctcs_loop_pass": 0,
+          "staging_transition_pass": 1,
+          "native_ctcs_ratio": 0.9999998441192808,
+          "planned_ctcs_ratio": 1.0003582279387682,
+          "executed_ctcs_ratio": 0.9908911180427418,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 3.352970501470687e-16,
+          "planned_dense_state_defect": 1.6251047153664766e-06,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 1.7763568394002505e-15
+        },
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+          "quad",
+          "matched",
+          "40",
+          "/tmp/comando-staging-rh-20261104/clean-final/matched",
+          "--ctcs",
+          "--staging-initial"
+        ]
+      },
+      "fine": {
+        "returncode": 2,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "refined_1ms",
+          "reference_initial": 0,
+          "staging_initial": 1,
+          "initial_ctcs_ratio": 1.1426695192613985,
+          "accepted": 25,
+          "reached": 1,
+          "simulation_time": 13.320961728729815,
+          "ctcs": 1,
+          "ctcs_loop_pass": 0,
+          "staging_transition_pass": 1,
+          "native_ctcs_ratio": 0.9999998717186006,
+          "planned_ctcs_ratio": 1.0002138715988043,
+          "executed_ctcs_ratio": 0.9951537358717104,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 3.099380269855218e-16,
+          "planned_dense_state_defect": 1.6251047153664766e-06,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 2.0542532470808894e-06
+        },
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+          "quad",
+          "fine",
+          "40",
+          "/tmp/comando-staging-rh-20261104/clean-final/fine",
+          "--ctcs",
+          "--staging-initial"
+        ]
+      },
+      "checks": {
+        "root": 0,
+        "node": 0,
+        "ctcs-parity": 0
+      }
+    },
+    "staging_transition_events": {
+      "matched": [
+        {
+          "cycle": "0",
+          "t": "0",
+          "implication": "staging",
+          "active": "1",
+          "consequence": "-0.050000000000000044",
+          "lateral_radius": "2.5",
+          "relative_altitude": "1.8500000000000001"
+        },
+        {
+          "cycle": "5",
+          "t": "3.290551923378632",
+          "implication": "staging",
+          "active": "0",
+          "consequence": "0.094268139949864604",
+          "lateral_radius": "1.0998607930970536",
+          "relative_altitude": "1.7057318600501354"
+        }
+      ],
+      "fine": [
+        {
+          "cycle": "0",
+          "t": "0",
+          "implication": "staging",
+          "active": "1",
+          "consequence": "-0.050000000000000044",
+          "lateral_radius": "2.5",
+          "relative_altitude": "1.8500000000000001"
+        },
+        {
+          "cycle": "5",
+          "t": "3.2604998919364991",
+          "implication": "staging",
+          "active": "0",
+          "consequence": "0.096238348087312797",
+          "lateral_radius": "1.0998054844802663",
+          "relative_altitude": "1.7037616519126872"
+        }
+      ]
+    },
+    "trigger_activity": {
+      "matched": {
+        "active_seconds": {
+          "landing_glideslope": 6.094411002909416,
+          "landing_omega": 6.094411002909416,
+          "landing_speed": 6.094411002909416,
+          "landing_tilt": 6.094411002909416,
+          "loose_omega": 13.344379155896817,
+          "loose_tilt": 13.344379155896817,
+          "los": 10.983772575998632,
+          "staging": 3.290051923419219
+        },
+        "max_positive_consequence_while_triggered": {
+          "landing_glideslope": 0.04625701707931493,
+          "landing_omega": 0,
+          "landing_speed": 0,
+          "landing_tilt": 0,
+          "loose_omega": 0,
+          "loose_tilt": 0,
+          "los": 0.42110432982803325,
+          "staging": 0.09400700679646867
+        },
+        "inactive_seconds": {
+          "landing_glideslope": 7.249968152986525,
+          "landing_omega": 7.249968152986525,
+          "landing_speed": 7.249968152986525,
+          "landing_tilt": 7.249968152986525,
+          "los": 2.3606065798971723,
+          "staging": 10.054327232476211
+        },
+        "initial_active": {
+          "landing_glideslope": 0,
+          "landing_omega": 0,
+          "landing_speed": 0,
+          "landing_tilt": 0,
+          "loose_omega": 1,
+          "loose_tilt": 1,
+          "los": 0,
+          "staging": 1
+        },
+        "final_active": {
+          "landing_glideslope": 1,
+          "landing_omega": 1,
+          "landing_speed": 1,
+          "landing_tilt": 1,
+          "loose_omega": 1,
+          "loose_tilt": 1,
+          "los": 1,
+          "staging": 0
+        },
+        "activations": {
+          "landing_glideslope": 1,
+          "landing_omega": 1,
+          "landing_speed": 1,
+          "landing_tilt": 1,
+          "los": 1
+        },
+        "deactivations": {
+          "staging": 1
+        }
+      },
+      "fine": {
+        "active_seconds": {
+          "landing_glideslope": 6.20004331051009,
+          "landing_omega": 6.20004331051009,
+          "landing_speed": 6.20004331051009,
+          "landing_tilt": 6.20004331051009,
+          "loose_omega": 13.320961728730198,
+          "loose_tilt": 13.320961728730198,
+          "los": 11.256961789071251,
+          "staging": 3.2599998919702475
+        },
+        "max_positive_consequence_while_triggered": {
+          "landing_glideslope": 0.04560912531758951,
+          "landing_omega": 0,
+          "landing_speed": 0,
+          "landing_tilt": 0,
+          "loose_omega": 0,
+          "loose_tilt": 0,
+          "los": 0.647945066872935,
+          "staging": 0.09595966348446305
+        },
+        "inactive_seconds": {
+          "landing_glideslope": 7.120918418219355,
+          "landing_omega": 7.120918418219355,
+          "landing_speed": 7.120918418219355,
+          "landing_tilt": 7.120918418219355,
+          "los": 2.063999939659041,
+          "staging": 10.060961836759727
+        },
+        "initial_active": {
+          "landing_glideslope": 0,
+          "landing_omega": 0,
+          "landing_speed": 0,
+          "landing_tilt": 0,
+          "loose_omega": 1,
+          "loose_tilt": 1,
+          "los": 0,
+          "staging": 1
+        },
+        "final_active": {
+          "landing_glideslope": 1,
+          "landing_omega": 1,
+          "landing_speed": 1,
+          "landing_tilt": 1,
+          "loose_omega": 1,
+          "loose_tilt": 1,
+          "los": 1,
+          "staging": 0
+        },
+        "activations": {
+          "landing_glideslope": 1,
+          "landing_omega": 1,
+          "landing_speed": 1,
+          "landing_tilt": 1,
+          "los": 1
+        },
+        "deactivations": {
+          "staging": 1
+        }
+      }
+    },
+    "interpretation": [
+      "Both plants complete25replans, start staging active, deactivate once on entering1.10m radius, and land. Neither has native constraint or root error.",
+      "Independent predicted CTCS integral exceeds unchanged budget by0.0358228% matched /0.0213872% fine. Native one-RK4 interval integral reports within budget; strict audit is intentionally NOT passed.",
+      "Executed interval integrals are within budget, but finite nonzero integral allowance permits staging-height shortfall about9.4cm matched /9.6cm fine while trigger active. No claim of pointwise-zero STC consequence."
+    ],
+    "retained_changes": "Test-only staging-start scenario, chronological trigger events and on-to-off requirement; save initial guess by value before solving, assert native solver did not mutate it, and compare standalone solve against exact constructed request.",
+    "removed_candidates": [
+      "Nominal-hover appended tail: improves second solve in one80-stage probe, fails later; production change reverted.",
+      "Uniform-hover cold initial-guess flag: tested with retained campaign and baseline profiles, did not establish full strict CTCS success; test override removed."
+    ],
+    "production_solver_constraints_changed": false,
+    "baseline_regressions": {
+      "pointmass-matched-ctcs": {
+        "returncode": 0,
+        "summary": {
+          "model": "pointmass",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "staging_initial": 0,
+          "hover_initial_guess": 0,
+          "initial_ctcs_ratio": 178915.81321091304,
+          "accepted": 15,
+          "reached": 0,
+          "simulation_time": 30,
+          "ctcs": 1,
+          "ctcs_loop_pass": 1,
+          "staging_transition_pass": 0,
+          "native_ctcs_ratio": 0.9999537128396285,
+          "planned_ctcs_ratio": 0.9999620111462996,
+          "executed_ctcs_ratio": 0.9999601982716865,
+          "physical_interval_budget": 1e-06,
+          "density_parity_error": 2.463738349762247e-14,
+          "planned_dense_state_defect": 1.1961682894190417e-09,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 0,
+          "planned_dense_excess": 0.64866687114416,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 0
+        }
+      },
+      "quad-matched-ctcs": {
+        "returncode": 0,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "staging_initial": 0,
+          "hover_initial_guess": 0,
+          "initial_ctcs_ratio": 0,
+          "accepted": 20,
+          "reached": 1,
+          "simulation_time": 9.929042605170928,
+          "ctcs": 1,
+          "ctcs_loop_pass": 1,
+          "staging_transition_pass": 0,
+          "native_ctcs_ratio": 0,
+          "planned_ctcs_ratio": 0,
+          "executed_ctcs_ratio": 0,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 0,
+          "planned_dense_state_defect": 2.2850253689199462e-08,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 8.881784197001252e-16
+        }
+      },
+      "pointmass-fine-ctcs": {
+        "returncode": 0,
+        "summary": {
+          "model": "pointmass",
+          "plant_execution": "refined_1ms",
+          "reference_initial": 0,
+          "staging_initial": 0,
+          "hover_initial_guess": 0,
+          "initial_ctcs_ratio": 178915.81321094692,
+          "accepted": 15,
+          "reached": 0,
+          "simulation_time": 30,
+          "ctcs": 1,
+          "ctcs_loop_pass": 1,
+          "staging_transition_pass": 0,
+          "native_ctcs_ratio": 0.9999537128399776,
+          "planned_ctcs_ratio": 0.9999620111454309,
+          "executed_ctcs_ratio": 0.9999601981953202,
+          "physical_interval_budget": 1e-06,
+          "density_parity_error": 2.4649915222597325e-14,
+          "planned_dense_state_defect": 1.196168698813782e-09,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 0,
+          "planned_dense_excess": 0.6486668711441579,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 1.6722720985740125e-09
+        }
+      },
+      "quad-fine-ctcs": {
+        "returncode": 0,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "refined_1ms",
+          "reference_initial": 0,
+          "staging_initial": 0,
+          "hover_initial_guess": 0,
+          "initial_ctcs_ratio": 0,
+          "accepted": 20,
+          "reached": 1,
+          "simulation_time": 9.929042649106242,
+          "ctcs": 1,
+          "ctcs_loop_pass": 1,
+          "staging_transition_pass": 0,
+          "native_ctcs_ratio": 0,
+          "planned_ctcs_ratio": 0,
+          "executed_ctcs_ratio": 0,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 0,
+          "planned_dense_state_defect": 2.2850253689199462e-08,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 4.634525835323089e-08
+        }
+      },
+      "pointmass-matched-node": {
+        "returncode": 0,
+        "summary": {
+          "model": "pointmass",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "staging_initial": 0,
+          "hover_initial_guess": 0,
+          "initial_ctcs_ratio": 0,
+          "accepted": 15,
+          "reached": 0,
+          "simulation_time": 30,
+          "ctcs": 0,
+          "ctcs_loop_pass": 0,
+          "staging_transition_pass": 0,
+          "native_ctcs_ratio": 0,
+          "planned_ctcs_ratio": 0,
+          "executed_ctcs_ratio": 0,
+          "physical_interval_budget": 1e-06,
+          "density_parity_error": 0,
+          "planned_dense_state_defect": 0,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 0,
+          "planned_dense_excess": 0.6452738160406788,
+          "executed_continuous_pass": 0,
+          "executed_physical_excess": 0.6070316358461354,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 0
+        }
+      },
+      "quad-matched-node": {
+        "returncode": 0,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "staging_initial": 0,
+          "hover_initial_guess": 0,
+          "initial_ctcs_ratio": 0,
+          "accepted": 20,
+          "reached": 1,
+          "simulation_time": 9.929042624733237,
+          "ctcs": 0,
+          "ctcs_loop_pass": 0,
+          "staging_transition_pass": 0,
+          "native_ctcs_ratio": 0,
+          "planned_ctcs_ratio": 0,
+          "executed_ctcs_ratio": 0,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 0,
+          "planned_dense_state_defect": 0,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 8.881784197001252e-16
+        }
+      }
+    },
+    "archive": "raw_runs.tar.gz contains all profiles, rejected probes, reviews, per-request input/results and final source snapshot; diagnostic initial-guess probe patch is archived, not active."
   }
 }
