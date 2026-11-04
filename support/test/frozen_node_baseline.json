@@ -113,10 +113,10 @@
     "include/planner_core/controller.hpp": "707b969a4962160976e79a6d6314a7cf16e6712d008048d8606f0d0c44a1d564",
     "include/ocp/ocp_stc_landing_noaug.hpp": "3e2458dd7d06a019d278927dc4ec728a0980ed5d3f9c4464c73e776dc0a9e957",
     "support/test/pointmass_reference_adapter.hpp": "6d96b7c3d9128da722c3e8ee9cff7c93472e98e414219d5bdae5e6314c660f50",
-    "support/test/test_measured_root_rh.cpp": "c0d8f2e7a672299b50c48ffe32aae28d5ccd6ce29cce58162b35e9289e422e67",
+    "support/test/test_measured_root_rh.cpp": "b9d56e71b2cd8adc8a54828b83f23f9d5620f8427cf715b5eaa24e0a3aa9544b",
     "support/test/test_stc_landing_noaug_ctcs.cpp": "5b88923e62a2b120bb8b498f4f75fd11acd4c52c9fddfc403422bff2d1ecda7f",
     "config/frozen_quad_ctcs.env": "8392201bb866e243295b2d8b2a0b33c2d5c2c428232789bcf0bee1564a2469a7",
-    "README.md": "eb5a2221d8227173c41c7786d12c13769841fc404cfdf03a8b6703411d1b3852"
+    "README.md": "c2bc080d199107da77b913830495ecf816c5e829ba3454d6a97dead4efd5f38d"
   },
   "scope_limit": "Quad interval-only CTCS frozen RH remains unresolved. Extra nodal guards and guided initializer removed. All additional failed solver-configuration, curvature, cone and quadrature trial code removed. Native solver unchanged. Current pointmass adapter substeps100 is not evidence about the user-reported 2-3-substep thesis configuration.",
   "ctcs_shared_controller": {
@@ -1783,6 +1783,364 @@
       "root_error": 0,
       "anchor_difference": 0,
       "prediction_error": 1.3322676295501878e-15
+    }
+  },
+  "fixed_duration_ctcs_experiment": {
+    "status": "Fixed duration alone did not resolve quad CTCS RH; full single-solve native feasibility verified, physical CTCS audit fails in this untightened comparison profile.",
+    "planner_parent_commit": "eebac9f",
+    "solver_algorithm_base": "4d68a48b94610699510b23ae8b8f86eb830c6254",
+    "solver_unchanged": true,
+    "result_directory": "logs/frozen_node_baseline_20261104/fixed_dt_comparison_20261105",
+    "fixed_grid": {
+      "dt_seconds": 0.1,
+      "intervals": 80,
+      "state_samples": 81,
+      "horizon_seconds": 8.0,
+      "replay_intervals": 4,
+      "replay_seconds": 0.4,
+      "fixed_control_decisions_per_stage": 4,
+      "independent_duration_decisions": 0
+    },
+    "comparison_profile": {
+      "overrides": {
+        "SZMUK_RH_N": "80",
+        "SZMUK_N": "80",
+        "SZMUK_TH0": "0.1",
+        "SZMUK_THL": "0.05",
+        "SZMUK_THH": "0.12",
+        "SZMUK_MAX_ITER": "1200"
+      },
+      "CTCS_epsilon": 0.0016,
+      "CTCS_Y_scale": 10,
+      "physical_tightening_exports": false,
+      "native_tolerance": 1e-06,
+      "initial_control": "uniform hover, zero moments; identical physical controls and initial rollout for paired first requests",
+      "initial_relative_state": [
+        2,
+        1.5,
+        1.85,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "target_acceleration": [
+        0.04306807449,
+        0.07358261346,
+        0
+      ],
+      "scope": "Native-default noaug comparison, not a reproduction of the thesis 100IC configuration"
+    },
+    "initial_pair_max_control_difference": 0.0,
+    "initial_pair_max_rollout_difference": 0.0,
+    "results": {
+      "free-single": {
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+          "quad",
+          "matched",
+          "1",
+          "/tmp/comando-fixed-dt-20261105/free-single",
+          "--ctcs",
+          "--staging-initial",
+          "--audit-loop",
+          "--single-horizon"
+        ],
+        "returncode": 2,
+        "wall_seconds": 0.644693095004186,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "staging_initial": 1,
+          "initial_ctcs_ratio": 0,
+          "accepted": 1,
+          "reached": 1,
+          "simulation_time": 9.599999648591941,
+          "ctcs": 1,
+          "ctcs_loop_pass": 0,
+          "staging_transition_pass": 1,
+          "native_ctcs_ratio": 0.9999996750835225,
+          "planned_ctcs_ratio": 0.9999397583366386,
+          "executed_ctcs_ratio": 0.9999397538724729,
+          "loop_pass": 1,
+          "physical_stc_pass": 0,
+          "physical_stc_excess": 0.610727275813775,
+          "standalone_comparisons": 1,
+          "shift_error": 0,
+          "initial_guess_dynamics_error": 0,
+          "planned_physical_stc_excess": 0.6109583933493712,
+          "remaining_horizon": 0,
+          "stationary_target": 0,
+          "fixed_dt": 0,
+          "single_horizon": 1,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 3.175980185642809e-16,
+          "planned_dense_state_defect": 1.7166229451109905e-07,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 4.218847493575595e-15
+        },
+        "physical_violations": {
+          "staging_height_shortfall_m": 0.08184613982213573,
+          "LOS_excess_m": 0.610727275813775,
+          "glideslope_excess_m": 0.05686364997054738,
+          "landing_tilt_excess_deg": 0.16286889622228684
+        },
+        "full_solve_validation": {
+          "requests": 1,
+          "intervals": 80,
+          "control_decisions_per_interval": 5,
+          "terminal_relative_position_norm_m": 0.008980839453972543,
+          "terminal_relative_speed_mps": 0.0015522604570563667,
+          "optimality_error": 9.434614961229723e-07,
+          "termination": "Optimal Solution",
+          "no_replanning": true
+        }
+      },
+      "fixed-single": {
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+          "quad",
+          "matched",
+          "1",
+          "/tmp/comando-fixed-dt-20261105/fixed-single-shared-row",
+          "--ctcs",
+          "--staging-initial",
+          "--audit-loop",
+          "--fixed-dt",
+          "0.1",
+          "--single-horizon"
+        ],
+        "returncode": 2,
+        "wall_seconds": 0.4072317120153457,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "staging_initial": 1,
+          "initial_ctcs_ratio": 0,
+          "accepted": 1,
+          "reached": 1,
+          "simulation_time": 7.999999999999988,
+          "ctcs": 1,
+          "ctcs_loop_pass": 0,
+          "staging_transition_pass": 1,
+          "native_ctcs_ratio": 0.9999997894408886,
+          "planned_ctcs_ratio": 0.9999180961694519,
+          "executed_ctcs_ratio": 0.999918099517643,
+          "loop_pass": 1,
+          "physical_stc_pass": 0,
+          "physical_stc_excess": 0.6725788447579866,
+          "standalone_comparisons": 1,
+          "shift_error": 0,
+          "initial_guess_dynamics_error": 0,
+          "planned_physical_stc_excess": 0.6728954666077476,
+          "remaining_horizon": 0,
+          "stationary_target": 0,
+          "fixed_dt": 0.1,
+          "single_horizon": 1,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 3.6430290490840974e-16,
+          "planned_dense_state_defect": 1.1833535812355578e-07,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 8.43769498715119e-15
+        },
+        "row_lifetime": "same shared interval row across stages as original",
+        "full_solve_validation": {
+          "requests": 1,
+          "intervals": 80,
+          "control_decisions_per_interval": 4,
+          "terminal_relative_position_norm_m": 0.01316932740722799,
+          "terminal_relative_speed_mps": 0.0018903224507245747,
+          "optimality_error": 7.400414801725375e-07,
+          "termination": "Optimal Solution",
+          "no_replanning": true
+        },
+        "physical_violations": {
+          "staging_height_shortfall_m": 0.09435421872414285,
+          "LOS_excess_m": 0.6725788447579866,
+          "glideslope_excess_m": 0.05860039498191963,
+          "landing_tilt_excess_deg": 0.48553962638314707
+        }
+      },
+      "free-rh": {
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+          "quad",
+          "matched",
+          "40",
+          "/tmp/comando-fixed-dt-20261105/free-rh",
+          "--ctcs",
+          "--staging-initial",
+          "--audit-loop"
+        ],
+        "returncode": 1,
+        "wall_seconds": 5.1527233560045715,
+        "summary": null,
+        "accepted_before_failure": 6,
+        "failure": {
+          "native_violation": 0.000264991,
+          "dynamics_defect": 0.0,
+          "termination": "Outer Max/Min",
+          "constraint_tolerance": 1e-06
+        }
+      },
+      "fixed-rh": {
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+          "quad",
+          "matched",
+          "40",
+          "/tmp/comando-fixed-dt-20261105/fixed-rh-shared-row",
+          "--ctcs",
+          "--staging-initial",
+          "--audit-loop",
+          "--fixed-dt",
+          "0.1"
+        ],
+        "returncode": 1,
+        "wall_seconds": 4.109420284017688,
+        "summary": null,
+        "row_lifetime": "same shared interval row across stages as original",
+        "accepted_before_failure": 1,
+        "failure": {
+          "native_violation": 9.34636e-06,
+          "dynamics_defect": 0.0,
+          "termination": "Outer Max/Min",
+          "constraint_tolerance": 1e-06
+        }
+      },
+      "fixed-rh-cold": {
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+          "quad",
+          "matched",
+          "40",
+          "/tmp/comando-fixed-dt-20261105/fixed-rh-cold-shared-row",
+          "--ctcs",
+          "--staging-initial",
+          "--audit-loop",
+          "--fixed-dt",
+          "0.1",
+          "--native-initial-guess"
+        ],
+        "returncode": 1,
+        "wall_seconds": 0.8660366070107557,
+        "summary": null,
+        "row_lifetime": "same shared interval row across stages as original",
+        "accepted_before_failure": 1,
+        "failure": {
+          "native_violation": 11898100.0,
+          "dynamics_defect": 0.0,
+          "termination": "Outer Max/Min",
+          "constraint_tolerance": 1e-06
+        }
+      }
+    },
+    "checks": {
+      "adapter-contract": {
+        "returncode": 0
+      },
+      "ordinary-node-contract": {
+        "returncode": 0
+      },
+      "fixed-saved-replay": {
+        "returncode": 0
+      },
+      "fixed-node-control": {
+        "returncode": 0,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "staging_initial": 0,
+          "initial_ctcs_ratio": 0,
+          "accepted": 40,
+          "reached": 1,
+          "simulation_time": 16.000000000000007,
+          "ctcs": 0,
+          "ctcs_loop_pass": 0,
+          "staging_transition_pass": 0,
+          "native_ctcs_ratio": 0,
+          "planned_ctcs_ratio": 0,
+          "executed_ctcs_ratio": 0,
+          "loop_pass": 1,
+          "physical_stc_pass": 1,
+          "physical_stc_excess": 0,
+          "standalone_comparisons": 40,
+          "shift_error": 1.3322676295501878e-14,
+          "initial_guess_dynamics_error": 0,
+          "planned_physical_stc_excess": 0,
+          "remaining_horizon": 0,
+          "stationary_target": 0,
+          "fixed_dt": 0.1,
+          "single_horizon": 0,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 0,
+          "planned_dense_state_defect": 0,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 3.552713678800501e-15
+        },
+        "wall_seconds": 5.51047909699264,
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+          "quad",
+          "matched",
+          "40",
+          "/tmp/comando-fixed-dt-20261105/fixed-node-control",
+          "--audit-loop",
+          "--fixed-dt",
+          "0.1"
+        ]
+      }
+    },
+    "fixed_node_control_scope": "Near-center initial state; not the staging-start CTCS case",
+    "failed_fixed_request_initial_state": "Standalone replay reports zero native primal violation and zero shooting defect before solving; final residual 9.3463573385174474e-6. All retained control shifts and perfect-model roots agree within2.23e-16.",
+    "residual_handling": {
+      "paper": "Uzun et al. 2024, Successive Convexification for Nonlinear Model Predictive Control with Continuous-Time Constraint Satisfaction",
+      "local_pdf": "/home/lab/Zotero/storage/NR6G7V8D/Uzun et al. - 2024 - Successive Convexification for Nonlinear Model Predictive Control with Continuous-Time Constraint Sa.pdf",
+      "equations": "Sec.2.4 Eq.11-12: per-interval y increment <=epsilon and new xc=(physical state,0,0); Sec.3/Algorithm1: update current state, shift initial guess, integrate appended tail; Sec.4: physical constraint tightening.",
+      "augmented_guess_rebase": "Subtracting the old executed-prefix auxiliary value from retained y/l is the algebraic rebase implied by the reset, not an explicitly prescribed IPM initialization rule.",
+      "noaug_rule": "Recompute (integral(H dt)-epsilon)/Y_scale for each new rollout interval. No carried old row residual, no forced zero, no deduction of consumed intervals from future per-interval epsilon. State13 is a clock, not a CTCS accumulator.",
+      "algorithm_limit": "Paper uses SCP and does not prescribe ALIPDDP slack/multiplier/barrier continuation.",
+      "pdf_sha256": "9ae489bc98bd310e2118e17099a85b269cd82a1c477768b5d9a5a296a2cd01bf"
+    },
+    "source_sha256": {
+      "support/test/test_measured_root_rh.cpp": "b9d56e71b2cd8adc8a54828b83f23f9d5620f8427cf715b5eaa24e0a3aa9544b",
+      "include/ocp/ocp_stc_landing_noaug.hpp": "3e2458dd7d06a019d278927dc4ec728a0980ed5d3f9c4464c73e776dc0a9e957",
+      "include/parameters.hpp": "fd29460d49e38eff7f81bb712aaab6839964ec142b25ffe7716a51af51515e5b",
+      "src/synchronous_mpc_internal.hpp": "c8cfb4ddf40a382d74300cca5ed43d7c935c57b15ee81b89592679783fa0860d",
+      "README.md": "c2bc080d199107da77b913830495ecf816c5e829ba3454d6a97dead4efd5f38d"
     }
   }
 }

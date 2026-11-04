@@ -68,6 +68,42 @@ The diagnostic now handles an exhausted finite horizon without attempting to
 compare an empty rejected trajectory with a stale previous request.
 Real-time operation and 100IC/MC1/MC2 validation remain outside these results.
 
+Fixed-duration comparison (2026-11-05): the test adapter removes duration from
+optimization entirely (four input decisions per stage), rather than pinning two
+inequality bounds to the same value. It reuses the original model, costs and
+CTCS implications, including their shared-row lifetime. `--fixed-dt 0.1` gives
+80 intervals / 8 s, with four intervals / 0.4 s executed per RH update.
+`--single-horizon` with a one-solve bound executes the entire returned horizon
+without replanning. Adapter value/Jacobian/curvature parity is exact at the
+sampled points; independent CTCS input finite differences pass.
+
+The matched comparison uses the native-default noaug cost/constraint profile,
+N80, initial dt=0.1, free bounds [0.05,0.12], max_iter1200, CTCS epsilon0.0016,
+Y-scale10 and **no tightening exports**. It is not a reproduction of the thesis
+100IC configuration or a claim that its earlier single-horizon results regressed.
+Both single solves land and satisfy native interval constraints; both fail the
+original physical STC audit. Fixed-time RH accepts the first prefix, then its
+second solve returns native CTCS residual 9.34636e-6 against tolerance1e-6.
+Free-time RH fails on its seventh solve (2.64991e-4). Rebuilding a uniform hover
+input guess each fixed-time request also fails on the second solve. Fixed time
+alone therefore did not resolve this tested case. The fixed NODE near-center
+control completes40requests with zero native violations. Raw requests, profiles,
+full-horizon trajectories, independent replays and checks are in
+`logs/frozen_node_baseline_20261104/fixed_dt_comparison_20261105`.
+
+Paper check: Uzun et al. (2024), Sec.2.4, Eq.(11)-(12), impose a separate
+violation-integrator increment bound on each interval, and reset the auxiliary
+initial values through xc=(physical state,0,0) at each new OCP. Rebasing a shifted
+auxiliary trajectory by subtracting its old prefix value follows from those
+equations; it is not an IPM continuation prescription. Our interval-only host has
+no violation-integrator state: a fresh row evaluates the new rollout's integral
+minus the same epsilon (both divided by Y-scale). It carries neither previous
+row residuals nor consumed budgets into future intervals. Sec.4 additionally
+uses physical constraint tightening; it does not enforce physical satisfaction
+by zeroing residuals. The paper's SCP initialization does not specify how to
+initialize ALIPDDP slacks or multipliers. This review is based on the local PDF
+`/home/lab/Zotero/storage/NR6G7V8D/Uzun et al. - 2024 - Successive Convexification for Nonlinear Model Predictive Control with Continuous-Time Constraint Sa.pdf`.
+
 ## OCPs and execution
 
 | OCP | Coordinates | Execution and constraints |

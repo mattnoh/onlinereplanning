@@ -22,6 +22,142 @@ static std::map<std::string,std::string> requestEnvironment(){
 }
 
 static void requireRh(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+// Fixed-duration test adapter: eliminate theta from the decision vector.
+// Reuse the same quad equations, costs, ordinary rows and CTCS implications.
+namespace FixedQuadTime {
+namespace Q=StcLandingNoAugOCP;
+static Vec lift(const Vec& u,double dt){
+    requireRh(u.size()==Q::NU,"fixed-duration quad must have four controls");
+    Vec result(Q::NU_SS);result.head(Q::NU)=u;result(Q::IDX_THETA)=dt;return result;
+}
+class Dynamics : public DiscreteDynamicsBase<double> {
+    std::shared_ptr<Q::Quad6DOFVarTimeRelativePred<double>> original_;
+    double duration_;
+public:
+    Dynamics(std::shared_ptr<Q::Quad6DOFVarTimeRelativePred<double>> original,double dt)
+        :original_(std::move(original)),duration_(dt){this->dim_x=Q::NX_SS;this->dim_u=Q::NU;this->dt=dt;}
+    Vec f(const Vec& x,const Vec& u) const override{return original_->f(x,lift(u,duration_));}
+    Mat fx(const Vec& x,const Vec& u) const override{return original_->fx(x,lift(u,duration_));}
+    Mat fu(const Vec& x,const Vec& u) const override{return original_->fu(x,lift(u,duration_)).leftCols(Q::NU);}
+    Vec intervalRates(const Vec& x,const Vec& u) const{return original_->intervalRates(x,lift(u,duration_));}
+    Mat intervalRatesX(const Vec& x,const Vec& u) const{return original_->intervalRatesX(x,lift(u,duration_));}
+    Mat intervalRatesU(const Vec& x,const Vec& u) const{return original_->intervalRatesU(x,lift(u,duration_)).leftCols(Q::NU);}
+};
+class Cost : public StageCostBase<double> {
+    std::shared_ptr<StageCostBase<double>> original_;double dt_;
+public:
+    Cost(std::shared_ptr<StageCostBase<double>> original,double dt):original_(std::move(original)),dt_(dt){}
+    double q(const Vec& x,const Vec& u) const override{return original_->q(x,lift(u,dt_));}
+    Vec qx(const Vec& x,const Vec& u) const override{return original_->qx(x,lift(u,dt_));}
+    Vec qu(const Vec& x,const Vec& u) const override{return original_->qu(x,lift(u,dt_)).head(Q::NU);}
+    Mat qxx(const Vec& x,const Vec& u) const override{return original_->qxx(x,lift(u,dt_));}
+    Mat quu(const Vec& x,const Vec& u) const override{return original_->quu(x,lift(u,dt_)).topLeftCorner(Q::NU,Q::NU);}
+    Mat qxu(const Vec& x,const Vec& u) const override{return original_->qxu(x,lift(u,dt_)).leftCols(Q::NU);}
+};
+class Row : public StageConstraintBase<double> {
+    std::shared_ptr<StageConstraintBase<double>> original_;double dt_;
+public:
+    Row(std::shared_ptr<StageConstraintBase<double>> original,double dt):original_(std::move(original)),dt_(dt){
+        this->constraint_type=original_->getConstraintType();this->dim_c=original_->getDimC();}
+    Vec c(const Vec& x,const Vec& u) const override{return original_->c(x,lift(u,dt_));}
+    Mat cx(const Vec& x,const Vec& u) const override{return original_->cx(x,lift(u,dt_));}
+    Mat cu(const Vec& x,const Vec& u) const override{return original_->cu(x,lift(u,dt_)).leftCols(Q::NU);}
+    Mat lagrangianHessian(const Vec& x,const Vec& u,const Vec& multiplier) const override{
+        return original_->lagrangianHessian(x,lift(u,dt_),multiplier).topLeftCorner(x.size()+Q::NU,x.size()+Q::NU);}
+};
+static std::shared_ptr<OCPDescriptor> descriptor(const OCPDescriptor& original,double dt){
+    requireRh(std::isfinite(dt)&&dt>0.&&dt>=Q::THL&&dt<=Q::THH,"fixed dt must lie in the original duration range");
+    auto result=std::make_shared<OCPDescriptor>(original);result->name=original.name+"_fixed_dt";
+    result->dt=dt;result->variable_dt=false;
+    result->sanitize_warm_control=[dt](Vec& u){auto v=lift(u,dt);Q::clampWarmControl(v);u=v.head(Q::NU);};
+    result->make_model=[make=original.make_model,dt](const Eigen::Vector3d& acceleration){
+        auto model=make(acceleration);const auto flow=model.flow;
+        model.nu=Q::NU;model.dt=dt;model.hover=model.hover.head(Q::NU).eval();
+        model.stage_duration=[dt](const Vec&,const Vec&){return dt;};
+        model.bounded=[dt](Vec u){auto v=lift(u,dt);Q::clampWarmControl(v);return Vec(v.head(Q::NU));};
+        model.flow=[flow,dt](const Vec& x,const Vec& u,double h,bool jac){
+            auto value=flow(x,lift(u,dt),h,jac);if(jac)value.b=value.b.leftCols(Q::NU).eval();return value;};
+        return model;
+    };
+    result->create=[create=original.create,dt](const OCPCreateArgs& input){
+        auto args=input;for(auto& u:args.prev_U)u=lift(u,dt);
+        for(auto& k:args.prev_K){Mat full=Mat::Zero(Q::NU_SS,k.cols());full.topRows(Q::NU)=k;k=std::move(full);}
+        const auto source=create(args);const int n=source->getHorizon();
+        auto native=std::dynamic_pointer_cast<Q::Quad6DOFVarTimeRelativePred<double>>(source->getDynamics(0));
+        requireRh(bool(native),"fixed dt requires the original noaug quad model");
+        auto dynamics=std::make_shared<Dynamics>(native,dt);auto problem=std::make_shared<OptimalControlProblem<double>>(n);
+        Vec state=source->getInitialState(0);problem->setInitialState(0,state);
+        std::shared_ptr<StcStageConstraint<double>> fixed_interval;
+        for(int k=0;k<n;++k){
+            problem->setStageDynamics(k,dynamics);problem->setStageCost(k,std::make_shared<Cost>(source->getStageCost(k),dt));
+            const Vec control=source->getInitialControl(k).head(Q::NU);problem->setInitialControl(k,control);
+            state=dynamics->f(state,control);problem->setInitialState(k+1,state);
+            for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
+                for(const auto& row:source->getStageConstraints(k,type)){
+                    if(std::dynamic_pointer_cast<Q::ThetaBounds<double>>(row))continue;
+                    if(auto interval=std::dynamic_pointer_cast<StcStageConstraint<double>>(row)){
+                        // Preserve the original shared-row/cache lifetime across stages.
+                        if(!fixed_interval)fixed_interval=Q::makeCtcsConstraint<double>(dynamics,interval->getEpsilon(),-1,dt);
+                        problem->addStageConstraint(k,fixed_interval);
+                    }else problem->addStageConstraint(k,std::make_shared<Row>(row,dt));
+                }
+        }
+        problem->setTerminalCost(source->getTerminalCost());
+        for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
+            for(const auto& row:source->getTerminalConstraints(type))problem->addTerminalConstraint(row);
+        return problem;
+    };
+    return result;
+}
+}
+
+static void fixedDurationContract(double dt){
+    namespace Q=StcLandingNoAugOCP;
+    const auto free=Q::descriptor();const auto fixed=FixedQuadTime::descriptor(free,dt);
+    OCPCreateArgs args;args.current_state=Vec::Zero(Q::NX_SS);args.current_state(2)=1.85;args.current_state(6)=1.;
+    args.target_accel=Eigen::Vector3d(.04306807449,.07358261346,0.);
+    const auto a=free.create(args),b=fixed->create(args);double error=0.,fd_error=0.;
+    const auto compare=[&](const Mat& x,const Mat& y){
+        requireRh(x.rows()==y.rows()&&x.cols()==y.cols(),"fixed duration adapter shape mismatch");
+        error=std::max(error,(x-y).cwiseAbs().maxCoeff()/(1.+x.cwiseAbs().maxCoeff()));
+    };
+    for(int sample=0;sample<3;++sample){
+        Vec x=args.current_state,u(4);u<<Q::HOVER_THRUST,.001,-.002,.0005;
+        if(sample){x(0)=.1;x(1)=.05;x(2)=sample==1?.4:1.79;x(3)=.2;x(7)=.02;x(8)=-.01;x.segment<4>(6).normalize();x(10)=.03;}
+        const auto full=FixedQuadTime::lift(u,dt);
+        requireRh(b->getDynamics(0)->getDimU()==4,"duration remains a decision variable");
+        compare(a->getDynamics(0)->f(x,full),b->getDynamics(0)->f(x,u));
+        compare(a->getDynamics(0)->fx(x,full),b->getDynamics(0)->fx(x,u));
+        compare(a->getDynamics(0)->fu(x,full).leftCols(4),b->getDynamics(0)->fu(x,u));
+        requireRh(std::abs(a->getStageCost(0)->q(x,full)-b->getStageCost(0)->q(x,u))<1e-12,"fixed duration changed objective");
+        compare(a->getStageCost(0)->qx(x,full),b->getStageCost(0)->qx(x,u));
+        compare(a->getStageCost(0)->qu(x,full).head(4),b->getStageCost(0)->qu(x,u));
+        compare(a->getStageCost(0)->qxx(x,full),b->getStageCost(0)->qxx(x,u));
+        compare(a->getStageCost(0)->quu(x,full).topLeftCorner(4,4),b->getStageCost(0)->quu(x,u));
+        compare(a->getStageCost(0)->qxu(x,full).leftCols(4),b->getStageCost(0)->qxu(x,u));
+        for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ}){
+            size_t index=0;
+            for(const auto& old:a->getStageConstraints(0,type)){
+                if(std::dynamic_pointer_cast<Q::ThetaBounds<double>>(old))continue;
+                const auto row=b->getStageConstraints(0,type).at(index++);
+                compare(old->c(x,full),row->c(x,u));compare(old->cx(x,full),row->cx(x,u));
+                compare(old->cu(x,full).leftCols(4),row->cu(x,u));
+                compare(old->lagrangianHessian(x,full,Vec::Ones(old->getDimC())).topLeftCorner(x.size()+4,x.size()+4),row->lagrangianHessian(x,u,Vec::Ones(row->getDimC())));
+                if(auto interval=std::dynamic_pointer_cast<StcStageConstraint<double>>(row)){
+                    requireRh(interval->numImplications()==8,"fixed duration dropped CTCS implications");
+                    for(int j=0;j<4;++j){auto plus=u,minus=u;plus(j)+=1e-6;minus(j)-=1e-6;
+                        const double fd=(row->c(x,plus)(0)-row->c(x,minus)(0))/(2e-6);
+                        fd_error=std::max(fd_error,std::abs(fd-row->cu(x,u)(0,j))/(1.+std::abs(fd)));}
+                }
+            }
+            requireRh(index==b->getStageConstraints(0,type).size(),"fixed duration added a constraint");
+            requireRh(a->getTerminalConstraints(type).size()==b->getTerminalConstraints(type).size(),"fixed duration changed terminal constraints");
+        }
+    }
+    requireRh(error<1e-12&&fd_error<2e-5,"fixed duration adapter parity/Jacobian failed");
+    std::cout<<"FIXED_DURATION_CONTRACT dt="<<dt<<" controls=4 independent_duration_decisions=0 parity="<<error<<" CTCS_FD_error="<<fd_error<<'\n';
+}
+
 static void ordinaryNodeContract(){
     namespace Q=StcLandingNoAugOCP;
     OCPCreateArgs args;args.current_state=Vec::Zero(Q::NX_SS);args.current_state(2)=1.85;args.current_state(6)=1.;args.target_accel=Eigen::Vector3d::Zero();
@@ -54,7 +190,7 @@ static void ordinaryNodeContract(){
 static void diagnoseSavedRequest(bool quad,const std::string& path,const std::string& legacy_ocp={}){
     std::ifstream input(path);requireRh(bool(input),"saved request missing");
     OCPCreateArgs args;std::vector<Vec> prepared_x,prepared_u,returned_x,returned_u;
-    std::string line,ocp=legacy_ocp;std::map<std::string,std::string> environment;bool environment_saved=false;
+    std::string line,ocp=legacy_ocp;std::map<std::string,std::string> environment;bool environment_saved=false;double fixed_dt=0.;
     while(std::getline(input,line)){
         std::stringstream row(line);std::string label;row>>label;
         if(label=="ocp")row>>ocp;
@@ -62,6 +198,7 @@ static void diagnoseSavedRequest(bool quad,const std::string& path,const std::st
         if(label=="environment_end")environment_saved=true;
         if(label=="epoch")row>>args.t_abs;
         if(label=="horizon")row>>args.horizon;
+        if(label=="fixed_dt")row>>fixed_dt;
         if(label=="root"){args.current_state.resize(quad?14:4);for(int j=0;j<args.current_state.size();++j)row>>args.current_state(j);}
         if(label=="target_acceleration")for(int j=0;j<3;++j)row>>args.target_accel(j);
         if(label=="prepared_X"||label=="prepared_U"||label=="returned_X"||label=="returned_U"){
@@ -72,10 +209,11 @@ static void diagnoseSavedRequest(bool quad,const std::string& path,const std::st
     }
     requireRh(!ocp.empty(),"legacy request has no OCP metadata; specify the actual descriptor explicitly");
     requireRh(!environment_saved||environment==requestEnvironment(),"saved request environment differs; replay with its recorded SZMUK/MPC/thread settings");
-    requireRh(quad?(ocp=="stc_landing_noaug"||ocp=="stc_landing_noaug_node"):
+    requireRh(quad?(ocp=="stc_landing_noaug"||ocp=="stc_landing_noaug_node"||ocp=="stc_landing_noaug_fixed_dt"||ocp=="stc_landing_noaug_node_fixed_dt"):
         (ocp=="existing_pointmass_ctcs"||ocp=="existing_pointmass_node"),"saved OCP does not match requested model/family");
-    auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(ocp)):
+    auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(fixed_dt>0.?ocp.substr(0,ocp.size()-9):ocp)):
         pointmassReferenceDescriptor(100,false,ocp=="existing_pointmass_node");
+    if(fixed_dt>0.)descriptor=FixedQuadTime::descriptor(*descriptor,fixed_dt);
     auto problem=descriptor->create(args);const int N=problem->getHorizon();
     requireRh(prepared_x.size()==size_t(N+1)&&prepared_u.size()==size_t(N),"saved request shape mismatch");
     for(int k=0;k<=N;++k)problem->setInitialState(k,prepared_x[k]);
@@ -96,7 +234,7 @@ static void diagnoseSavedRequest(bool quad,const std::string& path,const std::st
     };
     requireRh(identical(x,returned_x)&&identical(u,returned_u),"diagnostic replay differs from saved result");
     const auto final=auditPrimal(*problem,x,u,parameters);const auto& p=solver.getParam();
-    std::cout<<"REPLAY_FINAL bit_identical=1 iter="<<solver.getNumIter()<<" cost_records="<<solver.getAllCost().size()
+    std::cout<<std::defaultfloat<<std::setprecision(17)<<"REPLAY_FINAL bit_identical=1 iter="<<solver.getNumIter()<<" cost_records="<<solver.getAllCost().size()
         <<" termination="<<solver.getTerminationReason()<<" mu="<<p.mu<<" muT="<<p.muT<<" rho="<<p.rho
         <<" rhoT="<<p.rhoT<<" error="<<solver.getError()<<" optimality="<<solver.getOptError()
         <<" native="<<final.constraints<<" dynamics="<<final.dynamics<<'\n';
@@ -125,14 +263,15 @@ static void measuredGuessContract(){
     std::cout<<"MEASURED_GUESS_CONTRACT dynamics="<<audit.dynamics<<" native="<<audit.constraints<<'\n';
 }
 int main(int argc,char** argv){try{
+    if(argc==3&&std::string(argv[1])=="--fixed-dt-contract"){fixedDurationContract(std::stod(argv[2]));return 0;}
     if(argc==2&&std::string(argv[1])=="--ordinary-node-contract"){ordinaryNodeContract();return 0;}
     if((argc==4||argc==5)&&std::string(argv[1])=="--diagnose-request"){
         requireRh(std::string(argv[2])=="quad"||std::string(argv[2])=="pointmass","unknown replay model");
         diagnoseSavedRequest(std::string(argv[2])=="quad",argv[3],argc==5?argv[4]:"");return 0;
     }
     if(argc==2&&std::string(argv[1])=="--root-consistency"){measuredGuessContract();return 0;}
-    if(argc<5||argc>11)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess] [--audit-loop] [--stationary-target] [--remaining-horizon]");
-    bool ctcs=false,native_guess=false,reference_initial=false,staging_initial=false,audit_loop=false,stationary_target=false,remaining_horizon=false;
+    if(argc<5||argc>14)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess] [--audit-loop] [--stationary-target] [--remaining-horizon] [--fixed-dt SECONDS] [--single-horizon]");
+    bool ctcs=false,native_guess=false,reference_initial=false,staging_initial=false,audit_loop=false,stationary_target=false,remaining_horizon=false,single_horizon=false;double fixed_dt=0.;
     for(int i=5;i<argc;++i){
         const std::string option=argv[i];
         if(option=="--ctcs")ctcs=true;
@@ -142,6 +281,8 @@ int main(int argc,char** argv){try{
         else if(option=="--audit-loop")audit_loop=true;
         else if(option=="--stationary-target")stationary_target=true;
         else if(option=="--remaining-horizon")remaining_horizon=true;
+        else if(option=="--single-horizon")single_horizon=true;
+        else if(option=="--fixed-dt"){requireRh(i+1<argc,"missing fixed dt");fixed_dt=std::stod(argv[++i]);requireRh(fixed_dt>0.,"invalid fixed dt");}
         else throw std::invalid_argument("unknown option "+option);
     }
     const bool quad=std::string(argv[1])=="quad",fine=std::string(argv[2])=="fine";
@@ -150,11 +291,15 @@ int main(int argc,char** argv){try{
     requireRh(!remaining_horizon||quad,"remaining landing horizon is quad-only");
     requireRh(!staging_initial||(quad&&!reference_initial),"staging initial condition is quad-only and excludes reference initial");
     requireRh(fine||std::string(argv[2])=="matched","unknown plant");
-    const int bound=std::stoi(argv[3]),K=4;
+    requireRh((fixed_dt==0.&&!single_horizon)||quad,"fixed dt / single horizon are quad-only");
+    requireRh(fixed_dt==0.||!remaining_horizon,"fixed-dt comparison uses a fixed node count");
+    const int bound=std::stoi(argv[3]),K=single_horizon?StcLandingNoAugOCP::HORIZON:4;
+    requireRh(!single_horizon||bound==1,"single horizon requires one solve");
     const std::filesystem::path out(argv[4]);
     requireRh(bound>0&&bound<=40&&std::filesystem::create_directories(out),"invalid cycle bound/output");
     auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(ctcs?"stc_landing_noaug":"stc_landing_noaug_node")):
         pointmassReferenceDescriptor(100,false,!ctcs);
+    if(fixed_dt>0.)descriptor=FixedQuadTime::descriptor(*descriptor,fixed_dt);
     const auto params=descriptor->getSolverParams();
     std::shared_ptr<OptimalControlProblem<double>> captured_problem;
     std::shared_ptr<StcStageConstraint<double>> physical_stc;
@@ -166,11 +311,18 @@ int main(int argc,char** argv){try{
         if(native_guess){captured_args.prev_X.clear();captured_args.prev_U.clear();captured_args.prev_K.clear();}
         captured_problem=create(captured_args);
         if(quad&&ctcs){
-            auto dyn=std::dynamic_pointer_cast<StcLandingNoAugOCP::Quad6DOFVarTimeRelativePred<double>>(captured_problem->getDynamics(0));
-            requireRh(bool(dyn),"physical STC audit requires the original quad model");
-            physical_stc=StcLandingNoAugOCP::makeCtcsConstraint<double>(dyn,
-                StcLandingNoAugOCP::CTCS_STEP_EPS/StcLandingNoAugOCP::CTCS_Y_SCALE,
-                StcLandingNoAugOCP::IDX_THETA,0.,1,false);
+            if(fixed_dt>0.){
+                auto dyn=std::dynamic_pointer_cast<FixedQuadTime::Dynamics>(captured_problem->getDynamics(0));
+                requireRh(bool(dyn),"fixed physical audit requires the original quad adapter");
+                physical_stc=StcLandingNoAugOCP::makeCtcsConstraint<double>(dyn,
+                    StcLandingNoAugOCP::CTCS_STEP_EPS/StcLandingNoAugOCP::CTCS_Y_SCALE,-1,fixed_dt,1,false);
+            }else{
+                auto dyn=std::dynamic_pointer_cast<StcLandingNoAugOCP::Quad6DOFVarTimeRelativePred<double>>(captured_problem->getDynamics(0));
+                requireRh(bool(dyn),"physical STC audit requires the original quad model");
+                physical_stc=StcLandingNoAugOCP::makeCtcsConstraint<double>(dyn,
+                    StcLandingNoAugOCP::CTCS_STEP_EPS/StcLandingNoAugOCP::CTCS_Y_SCALE,
+                    StcLandingNoAugOCP::IDX_THETA,0.,1,false);
+            }
         }
         prepared_x.clear();prepared_u.clear();
         for(int k=0;k<=captured_problem->getHorizon();++k){
@@ -283,7 +435,7 @@ int main(int argc,char** argv){try{
         if(captured_problem)model.horizon=captured_problem->getHorizon();
         requireRh((plant-measured).norm()==0.,"plant advanced during frozen solve");
         std::ofstream request(out/("request-"+std::to_string(cycle)+".txt"));request<<std::setprecision(17);
-        request<<"ocp "<<descriptor->name<<"\nhorizon "<<model.horizon<<"\nepoch "<<time<<"\nroot "<<captured_args.current_state.transpose()<<"\ntarget_acceleration "<<acceleration.transpose()<<'\n';
+        request<<"ocp "<<descriptor->name<<"\nhorizon "<<model.horizon<<"\nfixed_dt "<<fixed_dt<<"\nepoch "<<time<<"\nroot "<<captured_args.current_state.transpose()<<"\ntarget_acceleration "<<acceleration.transpose()<<'\n';
         for(const auto& [name,value]:requestEnvironment())request<<"environment "<<std::quoted(name)<<' '<<std::quoted(value)<<'\n';
         request<<"environment_end\n";
         if(captured_problem){
@@ -322,6 +474,7 @@ int main(int argc,char** argv){try{
         }
         requireRh(result.solve_accepted,("measured-root solve rejected: "+result.rejection_reason).c_str());
         const auto& xs=result.solve_result.state_trajectory;const auto& us=result.solve_result.control_trajectory;
+        if(fixed_dt>0.)for(const auto& u:us)requireRh(u.size()==4,"fixed duration remained a decision variable");
         const auto relative=planner_core::prepareOcpState(*descriptor,measured,input.target_snapshot);
         root_error=std::max(root_error,(xs.front().head(descriptor->state_dim)-relative.head(descriptor->state_dim)).lpNorm<Eigen::Infinity>());
         requireRh(root_error<=1e-12&&result.x0_source=="measured","root changed/projected/predicted");
@@ -337,6 +490,7 @@ int main(int argc,char** argv){try{
                     double old_time=previous_prefix;
                     for(size_t k=0;k+K<previous_x.size();++k){
                         auto expected=previous_x[k+K];const double new_time=old_time-previous_prefix;
+                        if(fixed_dt>0.)expected(13)=new_time;
                         expected.head<3>()+=previous_target.position+previous_target.velocity*old_time+.5*previous_target.acceleration*old_time*old_time-
                             (input.target_snapshot.position+input.target_snapshot.velocity*new_time+.5*input.target_snapshot.acceleration*new_time*new_time);
                         expected.segment<3>(3)+=previous_target.velocity+previous_target.acceleration*old_time-
@@ -477,6 +631,7 @@ int main(int argc,char** argv){try{
         <<",\"ctcs\":"<<ctcs<<",\"ctcs_loop_pass\":"<<ctcs_pass<<",\"staging_transition_pass\":"<<staging_transition_pass<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
         <<",\"loop_pass\":"<<loop_pass<<",\"physical_stc_pass\":"<<physical_stc_pass<<",\"physical_stc_excess\":"<<physical_stc_excess<<",\"standalone_comparisons\":"<<standalone_comparisons<<",\"shift_error\":"<<shift_error<<",\"initial_guess_dynamics_error\":"<<guess_dynamics_error
         <<",\"planned_physical_stc_excess\":"<<planned_stc_excess<<",\"remaining_horizon\":"<<remaining_horizon<<",\"stationary_target\":"<<stationary_target
+        <<",\"fixed_dt\":"<<fixed_dt<<",\"single_horizon\":"<<single_horizon
         <<",\"physical_interval_budget\":"<<physical_budget<<",\"density_parity_error\":"<<density_parity_error<<",\"planned_dense_state_defect\":"<<dense_state_defect
         <<",\"native_solve_pass\":"<<native_pass<<",\"node_loop_pass\":"<<node_pass<<",\"planned_continuous_pass\":"<<(predicted_dense_error<=1e-6)<<",\"planned_dense_excess\":"<<predicted_dense_error
         <<",\"executed_continuous_pass\":"<<(executed_error<=1e-6)<<",\"executed_physical_excess\":"<<executed_error<<",\"native_violation\":"<<native_error<<",\"root_error\":"<<root_error<<",\"anchor_difference\":"<<anchor_difference
