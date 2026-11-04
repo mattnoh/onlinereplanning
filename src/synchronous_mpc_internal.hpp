@@ -27,15 +27,15 @@ class SynchronousMpcController {
         // Execute whole stages: retain their duration controls without fractional
         // resampling. Extend the fixed node count with the last input/duration.
         OcpSolver::WarmStartSnapshot guess;
-        const int N=model_.horizon;
+        const int N=config_.preserve_remaining_trajectory?model_.horizon-intervals_:model_.horizon;
         auto tail=accepted_->state_trajectory.back();
         double tail_time=node_times_.back();
-        const double last_duration=node_times_.back()-node_times_[N-1];
+        const double last_duration=node_times_.back()-node_times_[model_.horizon-1];
         for(int k=0;k<=N;++k){
             const int source=intervals_+k;
             Eigen::VectorXd state;
             double old_time;
-            if(source<=N){state=accepted_->state_trajectory[source];old_time=node_times_[source];}
+            if(source<=model_.horizon){state=accepted_->state_trajectory[source];old_time=node_times_[source];}
             else {tail=model_.flow(tail,accepted_->control_trajectory.back(),last_duration,false).x;
                 tail_time+=last_duration;state=tail;old_time=tail_time;}
             const double new_time=old_time-prefix_duration_;
@@ -45,7 +45,7 @@ class SynchronousMpcController {
                 (after.velocity+after.acceleration*new_time);
             // The original OCP factory rebases its per-solve clock using X[0].
             guess.prev_X.push_back(state);
-            if(k<N)guess.prev_U.push_back(accepted_->control_trajectory[std::min(source,N-1)]);
+            if(k<N)guess.prev_U.push_back(accepted_->control_trajectory[std::min(source,model_.horizon-1)]);
         }
         return guess;
     }
@@ -86,7 +86,11 @@ public:
         if(accepted_&&std::abs(input.absolute_time_sec-(origin_+prefix_duration_))>1e-9){
             out.rejection_reason="synchronous_mpc_cycle_time";return out;
         }
-        const auto model=descriptor_->make_model(input.target_snapshot.acceleration);
+        auto model=descriptor_->make_model(input.target_snapshot.acceleration);
+        if(config_.preserve_remaining_trajectory&&accepted_){
+            model.horizon=model_.horizon-intervals_;
+            if(model.horizon<=0){out.rejection_reason="finite_maneuver_completed";return out;}
+        }
         auto root=prepareOcpState(*descriptor_,input.current_state,input.target_snapshot);
         if(model.initial_state)root=model.initial_state(root,applied_);
         if(descriptor_->state_dim==13&&root.size()>13)root(13)=0.;
@@ -99,6 +103,7 @@ public:
                 shiftMpcSeed(*accepted_,model_,target_,input.target_snapshot,prefix_duration_);
             solver_->restoreWarmStart(warm);solver_->setNextWarmStartShift(0);
         }
+        if(config_.preserve_remaining_trajectory)solver_->setNextHorizon(model.horizon);
         const auto raw=solver_->solve(root,input.target_snapshot.acceleration,{},input.absolute_time_sec);
         out.solve_attempted=true;out.solve_num=count_;out.x0_source="measured";
         auto& result=out.solve_result;
@@ -127,6 +132,7 @@ public:
         }
         // Wall solve duration is deliberately not added to simulation time.
         accepted_=raw;model_=model;target_=input.target_snapshot;origin_=input.absolute_time_sec;
+        intervals_=std::min(config_.n_replay>0?config_.n_replay:descriptor_->default_n_replay,model.horizon);
         node_times_=std::move(times);prefix_duration_=node_times_[intervals_];
         out.solve_accepted=true;++count_;
         out.solve_log.solve_num=out.solve_num;out.solve_log.ocp_dt=model.dt;

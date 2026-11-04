@@ -239,6 +239,8 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
         args.target_accel = target_accel;
         args.extra = extra_params;
         args.t_abs = t_abs;
+        args.horizon = next_horizon_;
+        next_horizon_ = 0;
 
         setupProblem(args);
 

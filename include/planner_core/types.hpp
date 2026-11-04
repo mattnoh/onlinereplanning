@@ -241,6 +241,7 @@ struct OCPCreateArgs {
     Eigen::Vector3d target_accel;
     std::any extra;
     double t_abs = 0.0;
+    int horizon = 0; // Zero uses the descriptor's configured horizon.
 };
 
 namespace planner_core { enum class ExecutionMode { RhReplanning, DirectMpc }; }
@@ -382,6 +383,7 @@ struct PlannerCoreConfig {
     std::string solver_type = "alipddp";
     double ocp_dt = 0.05;
     int n_replay = 4;
+    bool preserve_remaining_trajectory = false;
     double max_constraint_error = 1.0;
     bool skip_trajectory_validation = false;
     bool enable_terminal_freeze = true;

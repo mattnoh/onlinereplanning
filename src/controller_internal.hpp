@@ -147,6 +147,7 @@ public:
     void restoreWarmStart(const WarmStartSnapshot& snapshot);
     void keepLatestAsUnexecutedWarmStart();
     void setNextWarmStartShift(int shift) { next_warm_start_shift_ = std::max(0, shift); }
+    void setNextHorizon(int horizon) { next_horizon_ = horizon; }
 
 private:
     const OCPDescriptor& descriptor() const;
@@ -162,6 +163,7 @@ private:
     Param                                          solver_params_;
 
     std::vector<Eigen::VectorXd> prev_X_;
+    int next_horizon_ = 0;
     std::vector<Eigen::VectorXd> prev_U_;
     std::vector<Eigen::MatrixXd> prev_K_;
     Eigen::Vector3d              target_accel_ = Eigen::Vector3d::Zero();

@@ -19,104 +19,73 @@ Current documentation for the active `mpc` branch, updated 2026-11-04. The MAVRO
 
 ## Frozen-time measured-state NODE and CTCS baseline
 
-The default solver is the exact shared algorithm base `4d68a48b` recorded in
-`logs/point_mass/paper_mpc/source_revisions.json`, restored in `../ALIPDDP-main`.
-The verified baseline and its source hashes are recorded in
+The shared solver remains the thesis algorithm base `4d68a48b`, restored in
+`../ALIPDDP-main`. Its numerical implementation is unchanged. The planner uses
+the existing `mpc` branch. Source hashes, exact environments and results are in
 [`support/test/frozen_node_baseline.json`](support/test/frozen_node_baseline.json).
-Both NODE runs pass: pointmass completes 15 replans/30 seconds; quad lands after
-20 replans/9.929 seconds, with zero native nodal violations and measured-root error.
-The original pointmass CTCS fresh-solver run also passes all 15 replans with zero
-executed physical excess and maximum interval integral 9.999600934e-7 < 1e-6.
-Results are in `logs/frozen_node_baseline_20261104`; thesis results are unchanged.
+Thesis results are unchanged.
 
-The native solver comes from `../ALIPDDP-main`. The same compiled planner core
-runs pointmass and the `stc_landing_noaug_node` quad variant through
-`Controller::configureSynchronous()` and `solveSynchronous()`. Simulation time
-freezes during each solve; the caller executes four whole optimized intervals
-before supplying the next measured root. Nodal constraints, dynamics and mission
-progress determine acceptance. Dense between-node violations remain diagnostics.
-The quad variant retains the original noaug dynamics, costs and ordinary stage
-constraints, excludes its STC interval row, and adds no terminal constraints.
+The current frozen-time tests pass for both models and both transcriptions:
+
+| Case | Requests | Result |
+|---|---:|---|
+| Pointmass NODE | 15 / 30 s | Zero native nodal violations. |
+| Quad NODE | 20 / 9.929 s | Lands; zero native nodal violations. |
+| Pointmass CTCS, matched and 1 ms plants | 15 / 30 s each | Zero executed obstacle excess; maximum interval integral below 1e-6. |
+| Quad CTCS, staging initially active, matched and 1 ms plants | 18 / 8.140 s each | Lands; zero reported original physical STC excess on full planned horizons and executed prefixes; staging switches off. |
+| Quad CTCS, incoming velocity, 1 ms plant | 19 / 8.204 s | Lands; original physical STC checks pass; largest native residual 2.50e-9. |
+
+Each solve freezes simulation time. The caller executes **four whole optimized
+intervals**, then supplies the independently propagated plant state as the next
+measured root. Every request constructs and initializes a fresh native solver.
+Only trajectories supply the next initial guess; numerical IPM/AL state is not
+continued. Every request in these runs matches its standalone counterpart
+exactly; retained-input/clock/frame-shift errors are below 1e-14.
+
+Pointmass keeps its original fixed-horizon tracking formulation. Quad landing
+uses the explicit remaining-maneuver option: N80 → N76 → …, without appending
+post-landing controls. The noaug port's terminal quaternion cost and default
+hover guess were restored to the retained single-horizon definitions. The
+[frozen quad profile](config/frozen_quad_ctcs.env) additionally selects a guided
+cold trajectory initial guess, the solver's existing `forward_filter=0`, and
+conditional nodal STC guards **alongside** the CTCS interval row. It therefore
+uses a guarded CTCS transcription, not an interval-only comparison arm. The
+eight original implications remain conditional; no terminal constraints were
+added. Explicit tightening advances triggers by 0.05 m, with physical margins
+listed in the profile. The LOS distance margin tapers to zero at the apex.
+
+Physical validation uses original nominal triggers and limits, with **no
+excluded switching band**, on every predicted horizon and executed prefix at
+at most 1 ms spacing plus midpoints. The quad interval budget remains 1e-5;
+measured integrals are below it. Pointmass retains its original sensing mask;
+predicted obstacles outside that mask are not constrained. NODE acceptance
+checks its native nodal constraints; between-node violations are diagnostics.
 
 ```bash
 cmake -S . -B build -DCOMANDO_ROS_VERSION=0 -DCOMANDO_BUILD_TESTS=ON
 cmake --build build --target test_measured_root_rh -j1
+# Run in a shell without inherited SZMUK_*, STC_* or MPC_* tuning.
+build/test_measured_root_rh pointmass matched 15 /tmp/pointmass-ctcs --ctcs --audit-loop
+source config/frozen_quad_ctcs.env
+build/test_measured_root_rh quad matched 40 /tmp/quad-ctcs --ctcs --staging-initial --audit-loop --remaining-horizon
+# Replace matched with fine for the independently integrated 1 ms plant.
+# Replace --staging-initial with --reference-initial for the incoming-velocity case.
 ```
 
-The same controller also passes CTCS for both models, using both a matched
-discrete plant and a separately integrated 1 ms plant. Pointmass completes 15
-replans/30 seconds; its largest independently integrated interval is
-9.999620112e-7 against the unchanged 1e-6 budget, with zero executed obstacle
-excess. Quad lands after 20 replans/9.929 seconds with zero ordinary-bound
-excess and zero CTCS integrals. Its original eight implications remain present;
-landing and LOS triggers activate. This near-center quad case does not activate
-staging or exercise a binding CTCS constraint.
-Some quad solves reach the 120-iteration allowance; these are feasible returns,
-not a claim that every solve reached the optimality tolerance (largest recorded
-optimality error about 1.53e-5 against 1e-6).
+Current raw requests, trajectories, trigger activity, summaries and reviews are
+under `logs/frozen_node_baseline_20261104/quad_ctcs_fixed`. Earlier rejected
+profiles and their failures remain archived as historical evidence. The first
+quad solve reduces the objective from 10.0434 to 2.01924, but **optimality is not
+established**: returns report `Outer Max/Min`, and the first staging solve's
+optimality residual is about 7.85e17. Primal feasibility and landing are the
+passing criteria here. The separate legacy `test_stc_landing_noaug` real-time
+30-node/30-iteration smoke still fails its cold solve (native residual 0.00313).
+These results do not validate real-time operation or the 100IC/MC1/MC2 campaigns.
 
-These CTCS runs use `stc_landing_noaug` and the original pointmass reference OCP
-through the same synchronous controller. Each request receives the measured
-plant state and fresh numerical solver state. Loop checks cover native rows,
-dynamics, measured roots, execution schedule and mission progress. Overall CTCS
-acceptance additionally checks the executed physical implications, using their
-original triggers. Independent planned and executed integrals are quadrature
-diagnostics, not an additional acceptance budget. They use the original physical
-density and composite Simpson integration at no more than 1 ms per segment.
-Pointmass retains its original sensing mask: obstacles outside
-that mask are not constrained in the predicted horizon. Results and per-trigger
-activity are in `logs/frozen_node_baseline_20261104/ctcs_shared`; profiles and
-summaries are also tracked in the baseline JSON above.
-
-For a fresh output directory, run either plant mode (`matched` or `fine`):
-
-```bash
-env SZMUK_RH_N=40 SZMUK_THH=.16 SZMUK_MAX_ITER=120 \
-  build/test_measured_root_rh pointmass matched 15 /tmp/ctcs-pointmass --ctcs
-env SZMUK_RH_N=40 SZMUK_THH=.16 SZMUK_MAX_ITER=120 \
-  build/test_measured_root_rh quad matched 40 /tmp/ctcs-quad --ctcs
-```
-
-An additional farther quad start `(2.4, 2, 2, 0, -2, 0, q=identity, omega=0)`
-fails its first OCP. At a 1200-iteration allowance it stops after 278 iterations
-with native violation 0.001430055, including CTCS and ordinary inequality rows.
-Two fresh standalone repeats return identical trajectories. This is an actual
-feasibility failure, not rejection solely for `Outer Max/Min`. The passing
-near-center result does not establish robustness for this farther start or the
-100IC/MC1/MC2 campaigns. No solver or constraint changes were made for these tests.
-
-The `--staging-initial` case starts from the existing settled staging-hover
-state `(2.0, 1.5, Z_STAGE+0.05)` with zero velocity/rates and identity attitude.
-With the unchanged N40/120-iteration profile, staging starts active and switches
-off once: at 3.291 s for the matched plant, or 3.260 s for the 1 ms plant. Both
-land after 25 replans (13.344 s / 13.321 s), with zero native violations.
-**Overall physical CTCS acceptance fails:** staging-height shortfalls reach
-9.4 / 9.6 cm while the trigger is active; LOS and glideslope consequences also
-have positive residuals. Independent predicted integral ratios of
-1.000358 / 1.000214 remain reported diagnostics. The test returns 2 for the
-physical failure; it requires the executed
-on-to-off transition for this scenario. Run with the same command above, adding
-`--staging-initial`. Chronological events, summaries and raw run archive are in
-`logs/frozen_node_baseline_20261104/ctcs_staging`. Trial nominal-tail and hover-guess
-changes were removed; no production loop, solver or constraint edits are retained.
-
-`--audit-loop` compares every constructed RH request with a fresh standalone
-solve, rather than comparing only the first request. All 120 CTCS requests
-across pointmass, near-center quad and staging-start quad (matched and 1 ms
-plants) return exactly the same X/U as their standalone counterparts. The two
-NODE regressions also pass. Measured-root and initial-guess dynamics errors are
-zero; retained-control, duration and target-frame shift error is at most
-3.56e-15. The staging-start quad has `loop_pass=1` and
-`physical_stc_pass=0`; no runtime loop defect is established by these tests.
-Results are in `logs/frozen_node_baseline_20261104/ctcs_loop_audit`.
-
-Saved-request replay now selects the recorded OCP, including CTCS, and checks
-its recorded `SZMUK_*`, `MPC_*` and thread environment. It previously substituted
-the unrelated `landing_rh` problem for every quad request. Use
-`test_measured_root_rh --diagnose-request quad REQUEST_FILE` with the saved
-environment. Older requests without descriptor metadata require an explicit
-descriptor as the final argument; replay never guesses one. This corrects the
-diagnostic, not the solver or production RH algorithm.
+Saved-request replay uses the recorded OCP, horizon and `SZMUK_*`/`MPC_*`/thread
+environment: `test_measured_root_rh --diagnose-request quad REQUEST_FILE`.
+Legacy files without descriptor metadata require an explicit correct descriptor;
+replay never substitutes another landing problem.
 
 ## OCPs and execution
 

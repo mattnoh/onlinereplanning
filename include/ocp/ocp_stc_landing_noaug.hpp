@@ -134,6 +134,15 @@ inline bool useRhCaptureLandingTrigger(){return defaults.constraints.capture_lan
 inline bool useRhFeedbackWarmStart(){return defaults.horizon.feedback_warm_start;}
 inline std::string stageTriggerMode(){return defaults.constraints.stage_trigger;}
 
+struct CtcsMargins {
+    double trigger=0., geometric=0., speed=0., tilt_deg=0., path_tilt_deg=0., rate=0.;
+};
+inline const CtcsMargins CTCS_MARGINS{
+    envOrQ("SZMUK_CTCS_TRIGGER_MARGIN",0.),envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.),
+    envOrQ("SZMUK_CTCS_SPEED_MARGIN",0.),envOrQ("SZMUK_CTCS_TILT_MARGIN_DEG",0.),
+    envOrQ("SZMUK_CTCS_PATH_TILT_MARGIN_DEG",0.),envOrQ("SZMUK_CTCS_RATE_MARGIN",0.)};
+inline CtcsMargins ctcsMargins(bool tightened){return tightened?CTCS_MARGINS:CtcsMargins{};}
+
 // ── Sigmoid helpers ───────────────────────────────────────────────────────────
 template<typename Scalar>
 inline Scalar sigmaLandVal(const Scalar& rxy2) {
@@ -177,12 +186,12 @@ inline Scalar posPart(const Scalar& v) {
 }
 
 template<typename Scalar>
-inline Scalar landingAltitudeTrigger(const Scalar& z, const Scalar& rxy2) {
-    const Scalar trig_alt = posPart(Scalar(ALT_TRIG) - z);
+inline Scalar landingAltitudeTrigger(const Scalar& z, const Scalar& rxy2,double altitude=ALT_TRIG) {
+    const Scalar trig_alt = posPart(Scalar(altitude) - z);
     if (!useRhCaptureLandingTrigger()) return trig_alt;  // benchmark default
     const Scalar cap2 = Scalar(CAP_LAND_RADIUS * CAP_LAND_RADIUS);
     const Scalar trig_cap = posPart(cap2 - rxy2) / cap2;
-    return (trig_alt / Scalar(ALT_TRIG)) * trig_cap;
+    return (trig_alt / Scalar(altitude)) * trig_cap;
 }
 
 inline double computeSigmaLand(const Eigen::VectorXd& x) {
@@ -397,18 +406,19 @@ struct CtcsIntegrandTerms {
 
 template<typename Scalar>
 inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x,
-                                                         const Vector<Scalar>& u) {
+                                                         const Vector<Scalar>& u,bool tightened=true) {
     CtcsIntegrandTerms<Scalar> out;
+    const auto margins=ctcsMargins(tightened);
 
     const Scalar rxy2     = x(0)*x(0) + x(1)*x(1);
-    out.a_altitude_state  = landingAltitudeTrigger<Scalar>(x(2), rxy2);
+    out.a_altitude_state  = landingAltitudeTrigger<Scalar>(x(2), rxy2,ALT_TRIG+margins.trigger);
 
     const Scalar v2     = x.template segment<3>(3).squaredNorm();
     const Scalar qperp2 = x(7)*x(7) + x(8)*x(8);
     const Scalar om2    = x.template segment<3>(10).squaredNorm();
     const Scalar rxy    = std::sqrt(rxy2 + Scalar(1e-12));
     const Scalar stage_radius_margin =
-        (rxy - Scalar(STAGE_RADIUS)) / Scalar(STAGE_TRIGGER_SCALE);
+        (rxy - Scalar(STAGE_RADIUS-margins.trigger)) / Scalar(STAGE_TRIGGER_SCALE);
     const Scalar stage_radius_trig =
         (stage_radius_margin > Scalar(0))
             ? Scalar(STAGE_TRIGGER_FLOOR) + stage_radius_margin
@@ -426,17 +436,17 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     }
 
     const Scalar loose_tilt_lim =
-        Scalar(std::pow(std::sin(0.5 * THETA_PHASE0_DEG * M_PI / 180.0), 2));
+        Scalar(std::pow(std::sin(0.5 * (THETA_PHASE0_DEG-margins.path_tilt_deg) * M_PI / 180.0), 2));
     out.loose_tilt  = posPart(qperp2 - loose_tilt_lim);
-    out.loose_omega = posPart(om2 - Scalar(OMEGA_PHASE0_MAX * OMEGA_PHASE0_MAX));
+    out.loose_omega = posPart(om2 - Scalar(std::pow(OMEGA_PHASE0_MAX-margins.rate,2)));
 
     const Scalar tilt_lim =
-        Scalar(std::pow(std::sin(0.5 * ALPHA_THETA_STC * THETA_STC_DEG * M_PI / 180.0), 2));
-    out.speed      = posPart(v2     - Scalar(SPD_STC_MAX   * SPD_STC_MAX));
+        Scalar(std::pow(std::sin(0.5 * (ALPHA_THETA_STC * THETA_STC_DEG-margins.tilt_deg) * M_PI / 180.0), 2));
+    out.speed      = posPart(v2     - Scalar(std::pow(SPD_STC_MAX-margins.speed,2)));
     out.tilt       = posPart(qperp2 - tilt_lim);
-    out.omega      = posPart(om2    - Scalar(OMEGA_STC_MAX * OMEGA_STC_MAX));
+    out.omega      = posPart(om2    - Scalar(std::pow(OMEGA_STC_MAX-margins.rate,2)));
     const Scalar gs_val = rxy - Scalar(GS_CONE_TAN) * (x(2) + Scalar(GS_APEX_OFFSET));
-    out.glideslope = posPart(gs_val);
+    out.glideslope = posPart(gs_val+Scalar(margins.geometric));
 
     const Scalar qw = x(6), qx = x(7), qy = x(8), qz = x(9);
     const Scalar bz_x = Scalar(2) * (qx * qz + qw * qy);
@@ -453,12 +463,14 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     const Scalar lat2 = posPart(los_norm2 - axial * axial);
     const Scalar lateral = std::sqrt(lat2 + Scalar(1e-12));
     const Scalar los_alt_margin =
-        (Scalar(LOS_ALT_TRIG) - x(2)) / Scalar(LOS_TRIGGER_SCALE);
+        (Scalar(LOS_ALT_TRIG+margins.trigger) - x(2)) / Scalar(LOS_TRIGGER_SCALE);
     out.a_los =
         (los_alt_margin > Scalar(0))
             ? Scalar(LOS_TRIGGER_FLOOR) + los_alt_margin
             : Scalar(0);
-    out.los = posPart(lateral - Scalar(LOS_CONE_TAN) * axial);
+    const double los_tan=LOS_CONE_TAN;
+    out.los = posPart(lateral - Scalar(los_tan) * axial
+        + Scalar(margins.geometric)*std::tanh(axial/Scalar(GS_APEX_OFFSET)));
 
     // NOTE: no thrust STC blocks — faithful to quad_single_horizon_noaug_stc,
     // whose integrand carries only stage/LOS/landing. Thrust limits stay
@@ -478,7 +490,7 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     const bool trig_stc_on = useTriggeredLandingStc();
 
     if (trig_stc_on) {
-        const Scalar stage_height_viol = posPart(Scalar(Z_STAGE) - x(2));
+        const Scalar stage_height_viol = posPart(Scalar(Z_STAGE+margins.geometric) - x(2));
         out.staging_value = Scalar(W_STC_STAGE) *
                             out.a_stage * out.a_stage *
                             stage_height_viol * stage_height_viol;
@@ -694,34 +706,17 @@ public:
         : wp_xy_(wp_xy), wp_z_(wp_z), wv_xy_(wv_xy), wv_z_(wv_z),
           watt_(watt), wom_(wom), vz_ref_(vz_ref) {}
 
-    static void bodyZHorizontal(const Vector<Scalar>& x, Scalar& bx, Scalar& by) {
-        const Scalar qw = x(6), qx = x(7), qy = x(8), qz = x(9);
-        bx = Scalar(2) * (qx * qz + qw * qy);
-        by = Scalar(2) * (qy * qz - qw * qx);
-    }
-
-    static Matrix<Scalar> bodyZHorizontalJacobian(const Vector<Scalar>& x) {
-        const Scalar qw = x(6), qx = x(7), qy = x(8), qz = x(9);
-        Matrix<Scalar> J = Matrix<Scalar>::Zero(2, 4);
-        J(0, 0) = Scalar(2) * qy;  J(0, 1) = Scalar(2) * qz;
-        J(0, 2) = Scalar(2) * qw;  J(0, 3) = Scalar(2) * qx;
-        J(1, 0) = Scalar(-2) * qx; J(1, 1) = Scalar(-2) * qw;
-        J(1, 2) = Scalar(2) * qz;  J(1, 3) = Scalar(2) * qy;
-        return J;
-    }
-
     Scalar p(const Vector<Scalar>& x) const override {
         Scalar ep   = x.template segment<2>(0).squaredNorm();
         Scalar ez   = x(2)*x(2);
         Scalar evxy = x.template segment<2>(3).squaredNorm();
         Scalar evz  = (x(5) - Scalar(vz_ref_)) * (x(5) - Scalar(vz_ref_));
-        Scalar bx, by;
-        bodyZHorizontal(x, bx, by);
+        Scalar etilt = x(7)*x(7) + x(8)*x(8);
         Scalar eom  = x.template segment<3>(10).squaredNorm();
         return Scalar(0.5) * (
                Scalar(wp_xy_)*ep + Scalar(wp_z_)*ez
              + Scalar(wv_xy_)*evxy + Scalar(wv_z_)*evz
-             + Scalar(watt_)*(bx*bx + by*by)
+             + Scalar(watt_)*etilt
              + Scalar(wom_)*eom);
     }
 
@@ -731,12 +726,8 @@ public:
         g(2)           = Scalar(wp_z_)*x(2);
         g.segment(3,2) = Scalar(wv_xy_)*x.segment(3,2);
         g(5)           = Scalar(wv_z_)*(x(5) - Scalar(vz_ref_));
-        Scalar bx, by;
-        bodyZHorizontal(x, bx, by);
-        Matrix<Scalar> Jtilt = bodyZHorizontalJacobian(x);
-        Vector<Scalar> etilt(2);
-        etilt << bx, by;
-        g.segment(6,4) += Scalar(watt_) * Jtilt.transpose() * etilt;
+        g(7) = Scalar(watt_)*x(7);
+        g(8) = Scalar(watt_)*x(8);
         g.segment(10,3) = Scalar(wom_)*x.segment(10,3);
         return g;
     }
@@ -747,8 +738,7 @@ public:
         H(2,2) = Scalar(wp_z_);
         H(3,3)=H(4,4) = Scalar(wv_xy_);
         H(5,5) = Scalar(wv_z_);
-        Matrix<Scalar> Jtilt = bodyZHorizontalJacobian(x);
-        H.block(6,6,4,4) += Scalar(watt_) * Jtilt.transpose() * Jtilt;
+        H(7,7)=H(8,8) = Scalar(watt_);
         H(10,10)=H(11,11)=H(12,12) = Scalar(wom_);
         return H;
     }
@@ -823,15 +813,38 @@ class GeneralSpeedCon : public StageConstraintBase<Scalar> { public:
 // The shared interface owns the production CTCS row and its interval
 // sensitivities. The host's original integrand/integral above remain an
 // independent diagnostic reference. Weights and epsilon both use Y_SCALE.
+template<typename Scalar>
+class NodalStcGuard : public StcStageConstraint<Scalar> {
+    Scalar relaxation_;
+public:
+    explicit NodalStcGuard(double tolerance)
+        :StcStageConstraint<Scalar>(StcForm::Original2018),relaxation_(Scalar(.1*tolerance)){}
+    Vector<Scalar> c(const Vector<Scalar>& x,const Vector<Scalar>& u) const override {
+        auto residual=StcStageConstraint<Scalar>::c(x,u);
+        // An inactive implication is identically zero. Give it a strict
+        // interior instead of an active inequality with a zero Jacobian.
+        // The physical margins exceed this numerical relaxation.
+        residual.array()-=relaxation_;return residual;
+    }
+};
+
 template<typename Scalar, typename Dynamics>
 std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
     std::shared_ptr<Dynamics> dyn,
     double eps = CTCS_STEP_EPS / CTCS_Y_SCALE,
-    int idx_theta = IDX_THETA, double fixed_dt = 0.0, int substeps = 1) {
+    int idx_theta = IDX_THETA, double fixed_dt = 0.0, int substeps = 1,bool tightened=true,
+    StcForm form=StcForm::Density) {
     using Vec = Vector<Scalar>;
     using StateFn = std::function<Scalar(const Vec&)>;
     using GradFn = std::function<Vec(const Vec&)>;
-    auto row = std::make_shared<StcStageConstraint<Scalar>>(StcForm::Density, eps);
+    const auto margins=ctcsMargins(tightened);
+    if(margins.trigger<0.||margins.trigger>=STAGE_RADIUS||margins.geometric<0.||margins.speed<0.||margins.speed>=SPD_STC_MAX||
+        margins.tilt_deg<0.||margins.tilt_deg>=ALPHA_THETA_STC*THETA_STC_DEG||margins.path_tilt_deg<0.||margins.path_tilt_deg>=THETA_PHASE0_DEG||margins.rate<0.||margins.rate>=OMEGA_STC_MAX||
+        margins.geometric/GS_APEX_OFFSET>=LOS_CONE_TAN)
+        throw std::invalid_argument("invalid CTCS physical tightening margins");
+    std::shared_ptr<StcStageConstraint<Scalar>> row=form==StcForm::Original2018?
+        std::static_pointer_cast<StcStageConstraint<Scalar>>(std::make_shared<NodalStcGuard<Scalar>>(defaults.solver.tolerance)):
+        std::make_shared<StcStageConstraint<Scalar>>(form, eps);
     const auto zero = [](const Vec& x) -> Vec { return Vec::Zero(x.size()); };
     const auto always = [](const Vec&) -> Scalar { return Scalar(-1); };
     const auto tilt = [](const Vec& x) -> Scalar { return x(7)*x(7) + x(8)*x(8); };
@@ -854,11 +867,11 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
                 [](const Vec&, const Vec& u) -> Vec { return Vec::Zero(u.size()); })
             .weight(Scalar(weight / CTCS_Y_SCALE));
     };
-    const Scalar looseTilt = tiltLimit(THETA_PHASE0_DEG);
+    const Scalar looseTilt = tiltLimit(THETA_PHASE0_DEG-margins.path_tilt_deg);
     add("loose_tilt", always, zero,
         [=](const Vec& x) -> Scalar { return tilt(x) - looseTilt; }, dtilt, 1.0);
     add("loose_omega", always, zero,
-        [=](const Vec& x) -> Scalar { return omega(x) - Scalar(OMEGA_PHASE0_MAX*OMEGA_PHASE0_MAX); }, domega, 1.0);
+        [=](const Vec& x) -> Scalar { return omega(x) - Scalar(std::pow(OMEGA_PHASE0_MAX-margins.rate,2)); }, domega, 1.0);
 
     if (useTriggeredLandingStc()) {
         const bool settle = stageTriggerMode() == "settle";
@@ -867,7 +880,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             if (settle) return -(posPart(tilt(x) - settleTilt) +
                 posPart(omega(x) - Scalar(STAGE_SETTLE_OMEGA_MAX*STAGE_SETTLE_OMEGA_MAX)));
             const Scalar margin = (std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) -
-                                   Scalar(STAGE_RADIUS)) / Scalar(STAGE_TRIGGER_SCALE);
+                                   Scalar(STAGE_RADIUS-margins.trigger)) / Scalar(STAGE_TRIGGER_SCALE);
             return margin > Scalar(0) ? -(Scalar(STAGE_TRIGGER_FLOOR) + margin) : Scalar(0);
         };
         GradFn dstage = [=](const Vec& x) -> Vec {
@@ -877,7 +890,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
                 if (omega(x) > Scalar(STAGE_SETTLE_OMEGA_MAX*STAGE_SETTLE_OMEGA_MAX)) g -= domega(x);
             } else {
                 const Scalar r = std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
-                if (r > Scalar(STAGE_RADIUS)) {
+                if (r > Scalar(STAGE_RADIUS-margins.trigger)) {
                     g(0) = -x(0)/(r*Scalar(STAGE_TRIGGER_SCALE));
                     g(1) = -x(1)/(r*Scalar(STAGE_TRIGGER_SCALE));
                 }
@@ -885,16 +898,16 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             return g;
         };
         add("staging", stageTrigger, dstage,
-            [](const Vec& x) -> Scalar { return Scalar(Z_STAGE) - x(2); },
+            [=](const Vec& x) -> Scalar { return Scalar(Z_STAGE+margins.geometric) - x(2); },
             [](const Vec& x) -> Vec { Vec g = Vec::Zero(x.size()); g(2) = Scalar(-1); return g; }, W_STC_STAGE);
 
-        StateFn losTrigger = [](const Vec& x) -> Scalar {
-            const Scalar m = (Scalar(LOS_ALT_TRIG) - x(2))/Scalar(LOS_TRIGGER_SCALE);
+        StateFn losTrigger = [=](const Vec& x) -> Scalar {
+            const Scalar m = (Scalar(LOS_ALT_TRIG+margins.trigger) - x(2))/Scalar(LOS_TRIGGER_SCALE);
             return m > Scalar(0) ? -(Scalar(LOS_TRIGGER_FLOOR) + m) : Scalar(0);
         };
-        GradFn dlosTrigger = [](const Vec& x) -> Vec {
+        GradFn dlosTrigger = [=](const Vec& x) -> Vec {
             Vec g = Vec::Zero(x.size());
-            if (x(2) < Scalar(LOS_ALT_TRIG)) g(2) = Scalar(1)/Scalar(LOS_TRIGGER_SCALE);
+            if (x(2) < Scalar(LOS_ALT_TRIG+margins.trigger)) g(2) = Scalar(1)/Scalar(LOS_TRIGGER_SCALE);
             return g;
         };
         // Body boresight and its quaternion derivatives, without normalizing
@@ -903,10 +916,15 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             const Scalar w=x(6), a=x(7), b=x(8), c=x(9);
             return {Scalar(2)*(a*c+w*b), Scalar(2)*(b*c-w*a), w*w-a*a-b*b+c*c};
         };
+        const double los_tan=LOS_CONE_TAN;
         StateFn los = [=](const Vec& x) -> Scalar {
             const Scalar axial = x.template head<3>().dot(boresight(x));
             const Scalar lateral2 = x.template head<3>().squaredNorm() - axial*axial;
-            return std::sqrt(posPart(lateral2)+Scalar(1e-12)) - Scalar(LOS_CONE_TAN)*axial;
+            // Taper the distance margin to an angular margin at the apex.
+            // For axial<0, |tanh(s)|<=|s| and margin/range<tan(angle) keep the
+            // entire rear half-space infeasible. The landing point is retained.
+            return std::sqrt(posPart(lateral2)+Scalar(1e-12)) - Scalar(los_tan)*axial
+                + Scalar(margins.geometric)*std::tanh(axial/Scalar(GS_APEX_OFFSET));
         };
         GradFn dlos = [=](const Vec& x) -> Vec {
             const Scalar w=x(6), a=x(7), b=x(8), c=x(9);
@@ -919,7 +937,8 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
                   Scalar(2)*w, -Scalar(2)*a, -Scalar(2)*b, Scalar(2)*c;
             da.template segment<4>(6) = db.transpose()*x.template head<3>();
             const Scalar lateral2 = x.template head<3>().squaredNorm()-axial*axial;
-            Vec g = -Scalar(LOS_CONE_TAN)*da;
+            const Scalar taper=std::tanh(axial/Scalar(GS_APEX_OFFSET));
+            Vec g = (-Scalar(los_tan)+Scalar(margins.geometric/GS_APEX_OFFSET)*(Scalar(1)-taper*taper))*da;
             if (lateral2 > Scalar(0)) {
                 Vec dl = -Scalar(2)*axial*da; dl.template head<3>() += Scalar(2)*x.template head<3>();
                 g += dl/(Scalar(2)*std::sqrt(lateral2+Scalar(1e-12)));
@@ -930,16 +949,16 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
 
         const bool capture = useRhCaptureLandingTrigger();
         StateFn landTrigger = [=](const Vec& x) -> Scalar {
-            if (!capture) return x(2) - Scalar(ALT_TRIG);
-            return -landingAltitudeTrigger<Scalar>(x(2), x(0)*x(0)+x(1)*x(1));
+            if (!capture) return x(2) - Scalar(ALT_TRIG+margins.trigger);
+            return -landingAltitudeTrigger<Scalar>(x(2), x(0)*x(0)+x(1)*x(1),ALT_TRIG+margins.trigger);
         };
         GradFn dland = [=](const Vec& x) -> Vec {
             Vec g = Vec::Zero(x.size());
             if (!capture) { g(2) = Scalar(1); return g; }
             const Scalar cap2 = Scalar(CAP_LAND_RADIUS*CAP_LAND_RADIUS);
-            const Scalar altitude = posPart(Scalar(ALT_TRIG)-x(2));
+            const Scalar altitude = posPart(Scalar(ALT_TRIG+margins.trigger)-x(2));
             const Scalar lateral = posPart(cap2-x(0)*x(0)-x(1)*x(1));
-            const Scalar denominator = Scalar(ALT_TRIG)*cap2;
+            const Scalar denominator = Scalar(ALT_TRIG+margins.trigger)*cap2;
             if (altitude > Scalar(0)) g(2) = lateral/denominator;
             if (lateral > Scalar(0)) {
                 g(0) = Scalar(2)*x(0)*altitude/denominator;
@@ -948,15 +967,15 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             return g;
         };
         add("landing_speed", landTrigger, dland,
-            [](const Vec& x) -> Scalar { return x.template segment<3>(3).squaredNorm()-Scalar(SPD_STC_MAX*SPD_STC_MAX); },
+            [=](const Vec& x) -> Scalar { return x.template segment<3>(3).squaredNorm()-Scalar(std::pow(SPD_STC_MAX-margins.speed,2)); },
             [](const Vec& x) -> Vec { Vec g=Vec::Zero(x.size()); g.template segment<3>(3)=Scalar(2)*x.template segment<3>(3); return g; }, W_LAND_SPEED);
-        const Scalar landTilt = tiltLimit(ALPHA_THETA_STC*THETA_STC_DEG);
+        const Scalar landTilt = tiltLimit(ALPHA_THETA_STC*THETA_STC_DEG-margins.tilt_deg);
         add("landing_tilt", landTrigger, dland,
             [=](const Vec& x) -> Scalar { return tilt(x)-landTilt; }, dtilt, W_LAND_TILT);
         add("landing_omega", landTrigger, dland,
-            [=](const Vec& x) -> Scalar { return omega(x)-Scalar(OMEGA_STC_MAX*OMEGA_STC_MAX); }, domega, W_LAND_OMEGA);
+            [=](const Vec& x) -> Scalar { return omega(x)-Scalar(std::pow(OMEGA_STC_MAX-margins.rate,2)); }, domega, W_LAND_OMEGA);
         add("landing_glideslope", landTrigger, dland,
-            [](const Vec& x) -> Scalar { return std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) - Scalar(GS_CONE_TAN)*(x(2)+Scalar(GS_APEX_OFFSET)); },
+            [=](const Vec& x) -> Scalar { return std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) - Scalar(GS_CONE_TAN)*(x(2)+Scalar(GS_APEX_OFFSET))+Scalar(margins.geometric); },
             [](const Vec& x) -> Vec {
                 Vec g=Vec::Zero(x.size()); const Scalar r=std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
                 g(0)=x(0)/r; g(1)=x(1)/r; g(2)=-Scalar(GS_CONE_TAN); return g;
@@ -982,7 +1001,13 @@ inline Eigen::VectorXd ensureNoAugStateSize(const Eigen::VectorXd& x) {
 }
 
 // ── Solver params ─────────────────────────────────────────────────────────────
-inline Param getSolverParams() { return defaults.solver; }
+inline Param getSolverParams() {
+    auto parameters=defaults.solver;
+    parameters.forward_filter=envOrInt("SZMUK_FORWARD_FILTER",parameters.forward_filter);
+    if(parameters.forward_filter!=0&&parameters.forward_filter!=1)
+        throw std::invalid_argument("SZMUK_FORWARD_FILTER must select native filter 0 or 1");
+    return parameters;
+}
 
 // ── Warm-start / validity helpers ─────────────────────────────────────────────
 inline void clampWarmControl(Eigen::VectorXd& u) {
@@ -1017,15 +1042,69 @@ inline bool plausibleTrajectory(const std::vector<Eigen::VectorXd>& X,
     return true;
 }
 
+// Cold trajectory initial guess only. The reference phases do not impose
+// any constraint schedule and are never sent to the plant before native solve.
+inline std::vector<Eigen::VectorXd> coldLandingControls(const Eigen::VectorXd& root,
+    int N,const std::shared_ptr<ConstantAccelPredictor>& predictor,
+    const std::shared_ptr<Quad6DOFVarTimeRelativePred<double>>& dynamics) {
+    using Coeff=Eigen::Matrix<double,3,8>;
+    const double h=THH,T=N*h,approach=.4*T,descent=T-approach;
+    Eigen::Matrix4d boundary;boundary<<1,1,1,1,4,5,6,7,12,20,30,42,24,60,120,210;
+    const auto polynomial=[&](const Eigen::Vector3d& p0,const Eigen::Vector3d& v0,
+        const Eigen::Vector3d& a0,const Eigen::Vector3d& j0,const Eigen::Vector3d& goal,double duration){
+        Coeff c=Coeff::Zero();c.col(0)=p0;c.col(1)=duration*v0;
+        c.col(2)=.5*duration*duration*a0;c.col(3)=duration*duration*duration*j0/6.;
+        Eigen::Matrix<double,4,3> rhs;
+        rhs.row(0)=(goal-c.leftCols<4>().rowwise().sum()).transpose();
+        rhs.row(1)=(-c.col(1)-2*c.col(2)-3*c.col(3)).transpose();
+        rhs.row(2)=(-2*c.col(2)-6*c.col(3)).transpose();rhs.row(3)=(-6*c.col(3)).transpose();
+        c.rightCols<4>()=boundary.partialPivLu().solve(rhs).transpose();return c;
+    };
+    Eigen::Quaterniond q0(root(6),root(7),root(8),root(9));q0.normalize();
+    Eigen::Vector3d a0=HOVER_THRUST/MASS*(q0*Eigen::Vector3d::UnitZ())+GRAVITY-predictor->predictAccel(0.);
+    a0+=.15*(q0*Eigen::Vector3d::UnitZ());
+    const Eigen::Vector3d j0=(HOVER_THRUST/MASS+.15)*(q0*root.segment<3>(10).cross(Eigen::Vector3d::UnitZ()));
+    const Eigen::Vector3d capture(0.,0.,std::max(root(2)+.05,Z_STAGE+.1));
+    const Coeff first=polynomial(root.head<3>(),root.segment<3>(3),a0,j0,capture,approach);
+    const Coeff second=polynomial(capture,Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero(),Eigen::Vector3d(0.,0.,.06),descent);
+    const auto reference=[&](double time,int order)->Eigen::Vector3d{
+        const bool early=time<approach;const auto& c=early?first:second;
+        const double duration=early?approach:descent,phase=std::clamp((early?time:time-approach)/duration,0.,1.);
+        Eigen::Vector3d value=Eigen::Vector3d::Zero();
+        for(int k=order;k<8;++k){double factor=1.;for(int j=0;j<order;++j)factor*=double(k-j)/duration;
+            value+=factor*std::pow(phase,k-order)*c.col(k);}
+        return value;
+    };
+    std::vector<Eigen::VectorXd> controls;Eigen::VectorXd state=root;
+    for(int k=0;k<N;++k){
+        const double time=k*h;Eigen::Quaterniond q(state(6),state(7),state(8),state(9));q.normalize();
+        Eigen::Vector3d acceleration=reference(time,2)+4.*(reference(time,0)-state.head<3>())+4.*(reference(time,1)-state.segment<3>(3));
+        const Eigen::Vector3d force=acceleration+predictor->predictAccel(time)-GRAVITY;
+        const auto desired=Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(),force.normalized());
+        Eigen::Quaterniond error=q.conjugate()*desired;if(error.w()<0.)error.coeffs()*=-1.;
+        const Eigen::Vector3d nominal=reference(time,2)+predictor->predictAccel(time)-GRAVITY,b3=nominal.normalized();
+        const Eigen::Vector3d derivative=(Eigen::Matrix3d::Identity()-b3*b3.transpose())*reference(time,3)/nominal.norm();
+        const Eigen::Vector3d omega_ref=q.conjugate()*(b3.cross(derivative));
+        // Sampled attitude error poles are approximately .422 and -.297.
+        const Eigen::Vector3d omega=state.segment<3>(10),angular_acceleration=(1.5/h)*(omega_ref+error.vec()/h-omega);
+        Eigen::VectorXd control=Eigen::VectorXd::Zero(NU_SS);control(0)=MASS*force.dot(q*Eigen::Vector3d::UnitZ());
+        control.segment<3>(1)=J_B*angular_acceleration+omega.cross(J_B*omega);control(IDX_THETA)=h;
+        clampWarmControl(control);controls.push_back(control);state=dynamics->f(state,control);
+    }
+    return controls;
+}
+
 // ── Factory ───────────────────────────────────────────────────────────────────
 inline std::shared_ptr<OptimalControlProblem<double>> create(
     const Eigen::VectorXd& x0_rel,
     const std::vector<Eigen::VectorXd>& prev_U = {},
     const std::vector<Eigen::VectorXd>& prev_X = {},
     const std::vector<Eigen::MatrixXd>& prev_K = {},
-    std::shared_ptr<ConstantAccelPredictor> predictor = nullptr)
+    std::shared_ptr<ConstantAccelPredictor> predictor = nullptr,
+    int requested_horizon = 0)
 {
-    const int N = HORIZON;
+    const int N = requested_horizon > 0 ? requested_horizon : HORIZON;
+    if(N>HORIZON)throw std::invalid_argument("remaining landing horizon exceeds configured maneuver");
     auto problem = std::make_shared<OptimalControlProblem<double>>(N);
 
     if (!predictor) {
@@ -1052,6 +1131,11 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     // CTCS_STEP_EPS is divided by CTCS_Y_SCALE (same zero set as unscaled).
     // Hard-wired: this OCP has no other enforcement mode.
     auto cstep = makeCtcsConstraint<double>(dyn);
+    // Conditional native STC rows guide knot feasibility; the interval row
+    // still enforces the CTCS transcription. Both use exactly the same
+    // implications and tightening, without making a condition always active.
+    const auto node_guards=envOrInt("SZMUK_CTCS_NODE_GUARDS",0)!=0?
+        makeCtcsConstraint<double>(dyn,CTCS_STEP_EPS/CTCS_Y_SCALE,IDX_THETA,0.,1,true,StcForm::Original2018):nullptr;
 
     const double eps_cost = envOrQ("SZMUK_W_EPS", 1.0);
     const Eigen::Vector3d r_follow(0.0, 0.0, Z_STAGE);
@@ -1072,6 +1156,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
         problem->addStageConstraint(k, czfl);
         problem->addStageConstraint(k, cspeed);
         problem->addStageConstraint(k, cstep);
+        if(node_guards)problem->addStageConstraint(k,node_guards);
     }
     problem->setTerminalCost(tcost);
     // No CT-cSTC terminal constraint: the interval inequality above is the
@@ -1111,6 +1196,8 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
         static_cast<int>(Xw.size()) > N &&
         static_cast<int>(prev_K.size()) >= N;
 
+    const auto cold_controls=prev_U.empty()&&envOrInt("SZMUK_CTCS_GUIDED_INITIAL_GUESS",0)!=0?
+        coldLandingControls(x0ss,N,predictor,dyn):std::vector<Eigen::VectorXd>{};
     Eigen::VectorXd sim14 = x0ss;
     for (int k = 0; k < N; ++k) {
         Eigen::VectorXd uk(NU_SS);
@@ -1145,26 +1232,14 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
                     uk = u_fb;
                 }
             }
+        } else if(!cold_controls.empty()) {
+            uk=cold_controls[k];
         } else {
-            // Geometric straight-line seed. Unlike the augmented arm (soft AL
-            // terminal EQ), the interval inequality here is a HARD per-node
-            // constraint, so a seed that dives below the staging floor while
-            // still outside the staging radius starts the IPM deeply
-            // infeasible and stalls the cold solve. Aim at (0,0,Z_STAGE)
-            // until laterally captured, and only then at the origin.
-            const Eigen::Vector3d p0 = sim14.head(3);
-            const Eigen::Vector3d v0 = sim14.segment(3, 3);
-            double T_g = static_cast<double>(N - k) * TH0;
-            if (T_g < TH0) T_g = TH0;
-            const double rxy_seed = p0.head(2).norm();
-            Eigen::Vector3d p_goal(0.0, 0.0,
-                                   rxy_seed > STAGE_RADIUS ? Z_STAGE : 0.0);
-            Eigen::Vector3d a_req = 2.0 * ((p_goal - p0) - v0 * T_g) / (T_g * T_g);
-            a_req.z() = std::max(a_req.z(), (-VZ_LAND_MAX - v0.z()) / T_g);
-            const double tabs_ws = sim14(IDX_DT);
-            const Eigen::Vector3d a_tgt_ws = predictor->predictAccel(tabs_ws);
-            const Eigen::Vector3d fw = MASS * (a_req + a_tgt_ws - GRAVITY);
-            uk(0) = fw.norm();
+            // Match the retained single-horizon noaug benchmark: a uniform
+            // hover input (plus vertical target acceleration), zero moments
+            // and TH0. The previous geometric thrust
+            // guess changed the cold OCP initialization before RH even began.
+            uk(0) = HOVER_THRUST + MASS * predictor->predictAccel(sim14(13)).z();
             uk(IDX_THETA) = TH0;
         }
         clampWarmControl(uk);
@@ -1286,7 +1361,7 @@ inline OCPDescriptor descriptor() {
             pred->setState(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
                            a.target_accel);
         }
-        return create(a.current_state, a.prev_U, a.prev_X, a.prev_K, pred);
+        return create(a.current_state, a.prev_U, a.prev_X, a.prev_K, pred, a.horizon);
     };
     return d;
 }
@@ -1306,7 +1381,9 @@ inline std::shared_ptr<OptimalControlProblem<double>> ordinaryNodeProblem(
         int excluded=0;
         for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
             for(const auto& row:source.getStageConstraints(k,type)){
-                if(std::dynamic_pointer_cast<StcStageConstraint<double>>(row))++excluded;
+                if(auto stc=std::dynamic_pointer_cast<StcStageConstraint<double>>(row)){
+                    if(stc->getForm()==StcForm::Density)++excluded;
+                }
                 else problem->addStageConstraint(k,row);
             }
         if(excluded!=1)throw std::runtime_error("ordinary NODE expects exactly one original STC row");
