@@ -1,6 +1,6 @@
 # CoManDO planner
 
-Current documentation for the active `mpc` branch, updated 2026-10-14. The MAVROS/PX4 ROS1 planner uses a ROS-independent core for RH replanning and direct MPC. The previous planner is archived in `../comando_planner_old` and excluded from catkin discovery. The shared ROS2 adapter builds; Crazyflie MPC flight validation and deployment remain pending.
+Current documentation for the active `mpc` branch, updated 2026-11-04. The MAVROS/PX4 ROS1 planner uses a ROS-independent core for RH replanning and direct MPC. The previous planner is archived in `../comando_planner_old` and excluded from catkin discovery. The shared ROS2 adapter builds; Crazyflie MPC flight validation and deployment remain pending.
 
 ## Layout
 
@@ -18,6 +18,16 @@ Current documentation for the active `mpc` branch, updated 2026-10-14. The MAVRO
 | `logs/` | Bags, CSVs, applied profiles, source/environment manifests, results, plots and GIFs. |
 
 ## Frozen-time measured-state NODE baseline
+
+The default solver is the exact shared algorithm base `4d68a48b` recorded in
+`logs/point_mass/paper_mpc/source_revisions.json`, restored in `../ALIPDDP-main`.
+The verified baseline and its source hashes are recorded in
+[`support/test/frozen_node_baseline.json`](support/test/frozen_node_baseline.json).
+Both NODE runs pass: pointmass completes 15 replans/30 seconds; quad lands after
+20 replans/9.929 seconds, with zero native nodal violations and measured-root error.
+The original pointmass CTCS fresh-solver run also passes all 15 replans with zero
+executed physical excess and maximum interval integral 9.999600934e-7 < 1e-6.
+Results are in `logs/frozen_node_baseline_20261104`; thesis results are unchanged.
 
 The native solver comes from `../ALIPDDP-main`. The same compiled planner core
 runs pointmass and the `stc_landing_noaug_node` quad variant through

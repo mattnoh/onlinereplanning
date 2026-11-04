@@ -1,0 +1,119 @@
+{
+  "solver_repository": "../ALIPDDP-main",
+  "solver_algorithm_base": "4d68a48b94610699510b23ae8b8f86eb830c6254",
+  "solver_restoration_commit": "59a169fd",
+  "matching_solver_check_commit": "56a2b6e2",
+  "thesis_provenance": "logs/point_mass/paper_mpc/source_revisions.json",
+  "verified_planner_code_commit": "eb25e58",
+  "planner_repository": "CoManDO_planner",
+  "planner_branch": "mpc",
+  "mode": "frozen simulation time during every solve; measured-root update after K=4 whole stages",
+  "numerical_lifecycle": "fresh construct/init/solve each request; trajectory initial guess only",
+  "node_acceptance": "native constraints and shooting dynamics at configured tolerance; exact measured root; correct applied inputs and mission progress; dense checks diagnostic only",
+  "profiles": {
+    "pointmass_node": {
+      "N": 16,
+      "dt": 0.5,
+      "K": 4,
+      "max_iter": 300,
+      "requests": 15
+    },
+    "quad_node": {
+      "N": 40,
+      "THH": 0.16,
+      "K": 4,
+      "max_iter": 120,
+      "request_bound": 40
+    },
+    "pointmass_ctcs": "original P6_ddp_zoh fresh-solver profile; hold ZOH, N16, dt.5, K4, duration30, substeps100, epsilon1e-6, delta.05, max_iter300"
+  },
+  "node_runs": {
+    "pointmass": {
+      "returncode": 0,
+      "summary": {
+        "accepted": 15,
+        "reached": 0,
+        "simulation_time": 30,
+        "native_solve_pass": 1,
+        "node_loop_pass": 1,
+        "planned_continuous_pass": 0,
+        "planned_dense_excess": 0.6452738160406788,
+        "executed_continuous_pass": 0,
+        "executed_physical_excess": 0.6070316358461354,
+        "native_violation": 0,
+        "root_error": 0,
+        "anchor_difference": 0,
+        "prediction_error": 0
+      }
+    },
+    "quad": {
+      "returncode": 0,
+      "summary": {
+        "accepted": 20,
+        "reached": 1,
+        "simulation_time": 9.929042624733237,
+        "native_solve_pass": 1,
+        "node_loop_pass": 1,
+        "planned_continuous_pass": 1,
+        "planned_dense_excess": 0,
+        "executed_continuous_pass": 1,
+        "executed_physical_excess": 0,
+        "native_violation": 0,
+        "root_error": 0,
+        "anchor_difference": 0,
+        "prediction_error": 8.881784197001252e-16
+      }
+    }
+  },
+  "pointmass_ctcs": {
+    "status": "pass",
+    "solves_completed": 15,
+    "solves_converged": 15,
+    "max_executed_physical_excess": 0.0,
+    "max_interval_integral": 9.999600934268825e-07,
+    "strict_interval_budgets_met": true,
+    "mean_tracking_error": 0.25005300242954004
+  },
+  "existing_tests": {
+    "test_controller": {
+      "build_returncode": 0,
+      "test_returncode": 0
+    },
+    "test_planner_core": {
+      "build_returncode": 0,
+      "test_returncode": 0
+    },
+    "test_trajectory_replayer": {
+      "build_returncode": 0,
+      "test_returncode": 0
+    }
+  },
+  "source_and_measured_root_contracts": "both pass",
+  "matching_original_solver_checks": "pass",
+  "result_directory": "logs/frozen_node_baseline_20261104",
+  "thesis_file_hashes_unchanged": {
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/P8_ddp_stage_tightened/summary.json": "2e9f50484c6cbd4948b06588c4afff8f57502e5cb606037d4015f805b83d74ea",
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/P8_ddp_stage_tightened/config.json": "4c9831552cf41bb6bb8965228e23e07a83bbee63c63fc74b73148dfbbc1edb2c",
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/P8_ddp_stage_tightened/solves.csv": "029f61d9e137cbfaa4db86465330e3022c0e2971763bf6a076efd697ce9292b0",
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/P9_ddp_stage_untightened/summary.json": "8cd6092773a24a7350b75ed7af7ec2dec4a1940cd18ae69a10e3bacc3f9e6bdb",
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/P9_ddp_stage_untightened/config.json": "3ef636d740868d698d793040a7c3c040e06fa80e4c8f8dcc8ad49a60d1d41a17",
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/P9_ddp_stage_untightened/solves.csv": "18f7faa5e58aeec5d1b4255980ee268df583366d6c6e4095a17775ddc3690cd5",
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/P7_ddp_zoh_reuse/summary.json": "5da7f8ef66aa8cfc1ba58ca79e8ac83b89e8ca0c4c686de8384614ed8d802a17",
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/P7_ddp_zoh_reuse/config.json": "39c373721de39f76c3d141d28a5eb4cbe49081a8ec2232091c948c37ac810494",
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/P7_ddp_zoh_reuse/solves.csv": "1b1fff6cae8983c9554612412af6e4ee1794a7e04aa8c6f02c252919393cd840",
+    "/home/lab/mavros_ws/src/CoManDO_planner/logs/point_mass/paper_mpc/source_revisions.json": "7b6e4cd9eee6b5661372b109edf791ac96ed6ac9819d29ff773a02c90e7d27f5"
+  },
+  "verified_source_sha256": {
+    "CMakeLists.txt": "1136f575d8559f178d09e24ed27429e0a55017d5eeba4bdcda0c635168d9aa7c",
+    "src/controller.cpp": "c6db4d0cf0b447701bf1fdd66f618d1f0102e9158c4015a8c2e8fdad7113a72b",
+    "src/controller_internal.hpp": "8b5e524dfe23b6201776f4e94fa6b5a584607a36f262761528350e4d9c71867b",
+    "src/synchronous_mpc_internal.hpp": "5478cc943a8747ca64043320ed3790a406e37b8d0810674a93bd6a289cce79a5",
+    "src/ocp_registry.cpp": "296f1b3e405d28a9bd1f256e9dd98e635773b8897e0e35b4609ecb8dd07f0a6e",
+    "include/planner_core/types.hpp": "e66a83993cb528dfacd794536859b6517f3e7bdf5ba7dde08ccb0cbfed3ff856",
+    "include/planner_core/controller.hpp": "707b969a4962160976e79a6d6314a7cf16e6712d008048d8606f0d0c44a1d564",
+    "include/ocp/ocp_stc_landing_noaug.hpp": "4df6d4b3811fab642b53aa2c683d5ee971a0f21aabd8572ce9a588e5cd2ec5b5",
+    "support/test/pointmass_reference_adapter.hpp": "6d96b7c3d9128da722c3e8ee9cff7c93472e98e414219d5bdae5e6314c660f50",
+    "support/test/test_measured_root_rh.cpp": "c748b1c488f4959f65830c4212625d2e4299d1a6f85f5e37134c2bb85b2f049b"
+  },
+  "scope_limit": "Verifies both ordinary NODE frozen-time loops and original pointmass CTCS. Does not validate quad CTCS RH, real-time delay handling, hardware, or the100IC/MC1/MC2campaign. A separate retained quad CTCS SH check with its legacy profile has a budget-certificate failure and is not claimed fixed."
+}
