@@ -278,6 +278,7 @@ int main(int argc,char** argv){try{
     for(int cycle=0;cycle<bound&&!reached;++cycle){
         input.current_state=plant;input.absolute_time_sec=time;input.now=std::chrono::steady_clock::now();input.target_snapshot=targetAt(time);
         const auto measured=plant;
+        captured_problem.reset();
         auto result=controller.solveSynchronous(input);
         if(captured_problem)model.horizon=captured_problem->getHorizon();
         requireRh((plant-measured).norm()==0.,"plant advanced during frozen solve");
@@ -297,7 +298,7 @@ int main(int argc,char** argv){try{
             budgets<<cycle<<",initial_guess,"<<k<<','<<(model.stage_duration?model.stage_duration(prepared_x[k],prepared_u[k]):model.dt)<<','<<physical_budget<<','<<row->getEpsilon()<<','<<ratio<<",\n";
         }
         if(ctcs&&captured_problem&&cycle==0)observeTriggers(captured_args.current_state,prepared_u.front(),cycle,time,0.);
-        if(!result.solve_accepted&&captured_problem){
+        if(!result.solve_accepted&&captured_problem&&!result.solve_result.state_trajectory.empty()){
             request<<"rejected_native "<<result.solve_result.primal_constraint_violation<<" tolerance "<<params.tolerance<<'\n';
             const auto& rejected_x=result.solve_result.state_trajectory;
             const auto& rejected_u=result.solve_result.control_trajectory;
@@ -319,7 +320,7 @@ int main(int argc,char** argv){try{
             }
             request.flush();
         }
-        requireRh(result.solve_accepted,"measured-root solve rejected");
+        requireRh(result.solve_accepted,("measured-root solve rejected: "+result.rejection_reason).c_str());
         const auto& xs=result.solve_result.state_trajectory;const auto& us=result.solve_result.control_trajectory;
         const auto relative=planner_core::prepareOcpState(*descriptor,measured,input.target_snapshot);
         root_error=std::max(root_error,(xs.front().head(descriptor->state_dim)-relative.head(descriptor->state_dim)).lpNorm<Eigen::Infinity>());

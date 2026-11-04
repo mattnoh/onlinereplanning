@@ -813,27 +813,11 @@ class GeneralSpeedCon : public StageConstraintBase<Scalar> { public:
 // The shared interface owns the production CTCS row and its interval
 // sensitivities. The host's original integrand/integral above remain an
 // independent diagnostic reference. Weights and epsilon both use Y_SCALE.
-template<typename Scalar>
-class NodalStcGuard : public StcStageConstraint<Scalar> {
-    Scalar relaxation_;
-public:
-    explicit NodalStcGuard(double tolerance)
-        :StcStageConstraint<Scalar>(StcForm::Original2018),relaxation_(Scalar(.1*tolerance)){}
-    Vector<Scalar> c(const Vector<Scalar>& x,const Vector<Scalar>& u) const override {
-        auto residual=StcStageConstraint<Scalar>::c(x,u);
-        // An inactive implication is identically zero. Give it a strict
-        // interior instead of an active inequality with a zero Jacobian.
-        // The physical margins exceed this numerical relaxation.
-        residual.array()-=relaxation_;return residual;
-    }
-};
-
 template<typename Scalar, typename Dynamics>
 std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
     std::shared_ptr<Dynamics> dyn,
     double eps = CTCS_STEP_EPS / CTCS_Y_SCALE,
-    int idx_theta = IDX_THETA, double fixed_dt = 0.0, int substeps = 1,bool tightened=true,
-    StcForm form=StcForm::Density) {
+    int idx_theta = IDX_THETA, double fixed_dt = 0.0, int substeps = 1,bool tightened=true) {
     using Vec = Vector<Scalar>;
     using StateFn = std::function<Scalar(const Vec&)>;
     using GradFn = std::function<Vec(const Vec&)>;
@@ -842,9 +826,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
         margins.tilt_deg<0.||margins.tilt_deg>=ALPHA_THETA_STC*THETA_STC_DEG||margins.path_tilt_deg<0.||margins.path_tilt_deg>=THETA_PHASE0_DEG||margins.rate<0.||margins.rate>=OMEGA_STC_MAX||
         margins.geometric/GS_APEX_OFFSET>=LOS_CONE_TAN)
         throw std::invalid_argument("invalid CTCS physical tightening margins");
-    std::shared_ptr<StcStageConstraint<Scalar>> row=form==StcForm::Original2018?
-        std::static_pointer_cast<StcStageConstraint<Scalar>>(std::make_shared<NodalStcGuard<Scalar>>(defaults.solver.tolerance)):
-        std::make_shared<StcStageConstraint<Scalar>>(form, eps);
+    auto row=std::make_shared<StcStageConstraint<Scalar>>(StcForm::Density, eps);
     const auto zero = [](const Vec& x) -> Vec { return Vec::Zero(x.size()); };
     const auto always = [](const Vec&) -> Scalar { return Scalar(-1); };
     const auto tilt = [](const Vec& x) -> Scalar { return x(7)*x(7) + x(8)*x(8); };
@@ -1042,58 +1024,6 @@ inline bool plausibleTrajectory(const std::vector<Eigen::VectorXd>& X,
     return true;
 }
 
-// Cold trajectory initial guess only. The reference phases do not impose
-// any constraint schedule and are never sent to the plant before native solve.
-inline std::vector<Eigen::VectorXd> coldLandingControls(const Eigen::VectorXd& root,
-    int N,const std::shared_ptr<ConstantAccelPredictor>& predictor,
-    const std::shared_ptr<Quad6DOFVarTimeRelativePred<double>>& dynamics) {
-    using Coeff=Eigen::Matrix<double,3,8>;
-    const double h=THH,T=N*h,approach=.4*T,descent=T-approach;
-    Eigen::Matrix4d boundary;boundary<<1,1,1,1,4,5,6,7,12,20,30,42,24,60,120,210;
-    const auto polynomial=[&](const Eigen::Vector3d& p0,const Eigen::Vector3d& v0,
-        const Eigen::Vector3d& a0,const Eigen::Vector3d& j0,const Eigen::Vector3d& goal,double duration){
-        Coeff c=Coeff::Zero();c.col(0)=p0;c.col(1)=duration*v0;
-        c.col(2)=.5*duration*duration*a0;c.col(3)=duration*duration*duration*j0/6.;
-        Eigen::Matrix<double,4,3> rhs;
-        rhs.row(0)=(goal-c.leftCols<4>().rowwise().sum()).transpose();
-        rhs.row(1)=(-c.col(1)-2*c.col(2)-3*c.col(3)).transpose();
-        rhs.row(2)=(-2*c.col(2)-6*c.col(3)).transpose();rhs.row(3)=(-6*c.col(3)).transpose();
-        c.rightCols<4>()=boundary.partialPivLu().solve(rhs).transpose();return c;
-    };
-    Eigen::Quaterniond q0(root(6),root(7),root(8),root(9));q0.normalize();
-    Eigen::Vector3d a0=HOVER_THRUST/MASS*(q0*Eigen::Vector3d::UnitZ())+GRAVITY-predictor->predictAccel(0.);
-    a0+=.15*(q0*Eigen::Vector3d::UnitZ());
-    const Eigen::Vector3d j0=(HOVER_THRUST/MASS+.15)*(q0*root.segment<3>(10).cross(Eigen::Vector3d::UnitZ()));
-    const Eigen::Vector3d capture(0.,0.,std::max(root(2)+.05,Z_STAGE+.1));
-    const Coeff first=polynomial(root.head<3>(),root.segment<3>(3),a0,j0,capture,approach);
-    const Coeff second=polynomial(capture,Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero(),Eigen::Vector3d::Zero(),Eigen::Vector3d(0.,0.,.06),descent);
-    const auto reference=[&](double time,int order)->Eigen::Vector3d{
-        const bool early=time<approach;const auto& c=early?first:second;
-        const double duration=early?approach:descent,phase=std::clamp((early?time:time-approach)/duration,0.,1.);
-        Eigen::Vector3d value=Eigen::Vector3d::Zero();
-        for(int k=order;k<8;++k){double factor=1.;for(int j=0;j<order;++j)factor*=double(k-j)/duration;
-            value+=factor*std::pow(phase,k-order)*c.col(k);}
-        return value;
-    };
-    std::vector<Eigen::VectorXd> controls;Eigen::VectorXd state=root;
-    for(int k=0;k<N;++k){
-        const double time=k*h;Eigen::Quaterniond q(state(6),state(7),state(8),state(9));q.normalize();
-        Eigen::Vector3d acceleration=reference(time,2)+4.*(reference(time,0)-state.head<3>())+4.*(reference(time,1)-state.segment<3>(3));
-        const Eigen::Vector3d force=acceleration+predictor->predictAccel(time)-GRAVITY;
-        const auto desired=Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(),force.normalized());
-        Eigen::Quaterniond error=q.conjugate()*desired;if(error.w()<0.)error.coeffs()*=-1.;
-        const Eigen::Vector3d nominal=reference(time,2)+predictor->predictAccel(time)-GRAVITY,b3=nominal.normalized();
-        const Eigen::Vector3d derivative=(Eigen::Matrix3d::Identity()-b3*b3.transpose())*reference(time,3)/nominal.norm();
-        const Eigen::Vector3d omega_ref=q.conjugate()*(b3.cross(derivative));
-        // Sampled attitude error poles are approximately .422 and -.297.
-        const Eigen::Vector3d omega=state.segment<3>(10),angular_acceleration=(1.5/h)*(omega_ref+error.vec()/h-omega);
-        Eigen::VectorXd control=Eigen::VectorXd::Zero(NU_SS);control(0)=MASS*force.dot(q*Eigen::Vector3d::UnitZ());
-        control.segment<3>(1)=J_B*angular_acceleration+omega.cross(J_B*omega);control(IDX_THETA)=h;
-        clampWarmControl(control);controls.push_back(control);state=dynamics->f(state,control);
-    }
-    return controls;
-}
-
 // ── Factory ───────────────────────────────────────────────────────────────────
 inline std::shared_ptr<OptimalControlProblem<double>> create(
     const Eigen::VectorXd& x0_rel,
@@ -1131,12 +1061,6 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     // CTCS_STEP_EPS is divided by CTCS_Y_SCALE (same zero set as unscaled).
     // Hard-wired: this OCP has no other enforcement mode.
     auto cstep = makeCtcsConstraint<double>(dyn);
-    // Conditional native STC rows guide knot feasibility; the interval row
-    // still enforces the CTCS transcription. Both use exactly the same
-    // implications and tightening, without making a condition always active.
-    const auto node_guards=envOrInt("SZMUK_CTCS_NODE_GUARDS",0)!=0?
-        makeCtcsConstraint<double>(dyn,CTCS_STEP_EPS/CTCS_Y_SCALE,IDX_THETA,0.,1,true,StcForm::Original2018):nullptr;
-
     const double eps_cost = envOrQ("SZMUK_W_EPS", 1.0);
     const Eigen::Vector3d r_follow(0.0, 0.0, Z_STAGE);
     auto stage_cost = std::make_shared<CTcSTCStageCost<double>>(
@@ -1156,7 +1080,6 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
         problem->addStageConstraint(k, czfl);
         problem->addStageConstraint(k, cspeed);
         problem->addStageConstraint(k, cstep);
-        if(node_guards)problem->addStageConstraint(k,node_guards);
     }
     problem->setTerminalCost(tcost);
     // No CT-cSTC terminal constraint: the interval inequality above is the
@@ -1196,8 +1119,6 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
         static_cast<int>(Xw.size()) > N &&
         static_cast<int>(prev_K.size()) >= N;
 
-    const auto cold_controls=prev_U.empty()&&envOrInt("SZMUK_CTCS_GUIDED_INITIAL_GUESS",0)!=0?
-        coldLandingControls(x0ss,N,predictor,dyn):std::vector<Eigen::VectorXd>{};
     Eigen::VectorXd sim14 = x0ss;
     for (int k = 0; k < N; ++k) {
         Eigen::VectorXd uk(NU_SS);
@@ -1232,8 +1153,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
                     uk = u_fb;
                 }
             }
-        } else if(!cold_controls.empty()) {
-            uk=cold_controls[k];
+
         } else {
             // Match the retained single-horizon noaug benchmark: a uniform
             // hover input (plus vertical target acceleration), zero moments

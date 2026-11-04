@@ -111,14 +111,14 @@
     "src/ocp_registry.cpp": "296f1b3e405d28a9bd1f256e9dd98e635773b8897e0e35b4609ecb8dd07f0a6e",
     "include/planner_core/types.hpp": "a1dbf42811b17433b566601f9c22c0b0ba162edbaed4fd42774c8c6ffe439da4",
     "include/planner_core/controller.hpp": "707b969a4962160976e79a6d6314a7cf16e6712d008048d8606f0d0c44a1d564",
-    "include/ocp/ocp_stc_landing_noaug.hpp": "31501be1448db7191038decb450c6a0a2dcc8df455ea3e8303b7a0040211a60e",
+    "include/ocp/ocp_stc_landing_noaug.hpp": "3e2458dd7d06a019d278927dc4ec728a0980ed5d3f9c4464c73e776dc0a9e957",
     "support/test/pointmass_reference_adapter.hpp": "6d96b7c3d9128da722c3e8ee9cff7c93472e98e414219d5bdae5e6314c660f50",
-    "support/test/test_measured_root_rh.cpp": "cf4ceb334db72979be018a4503a4b4d2ee4ff82173fd581075085134bdda872a",
+    "support/test/test_measured_root_rh.cpp": "c0d8f2e7a672299b50c48ffe32aae28d5ccd6ce29cce58162b35e9289e422e67",
     "support/test/test_stc_landing_noaug_ctcs.cpp": "5b88923e62a2b120bb8b498f4f75fd11acd4c52c9fddfc403422bff2d1ecda7f",
-    "config/frozen_quad_ctcs.env": "b47bdc09999b7e6a95131e93c75cf6917fbf8256c46eb1d0bd98cb35e187d9eb",
-    "README.md": "50104cdc0810a331fdb52bb60b7f26873229e87ae7c4d6594181bb22363457f1"
+    "config/frozen_quad_ctcs.env": "8392201bb866e243295b2d8b2a0b33c2d5c2c428232789bcf0bee1564a2469a7",
+    "README.md": "eb5a2221d8227173c41c7786d12c13769841fc404cfdf03a8b6703411d1b3852"
   },
-  "scope_limit": "Current frozen measured-root NODE and CTCS cases pass on both models. Quad CTCS uses explicit guarded, tightened finite-maneuver N80 remaining-horizon profile. This establishes sampled primal/physical feasibility and landing for the tested ICs, not optimality, real-time operation or 100IC/MC1/MC2 robustness. Legacy 30-iteration real-time smoke fails. Older nested audit failures are historical, superseded only for the current recorded profile.",
+  "scope_limit": "Quad interval-only CTCS frozen RH remains unresolved. Extra nodal guards and guided initializer removed. All additional failed solver-configuration, curvature, cone and quadrature trial code removed. Native solver unchanged. Current pointmass adapter substeps100 is not evidence about the user-reported 2-3-substep thesis configuration.",
   "ctcs_shared_controller": {
     "result_directory": "logs/frozen_node_baseline_20261104/ctcs_shared",
     "profile": {
@@ -1097,9 +1097,9 @@
     },
     "remaining_failure": "Staging-start quad completes25replans and lands, but physical STC consequences fail. It is NOT claimed fully fixed. No OCP or solver change adopted."
   },
-  "current_verified_profile": "frozen_quad_ctcs_fixed",
+  "current_verified_profile": "pointmass_NODE_CTCS_reference_and_quad_NODE; quad_interval_CTCS_unresolved",
   "frozen_quad_ctcs_fixed": {
-    "status": "All eight final frozen runs pass their respective NODE or CTCS checks",
+    "status": "REJECTED as requested baseline: historical results used extra nodal STC guards and a guided initializer, now removed.",
     "planner_base_commit": "0279c8b",
     "profile": "config/frozen_quad_ctcs.env",
     "result_directory": "logs/frozen_node_baseline_20261104/quad_ctcs_fixed",
@@ -1716,5 +1716,73 @@
     "protected_user_files_unchanged": true,
     "thesis_files_unchanged": true,
     "archive": "raw_runs.tar.gz retains all trial evidence, reviews and exact final source snapshot"
+  },
+  "frozen_quad_ctcs_interval_only": {
+    "status": "UNRESOLVED",
+    "result_directory": "logs/frozen_node_baseline_20261104/quad_ctcs_interval_only_investigation",
+    "retained_changes": [
+      "Remove additional nodal STC guards",
+      "Remove guided cold initializer; retain uniform hover input guess",
+      "Handle a rejected finite-horizon request without stale diagnostic comparison"
+    ],
+    "failed_trial_code_removed": [
+      "Original-SH zero additional constraint curvature adapter",
+      "Additional native max-step/max-inner/initial-mu parameter parsers",
+      "Separate stage/LOS tightening parameters",
+      "Exactly equivalent SOC transcription",
+      "Additional CTCS integration substeps"
+    ],
+    "latest_trial": "With four or sixteen integration substeps, two feasible requests followed by infeasible request2; same request fails standalone. Finer integration reduced quadrature discrepancy but did not fix RH.",
+    "substep_claim_correction": "100 applies only to the recent reference adapter; user reports original thesis worked with 2-3. No necessity inference is justified.",
+    "no_solver_numerics_or_thesis_files_modified": true,
+    "cleanup_checks": {
+      "ordinary-node-contract": {
+        "returncode": 0
+      },
+      "root-consistency": {
+        "returncode": 0
+      },
+      "quad-node-clean": {
+        "returncode": 0
+      }
+    },
+    "quad_NODE_after_cleanup": {
+      "model": "quad",
+      "plant_execution": "matched_discrete",
+      "reference_initial": 0,
+      "staging_initial": 0,
+      "initial_ctcs_ratio": 0,
+      "accepted": 20,
+      "reached": 1,
+      "simulation_time": 9.929260822414566,
+      "ctcs": 0,
+      "ctcs_loop_pass": 0,
+      "staging_transition_pass": 0,
+      "native_ctcs_ratio": 0,
+      "planned_ctcs_ratio": 0,
+      "executed_ctcs_ratio": 0,
+      "loop_pass": 1,
+      "physical_stc_pass": 1,
+      "physical_stc_excess": 0,
+      "standalone_comparisons": 20,
+      "shift_error": 1.7763568394002505e-15,
+      "initial_guess_dynamics_error": 0,
+      "planned_physical_stc_excess": 0,
+      "remaining_horizon": 0,
+      "stationary_target": 0,
+      "physical_interval_budget": 0.0016,
+      "density_parity_error": 0,
+      "planned_dense_state_defect": 0,
+      "native_solve_pass": 1,
+      "node_loop_pass": 1,
+      "planned_continuous_pass": 1,
+      "planned_dense_excess": 0,
+      "executed_continuous_pass": 1,
+      "executed_physical_excess": 0,
+      "native_violation": 0,
+      "root_error": 0,
+      "anchor_difference": 0,
+      "prediction_error": 1.3322676295501878e-15
+    }
   }
 }
