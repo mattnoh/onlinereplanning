@@ -44,11 +44,39 @@ NODE between-node checks remain diagnostics. Results, profiles and hashes:
 Pointmass NODE, the current pointmass CTCS reference-adapter case, and quad NODE
 have passing frozen-time results recorded in
 [`support/test/frozen_node_baseline.json`](support/test/frozen_node_baseline.json).
-**Quad interval-only CTCS RH is unresolved.** The `d588218` passing quad result
+Quad interval-only CTCS RH now has a **scoped passing frozen staging/moving-target
+case** using `config/frozen_quad_ctcs.env`. It completes 19 replans / 7.73931 simulated
+seconds, with zero executed original physical excess and maximum planned
+physical excess 8.05439e-7 against the unchanged 1e-6 audit threshold. Staging
+starts active and deactivates after capture. Its full-horizon control and first
+RH request have identical prepared and returned trajectories. The solver and
+RH loop remain unchanged; the planner now honors the supplied SH barrier and
+positive thrust/duration-bound scaling settings. The profile uses existing
+physical tightening and stronger terminal position accuracy weights.
+
+This is not a general cold-start fix or a strict integral certificate. The
+maximum native row residual is 3.24973e-9, below native tolerance 1e-6, but the
+raw native budget ratio is 1.00324973 (0.325% overspend). Independent refined
+integrals also exceed the tightened numerical budget; they remain diagnostics.
+Tested stationary-hover, inbound and near-center cold starts still have failures
+with this profile. The literal physical checks and solver tolerance were not
+weakened. Native cone-normalization, inner-loop, nominal-hover-tail and
+shrinking-horizon trials did not supply a general fix; their changes were
+removed or left unselected. Profiles, failures and passing regression evidence:
+`logs/frozen_node_baseline_20261104/quad_ctcs_rh_from_sh_20261105.json`;
+passed raw runs are retained alongside it as a `.tar.gz` archive.
+
+```bash
+# Use a shell without inherited SZMUK_*/STC_*/MPC_* overrides.
+source config/frozen_quad_ctcs.env
+build/test_measured_root_rh quad matched 1 /tmp/quad-ctcs-single --ctcs --staging-initial --audit-loop --single-horizon
+build/test_measured_root_rh quad matched 40 /tmp/quad-ctcs-rh --ctcs --staging-initial --audit-loop
+```
+
+The historical `d588218` passing quad result
 used extra conditional nodal guards and a guided cold initializer. That result
 was rejected as insufficient for the requested formulation. Both additions have
-now been removed from production code. The previous quad profile is retained
-only as an explicitly **unvalidated diagnostic**, not a passing baseline.
+now been removed from production code.
 
 The caller freezes simulation time during each fresh native solve, executes four
 whole optimized intervals and then supplies the propagated plant state. Only a
@@ -57,7 +85,7 @@ Original physical STC triggers and limits remain the grading reference, with no
 excluded switching band. NODE acceptance uses native nodal constraints; dense
 violations are diagnostics for NODE.
 
-The interval-only investigations include scalar-row scaling, the retained
+The historical interval-only investigations before the clean solver restoration include scalar-row scaling, the retained
 single-horizon curvature contract, native parameter configurations, consistent
 trigger-tightening trials, an exactly equivalent SOC representation and finer
 CTCS quadrature. None completed the required quad RH case. **Those trial code
@@ -102,7 +130,7 @@ Y-scale10 and **no tightening exports**. It is not a reproduction of the thesis
 100IC configuration or a claim that its earlier single-horizon results regressed.
 Both single solves land and satisfy native interval constraints; both fail the
 original physical STC audit. Fixed-time RH accepts the first prefix, then its
-second solve returns native CTCS residual 9.34636e-6 against tolerance1e-6.
+second solve returns native CTCS residual 9.34636e-6 against tolerance 1e-6.
 Free-time RH fails on its seventh solve (2.64991e-4). Rebuilding a uniform hover
 input guess each fixed-time request also fails on the second solve. Fixed time
 alone therefore did not resolve this tested case. The fixed NODE near-center

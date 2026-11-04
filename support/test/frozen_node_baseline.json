@@ -4,7 +4,7 @@
   "solver_restoration_commit": "002850dfd35f14416e59273bdff8701ecb40a34e",
   "matching_solver_check_commit": "Current user-scenario results supersede the old analytic KKT evidence; see clean restoration record.",
   "thesis_provenance": "logs/point_mass/paper_mpc/source_revisions.json",
-  "verified_planner_code_commit": "03b083a (solver-only restoration; pointmass adapter, RH loop and OCPs unchanged)",
+  "verified_planner_code_commit": "477dfba7e1e4ecd5f72393c4cc50f3a38ff14f05",
   "planner_repository": "CoManDO_planner",
   "planner_branch": "mpc",
   "mode": "frozen simulation time during every solve; measured-root update after K=4 whole stages",
@@ -2210,6 +2210,124 @@
         "executed_physical_excess": 0,
         "executed_ctcs_ratio": 0
       }
+    }
+  },
+  "current_quad_ctcs_rh_case": {
+    "status": "validated_current_frozen_staging_moving_case; broader quad CTCS RH coverage remains incomplete",
+    "planner_code_commit": "477dfba7e1e4ecd5f72393c4cc50f3a38ff14f05",
+    "solver_commit": "002850dfd35f14416e59273bdff8701ecb40a34e",
+    "scope": {
+      "initial_physical_state": [
+        2,
+        1.5,
+        1.85,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "target_acceleration": [
+        0.04306807449,
+        0.07358261346,
+        0
+      ],
+      "plant": "matched perfect world-frame model; independent measured physical state fed back each request",
+      "time": "frozen during every solve",
+      "horizon": "80 intervals; variable duration .05 to .12 s",
+      "execute_before_replan": "four optimized whole intervals",
+      "physical_audit_sampling_seconds": 0.001,
+      "arrival_criterion": "Existing <=.1 m relative position and <=.3 m/s relative velocity; unchanged"
+    },
+    "retained_changes": [
+      "Honor the supplied SH fresh barrier parameters SZMUK_MU/MUT/MU_MUL.",
+      "Honor SH positive thrust/time-bound row scaling when SZMUK_BOUND_SCALE=1. No physical bound changes.",
+      "Frozen profile uses existing tightening settings, Y scale 10, terminal position weights xy100000/z10000. No added terminal constraints."
+    ],
+    "discarded_trials": [
+      "Nominal-hover appended control tail: removed; original shift/last-input extension retained.",
+      "Additional unit torque/speed cone normalization option: removed.",
+      "Extra inner-loop parameter exposure trial: removed; native defaults retained.",
+      "Shrinking-horizon mode was tested and did not solve the issue; existing feature unchanged, not selected."
+    ],
+    "known_limits": {
+      "not_a_general_initial_condition_fix": true,
+      "tested_stationary_target_hover_and_inbound_near_cold_starts": "Some fail with this profile; see trial records.",
+      "native_budget_feasible_at_solver_tolerance": true,
+      "native_row_tolerance": 1e-06,
+      "max_native_row_residual": 3.2497284982315545e-09,
+      "strict_raw_native_budget_met": false,
+      "native_budget_ratio": 1.0032497284982316,
+      "raw_native_budget_overspend_percent": 0.32497284982315744,
+      "independent_planned_integral_ratio": 1.6105684314998006,
+      "independent_executed_integral_ratio": 1.2883588456112394,
+      "integration_note": "Independent integrals are diagnostics, not an independent replacement budget. No strict continuous-integral certificate is claimed.",
+      "physical_note": "All original nominal physical checks pass at the unchanged 1e-6 threshold on the 1 ms audit; the maximum positive planned consequence is terminal LOS.",
+      "not_tested_here": [
+        "real-time execution",
+        "plant mismatch or measurement noise",
+        "100-IC RH/MC1/MC2 campaigns"
+      ]
+    },
+    "evidence": "logs/frozen_node_baseline_20261104/quad_ctcs_rh_from_sh_20261105.json",
+    "summary": {
+      "model": "quad",
+      "plant_execution": "matched_discrete",
+      "reference_initial": 0,
+      "staging_initial": 1,
+      "initial_ctcs_ratio": 48303.3462716665,
+      "accepted": 19,
+      "reached": 1,
+      "simulation_time": 7.739313024576034,
+      "ctcs": 1,
+      "ctcs_loop_pass": 1,
+      "staging_transition_pass": 1,
+      "native_ctcs_ratio": 1.0032497284982316,
+      "planned_ctcs_ratio": 1.6105684314998006,
+      "executed_ctcs_ratio": 1.2883588456112394,
+      "loop_pass": 1,
+      "physical_stc_pass": 1,
+      "physical_stc_excess": 0,
+      "standalone_comparisons": 19,
+      "shift_error": 1.7763568394002505e-15,
+      "initial_guess_dynamics_error": 0,
+      "planned_physical_stc_excess": 8.054386272388165e-07,
+      "remaining_horizon": 0,
+      "stationary_target": 0,
+      "fixed_dt": 0,
+      "single_horizon": 0,
+      "replay_intervals": 4,
+      "physical_interval_budget": 1e-05,
+      "density_parity_error": 5.524781005191284e-16,
+      "planned_dense_state_defect": 3.290139782841095e-08,
+      "native_solve_pass": 1,
+      "node_loop_pass": 1,
+      "planned_continuous_pass": 1,
+      "planned_dense_excess": 0,
+      "executed_continuous_pass": 1,
+      "executed_physical_excess": 0,
+      "native_violation": 3.2497284982315545e-09,
+      "root_error": 0,
+      "anchor_difference": 0,
+      "prediction_error": 6.661338147750939e-16
+    },
+    "paired_SH_first_RH": {
+      "prepared_X": 0.0,
+      "prepared_U": 0.0,
+      "returned_X": 0.0,
+      "returned_U": 0.0
+    },
+    "other_regressions": {
+      "final-quad-node": 0,
+      "final-pointmass-node": 0,
+      "final-pointmass-ctcs": 0,
+      "ordinary-node-contract": 0,
+      "root-consistency": 0
     }
   }
 }
