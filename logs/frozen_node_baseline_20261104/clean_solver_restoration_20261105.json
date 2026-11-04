@@ -1,0 +1,4045 @@
+{
+  "solver_repository": "/home/lab/mavros_ws/src/ALIPDDP-main",
+  "solver_branch": "comando-ctcs-interface",
+  "solver_commit": "002850dfd35f14416e59273bdff8701ecb40a34e",
+  "original_source": "/home/lab/projects/STC/multiquad_carrier_landing/src/solver/ddp",
+  "original_main_revision": "1bc946476a5160821edb690dfe20dbc65a8de9a0",
+  "numerical_modes": {
+    "default": "Original single-shooting iLQR; original initial slacks/duals, recursion, regularization, stopping rules. use_ddp_terms defaults false.",
+    "retained_extension": "Existing FDDP/full-DDP implementation selected only by existing use_feasibility_ms / use_ddp_terms flags. Pointmass RH keeps its existing FDDP mode.",
+    "numerical_state_reuse": false
+  },
+  "solver_sha256": {
+    "alipddp/alipddp/alipddp.h": "668c289871d6db0b4b8f58ba5fb700d57e15069ff4228f6c900d92216a1e6314",
+    "alipddp/alipddp/alipddp.tpp": "54dbeb42ee59a70f531b7446133a97952eb35fa7decafeae2c8776dd5d0bc7fe",
+    "alipddp/helper_functions/soc_helper.h": "fa3168ac789afc38887a8743b016aa7d7be0495707c0d958498a01243ce6d4ec",
+    "alipddp/param.h": "e34c101d8c31453fcd2bd3d240680c589b8d01dd82d39c099582cf2f13383640",
+    "problem_maker/constraint/ctcs_stage_constraint.h": "b7d87acf31294ea43bcb3a1b75d1e0ccc0c91b187c29a035d5b91a3c0e4e8520"
+  },
+  "reference_sha256": {
+    "alipddp/alipddp/alipddp.h": "3e74a04a9432c15c30b0dd8cc35f26b5c356d2ab6c2e95419878d725652231ca",
+    "alipddp/alipddp/alipddp.tpp": "481a358d33999f2e73e95ecbbc5999b8a9e0a7c09d865c43796d00637445c637",
+    "alipddp/helper_functions/soc_helper.h": "e317c83940521da7548ce206b4ff208708ea17bc48feb4ea97bb327b2f42e6e0",
+    "alipddp/param.h": "b7aee9ecd581f46eb33850fccfe9fb857b8db5c3f679c3f019ecee7494084d94",
+    "problem_maker/constraint/ctcs_stage_constraint.h": "f00baad41f4d60a934794e2690b008a68854cd12ebae86f9fad56fc751db0584"
+  },
+  "quad_single_horizon": {
+    "source": "/home/lab/projects/STC/multiquad_carrier_landing/src/examples/quad_sh_ctcs/quad_sh_ctcs.cpp",
+    "row": "header (interface), not handwritten",
+    "profile": {
+      "SZMUK_N": "80",
+      "SZMUK_MAX_ITER": "1200",
+      "SZMUK_W_EPS": "0.0",
+      "SZMUK_W_TOUCH_VEL": "0.0",
+      "SZMUK_R_THETA": "0.0",
+      "SZMUK_W_POS_XY": "0.0",
+      "SZMUK_W_POS_Z": "0.0",
+      "SZMUK_W_VEL": "0.0",
+      "SZMUK_RHO": "100.0",
+      "SZMUK_RHO_MUL": "10.0",
+      "SZMUK_REG2_MIN": "0.1",
+      "SZMUK_VERBOSE_SOLVER": "0",
+      "SZMUK_CTCS_MODE": "step_ineq",
+      "SZMUK_CTCS_Y_SCALE": "1000000.0",
+      "SZMUK_CTCS_STEP_EPS": "1e-05",
+      "SZMUK_LOS_TRIGGER_FLOOR": "0.0",
+      "SZMUK_W_LAND_SPEED": "100",
+      "SZMUK_W_LAND_TILT": "300000000",
+      "SZMUK_W_LAND_OMEGA": "1000000",
+      "SZMUK_W_LAND_GS": "7500",
+      "SZMUK_W_STC_STAGE": "100",
+      "SZMUK_W_STC_LOS": "200",
+      "SZMUK_BOUND_SCALE": "1",
+      "SZMUK_MU": "0.1"
+    },
+    "samples": 100,
+    "landed": 100,
+    "activated_consequence_compliant": 89,
+    "ctcs_certified": 89,
+    "matches_direct_original_core_nodes": 100,
+    "independent_fresh_reference_spot_checks": {
+      "samples": [
+        0,
+        1,
+        2
+      ],
+      "byte_identical_nodes": true
+    },
+    "grading": "Original run_100ic.py graders imported read-only. 100/100 refers to landings; this does not claim zero physical violations in all 100 ICs.",
+    "records": [
+      {
+        "sample": {
+          "sample": 0,
+          "r0": [
+            "0.2285884360425806",
+            "0.6407018832165956",
+            "2.529474655455947"
+          ],
+          "v0": [
+            "2.680410822149282",
+            "0.2275920615983298",
+            "0.3878587324500555"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.3632119999999999,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.6443866963816015e-05,
+          "vel_err": 0.00014402151679523446,
+          "T_star": 8.93928967,
+          "y_dense": 8.245954087885011e-05,
+          "budget_ratio": 0.10307442609856263,
+          "zhold_frac": 0.6366205783775658,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s0/clean_step_ineq_final-interface-s0.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 1,
+          "r0": [
+            "-1.2779282417557472",
+            "-0.5394121845473709",
+            "2.1634335831993856"
+          ],
+          "v0": [
+            "-1.984046452476928",
+            "-1.9185159966117618",
+            "0.9884844881818371"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.3769129999999999,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010758574301458349,
+          "vel_err": 0.0001770706867327283,
+          "T_star": 8.51696928,
+          "y_dense": 7.448789471824999e-05,
+          "budget_ratio": 0.09310986839781248,
+          "zhold_frac": 0.6246456932154157,
+          "path_excess": 3.121e-05,
+          "constraint_excess": 3.121e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s1/clean_step_ineq_final-interface-s1.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 2,
+          "r0": [
+            "-1.857333541636214",
+            "-0.6468411169455109",
+            "2.3797445371763795"
+          ],
+          "v0": [
+            "-0.45909417120140505",
+            "0.37046269525579617",
+            "0.16520411511382155"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.13997670396637707,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.7131917580936467e-05,
+          "vel_err": 0.00027436361967287135,
+          "T_star": 7.08619608,
+          "y_dense": 0.00011554433290240004,
+          "budget_ratio": 0.14443041612800003,
+          "zhold_frac": 0.5132195523440836,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s2/clean_step_ineq_final-interface-s2.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 3,
+          "r0": [
+            "-0.30734469390908514",
+            "-0.9110130830343254",
+            "2.7752373503578407"
+          ],
+          "v0": [
+            "0.39293653228667474",
+            "0.2660423350724349",
+            "-0.040102887423999055"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.24454385818487856,
+          true,
+          "triggered landing glideslope"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.1844674408193864e-05,
+          "vel_err": 9.71854598178143e-05,
+          "T_star": 6.00968895,
+          "y_dense": 0.00016200971598160014,
+          "budget_ratio": 0.20251214497700015,
+          "zhold_frac": 0.19967752906745698,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s3/clean_step_ineq_final-interface-s3.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 4,
+          "r0": [
+            "0.20944010279479644",
+            "0.94030858004787",
+            "1.9067419728515071"
+          ],
+          "v0": [
+            "-0.960384777059015",
+            "-0.8764696427100162",
+            "-0.4543964961784367"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.0958480758330047,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 3.713453513913968e-05,
+          "vel_err": 2.1478477599681036e-05,
+          "T_star": 6.8793118,
+          "y_dense": 0.0001162911319609,
+          "budget_ratio": 0.145363914951125,
+          "zhold_frac": 0.2715627426569036,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s4/clean_step_ineq_final-interface-s4.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 5,
+          "r0": [
+            "2.638235724282688",
+            "-0.10096410850521496",
+            "2.150964681917169"
+          ],
+          "v0": [
+            "-0.724429544372406",
+            "-2.3022574045263986",
+            "-0.8136007740000256"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.18623460702514238,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.880236687228499e-05,
+          "vel_err": 0.00016307003710062742,
+          "T_star": 8.07373316,
+          "y_dense": 0.00014140758963709994,
+          "budget_ratio": 0.17675948704637492,
+          "zhold_frac": 0.5842791824445186,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s5/clean_step_ineq_final-interface-s5.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 6,
+          "r0": [
+            "-0.4157953148416121",
+            "-0.16662261068259113",
+            "1.7537675727171473"
+          ],
+          "v0": [
+            "2.3431674065535892",
+            "0.4400611369096013",
+            "-0.8602972583671872"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1808119103663839,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.2296068477362997e-05,
+          "vel_err": 0.0001283349940585186,
+          "T_star": 8.96141748,
+          "y_dense": 4.4301195049750035e-05,
+          "budget_ratio": 0.05537649381218754,
+          "zhold_frac": 0.5479712535387872,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s6/clean_step_ineq_final-interface-s6.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 7,
+          "r0": [
+            "2.1508083006047443",
+            "-0.47344422378597517",
+            "2.2874864795553456"
+          ],
+          "v0": [
+            "-0.4074736474079361",
+            "1.0071112544364942",
+            "0.22492362624791698"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.13075859543673296,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.0467043517631901e-05,
+          "vel_err": 0.0001769302591418438,
+          "T_star": 6.86418541,
+          "y_dense": 0.00016726341470074988,
+          "budget_ratio": 0.20907926837593735,
+          "zhold_frac": 0.48138349310701384,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s7/clean_step_ineq_final-interface-s7.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 8,
+          "r0": [
+            "-1.0324118742261195",
+            "-0.6944876628875484",
+            "2.652660586584576"
+          ],
+          "v0": [
+            "-0.6293652728364845",
+            "1.0916396594047637",
+            "-0.36587673746504895"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1511956644752721,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.6068089688352694e-05,
+          "vel_err": 8.71006791018302e-05,
+          "T_star": 7.48476238,
+          "y_dense": 5.142279355445002e-05,
+          "budget_ratio": 0.06427849194306252,
+          "zhold_frac": 0.5186537344689892,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s8/clean_step_ineq_final-interface-s8.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 9,
+          "r0": [
+            "3.493775868910486",
+            "-1.5525370113845454",
+            "1.9100413683236832"
+          ],
+          "v0": [
+            "2.3130259870710046",
+            "-0.5491703713274412",
+            "-0.4152072565634179"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.0503692,
+          true,
+          "triggered landing speed"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00011141078044785432,
+          "vel_err": 0.00023688372527465873,
+          "T_star": 8.9094481,
+          "y_dense": 5.149848458125003e-05,
+          "budget_ratio": 0.06437310572656253,
+          "zhold_frac": 0.6861758485354441,
+          "path_excess": 1.684e-05,
+          "constraint_excess": 1.684e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s9/clean_step_ineq_final-interface-s9.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 10,
+          "r0": [
+            "-2.4366791357148765",
+            "-2.926568874353072",
+            "2.251489680524331"
+          ],
+          "v0": [
+            "0.5813599822979476",
+            "-0.4111269863793608",
+            "0.16207099052295554"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.18653943320332766,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.018090681807931e-05,
+          "vel_err": 0.0002520847321834466,
+          "T_star": 7.70054631,
+          "y_dense": 8.089286674335e-05,
+          "budget_ratio": 0.10111608342918749,
+          "zhold_frac": 0.5621354519196443,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s10/clean_step_ineq_final-interface-s10.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 11,
+          "r0": [
+            "3.9045237993407094",
+            "0.3032956211835098",
+            "2.492283013148543"
+          ],
+          "v0": [
+            "2.0742650948876884",
+            "0.8374654673645447",
+            "0.5858298486598872"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.26047000000000015,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010964747785517003,
+          "vel_err": 0.0002127947381868264,
+          "T_star": 8.93155763,
+          "y_dense": 4.844146363599999e-05,
+          "budget_ratio": 0.06055182954499999,
+          "zhold_frac": 0.6597884080382964,
+          "path_excess": 3.063e-05,
+          "constraint_excess": 3.063e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s11/clean_step_ineq_final-interface-s11.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 12,
+          "r0": [
+            "-3.400178388553333",
+            "-2.8379702297755016",
+            "2.0774398627011226"
+          ],
+          "v0": [
+            "-0.12408407373974517",
+            "-0.933578296059693",
+            "-0.2442876486421868"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.25588500000000014,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.085345055380524e-05,
+          "vel_err": 0.00010630359448297127,
+          "T_star": 9.05857907,
+          "y_dense": 5.013856931154986e-05,
+          "budget_ratio": 0.06267321163943733,
+          "zhold_frac": 0.6272506842510787,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s12/clean_step_ineq_final-interface-s12.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 13,
+          "r0": [
+            "-1.1276768091851321",
+            "1.9103344819173533",
+            "2.8541717777116187"
+          ],
+          "v0": [
+            "-0.13746926798437747",
+            "-0.16885680760841443",
+            "0.004861516801736642"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.12784327189209854,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 9.613459314939653e-06,
+          "vel_err": 0.0001956582096412006,
+          "T_star": 6.77223571,
+          "y_dense": 0.00016026878514440018,
+          "budget_ratio": 0.20033598143050022,
+          "zhold_frac": 0.48138537546561555,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s13/clean_step_ineq_final-interface-s13.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 14,
+          "r0": [
+            "-3.468165572658796",
+            "2.061403047778577",
+            "2.7165644016454236"
+          ],
+          "v0": [
+            "-0.8377534355853394",
+            "1.943520566209538",
+            "-0.44169748054547986"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.21833300000000005,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 7.511107907625879e-05,
+          "vel_err": 0.00016094356712835714,
+          "T_star": 9.21558767,
+          "y_dense": 4.7915636521000016e-05,
+          "budget_ratio": 0.05989454565125002,
+          "zhold_frac": 0.6692562428848339,
+          "path_excess": 1.574e-05,
+          "constraint_excess": 1.574e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s14/clean_step_ineq_final-interface-s14.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 15,
+          "r0": [
+            "-0.6487657800167735",
+            "-0.17211316321488299",
+            "2.3133783635120477"
+          ],
+          "v0": [
+            "0.2341288313519646",
+            "2.193539619631918",
+            "0.0037261489474944894"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.09335579999999899,
+          true,
+          "triggered landing speed"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010291911872922348,
+          "vel_err": 0.00020411865813785862,
+          "T_star": 7.89222786,
+          "y_dense": 4.4356853335600105e-05,
+          "budget_ratio": 0.05544606666950013,
+          "zhold_frac": 0.5774740581298928,
+          "path_excess": 3.765e-05,
+          "constraint_excess": 3.765e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s15/clean_step_ineq_final-interface-s15.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 16,
+          "r0": [
+            "-0.37258684654351715",
+            "-0.44273944074949506",
+            "2.882228495012396"
+          ],
+          "v0": [
+            "0.0961549361195565",
+            "0.7542291565210184",
+            "0.2578576336296832"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.08316711675728228,
+          true,
+          "triggered landing glideslope"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 6.83054565902315e-05,
+          "vel_err": 6.816729641110905e-05,
+          "T_star": 6.31064531,
+          "y_dense": 5.88929776836e-05,
+          "budget_ratio": 0.07361622210449999,
+          "zhold_frac": 0.4259462270428252,
+          "path_excess": 1.319e-05,
+          "constraint_excess": 1.319e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s16/clean_step_ineq_final-interface-s16.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 17,
+          "r0": [
+            "-0.16250635935206773",
+            "0.7998408826020581",
+            "2.3629513092875536"
+          ],
+          "v0": [
+            "-0.028052203490323252",
+            "-0.9739186719152297",
+            "-0.06753740881717259"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.030514739036246574,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 3.706432516585187e-05,
+          "vel_err": 5.70787219548581e-05,
+          "T_star": 6.00324655,
+          "y_dense": 5.22643027872e-05,
+          "budget_ratio": 0.065330378484,
+          "zhold_frac": 0.21988102254437641,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s17/clean_step_ineq_final-interface-s17.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 18,
+          "r0": [
+            "0.08495552320479653",
+            "0.46338920599994",
+            "1.7755533239043677"
+          ],
+          "v0": [
+            "-2.312892140316774",
+            "1.3690521192214784",
+            "-0.17556331844523304"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.07779280000000055,
+          true,
+          "triggered landing speed"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010701882731557097,
+          "vel_err": 0.0001726877048315832,
+          "T_star": 8.43229517,
+          "y_dense": 6.182880214940009e-05,
+          "budget_ratio": 0.07728600268675011,
+          "zhold_frac": 0.5774056377108536,
+          "path_excess": 3.003e-05,
+          "constraint_excess": 3.003e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s18/clean_step_ineq_final-interface-s18.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 19,
+          "r0": [
+            "4.014946256187494",
+            "1.5311033809555141",
+            "2.550813046835624"
+          ],
+          "v0": [
+            "2.668997667909923",
+            "-1.1273332268889968",
+            "0.15435570365191892"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.5272880000000001,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.0001154263323509848,
+          "vel_err": 0.00021989263402851859,
+          "T_star": 8.95639968,
+          "y_dense": 6.244572000000008e-05,
+          "budget_ratio": 0.0780571500000001,
+          "zhold_frac": 0.6784422208813262,
+          "path_excess": 9.3e-06,
+          "constraint_excess": 9.3e-06,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s19/clean_step_ineq_final-interface-s19.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 20,
+          "r0": [
+            "0.0017376139483265883",
+            "-3.1186471292467517",
+            "2.1849400042363456"
+          ],
+          "v0": [
+            "2.619035549267731",
+            "0.7057986031646559",
+            "-0.5444231649633801"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.3374000000000002,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010721185242313464,
+          "vel_err": 0.00017041916353509074,
+          "T_star": 8.35855365,
+          "y_dense": 7.498557454974979e-05,
+          "budget_ratio": 0.09373196818718724,
+          "zhold_frac": 0.6083850188602905,
+          "path_excess": 3.402e-05,
+          "constraint_excess": 3.402e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s20/clean_step_ineq_final-interface-s20.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 21,
+          "r0": [
+            "-2.1725928110359134",
+            "1.039277973804454",
+            "2.530654284222858"
+          ],
+          "v0": [
+            "1.5046197251988573",
+            "-1.8025372929762566",
+            "-0.803254200875963"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.11587257180990163,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.202749418340634e-05,
+          "vel_err": 0.0003002691734094594,
+          "T_star": 7.26455277,
+          "y_dense": 9.158476187590002e-05,
+          "budget_ratio": 0.11448095234487503,
+          "zhold_frac": 0.5309231775323727,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s21/clean_step_ineq_final-interface-s21.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 22,
+          "r0": [
+            "2.957759470318529",
+            "0.05159633287638672",
+            "2.054188765015798"
+          ],
+          "v0": [
+            "0.07490139806174981",
+            "-2.4745803053149076",
+            "0.7081376411625202"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.39772300000000016,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.4942153074664583e-05,
+          "vel_err": 0.00012021220736680615,
+          "T_star": 8.98670828,
+          "y_dense": 6.588812396350014e-05,
+          "budget_ratio": 0.08236015495437517,
+          "zhold_frac": 0.6363618459416599,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s22/clean_step_ineq_final-interface-s22.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 23,
+          "r0": [
+            "-1.6832037372652802",
+            "0.5926827738034544",
+            "2.8608790097689005"
+          ],
+          "v0": [
+            "0.9953823915302656",
+            "0.1597217221966869",
+            "-0.2892714998169643"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1819183624135079,
+          true,
+          "triggered landing glideslope"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 3.887081295779649e-05,
+          "vel_err": 0.00013890408417321646,
+          "T_star": 6.38584133,
+          "y_dense": 0.0001297742816249,
+          "budget_ratio": 0.162217852031125,
+          "zhold_frac": 0.21704265552116372,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s23/clean_step_ineq_final-interface-s23.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 24,
+          "r0": [
+            "-0.11877210498790615",
+            "-3.5113041239641833",
+            "1.9219736593044545"
+          ],
+          "v0": [
+            "-0.37787254585068275",
+            "0.8514822056930009",
+            "-0.01000933602597854"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.14871809585922202,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.5325563611169413e-05,
+          "vel_err": 4.253793718552887e-05,
+          "T_star": 6.90949234,
+          "y_dense": 5.5918948406199944e-05,
+          "budget_ratio": 0.06989868550774993,
+          "zhold_frac": 0.44026386893714975,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s24/clean_step_ineq_final-interface-s24.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 25,
+          "r0": [
+            "0.4475541605982493",
+            "-0.35917621862254306",
+            "2.07713318175231"
+          ],
+          "v0": [
+            "1.549069909679612",
+            "0.2159490546442191",
+            "0.15368349561994152"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          202.40557091385728,
+          false,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00016403579517897915,
+          "vel_err": 0.0004474767471053663,
+          "T_star": 8.54490342,
+          "y_dense": 309.2918405813676,
+          "budget_ratio": 386614.8007267095,
+          "zhold_frac": 0.2611051840302719,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s25/clean_step_ineq_final-interface-s25.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 26,
+          "r0": [
+            "-1.163902953872536",
+            "-0.5377272608902895",
+            "1.8684412868801306"
+          ],
+          "v0": [
+            "0.4897203586030272",
+            "0.024291203810948958",
+            "-0.07553357202888221"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.8832832665256745,
+          true,
+          "triggered landing glideslope"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010153809531402488,
+          "vel_err": 0.00211186020486679,
+          "T_star": 6.47213157,
+          "y_dense": 0.4694812900407178,
+          "budget_ratio": 586.8516125508972,
+          "zhold_frac": 0.07308785751399674,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s26/clean_step_ineq_final-interface-s26.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 27,
+          "r0": [
+            "-1.871575405209266",
+            "0.32465562903404754",
+            "2.6141420851612893"
+          ],
+          "v0": [
+            "0.17401177322146283",
+            "-1.7623828184037884",
+            "-0.2977065879976925"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          117.16339370453252,
+          false,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.0009572608199440735,
+          "vel_err": 0.0016253500283631215,
+          "T_star": 8.1318269,
+          "y_dense": 876.305477158312,
+          "budget_ratio": 1095381.84644789,
+          "zhold_frac": 0.3932442524077831,
+          "path_excess": 0.0005303,
+          "constraint_excess": 0.0005303,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s27/clean_step_ineq_final-interface-s27.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 28,
+          "r0": [
+            "0.7665021425015641",
+            "3.5581484678074107",
+            "2.6407899938148764"
+          ],
+          "v0": [
+            "0.94341657421998",
+            "-0.4393952101985801",
+            "0.0774356489571879"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.17536400369591076,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.0663990418116242e-05,
+          "vel_err": 0.0002592763371385827,
+          "T_star": 7.7232893,
+          "y_dense": 8.646197758185e-05,
+          "budget_ratio": 0.10807747197731249,
+          "zhold_frac": 0.5594415736828607,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s28/clean_step_ineq_final-interface-s28.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 29,
+          "r0": [
+            "-2.2172035080897343",
+            "0.04345605737427866",
+            "2.659809657010508"
+          ],
+          "v0": [
+            "-1.2881432672419495",
+            "0.043442219651540395",
+            "0.22809012934559106"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.19526021377631864,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.8678923951876884e-05,
+          "vel_err": 0.0001406513110497019,
+          "T_star": 8.621469,
+          "y_dense": 6.268010391915001e-05,
+          "budget_ratio": 0.07835012989893751,
+          "zhold_frac": 0.6089449396616748,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s29/clean_step_ineq_final-interface-s29.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 30,
+          "r0": [
+            "-0.9032789273096222",
+            "3.844040501014939",
+            "2.736186857228046"
+          ],
+          "v0": [
+            "-0.34713444391325715",
+            "1.1657090552338871",
+            "0.09527225856401571"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.361448,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.9414121149307787e-05,
+          "vel_err": 0.00013268880472745243,
+          "T_star": 8.9434549,
+          "y_dense": 5.5074463317850016e-05,
+          "budget_ratio": 0.06884307914731251,
+          "zhold_frac": 0.6291194849095734,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s30/clean_step_ineq_final-interface-s30.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 31,
+          "r0": [
+            "2.563150467501871",
+            "-1.130015557383653",
+            "2.715523202973848"
+          ],
+          "v0": [
+            "-1.760190283166089",
+            "1.8493232691906178",
+            "-0.6153516055949647"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.053585139990875774,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.0001139816270282189,
+          "vel_err": 6.098211705082073e-05,
+          "T_star": 7.37276266,
+          "y_dense": 4.793949073785005e-05,
+          "budget_ratio": 0.05992436342231256,
+          "zhold_frac": 0.48995246511841467,
+          "path_excess": 2.926e-05,
+          "constraint_excess": 2.926e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s31/clean_step_ineq_final-interface-s31.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 32,
+          "r0": [
+            "0.4457697773351757",
+            "-0.26298435501741213",
+            "2.2929103190689233"
+          ],
+          "v0": [
+            "-0.6823474947825687",
+            "-0.8537062435404262",
+            "-0.3375506042429722"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.10999379808162857,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010580030292962303,
+          "vel_err": 4.98250900651469e-05,
+          "T_star": 7.20920647,
+          "y_dense": 7.479484299920002e-05,
+          "budget_ratio": 0.09349355374900002,
+          "zhold_frac": 0.4304948322557892,
+          "path_excess": 3.123e-05,
+          "constraint_excess": 3.123e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s32/clean_step_ineq_final-interface-s32.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 33,
+          "r0": [
+            "-0.8243520815405692",
+            "-1.1453592640627173",
+            "2.5268499134132214"
+          ],
+          "v0": [
+            "0.8343017371262823",
+            "-1.073749348712568",
+            "-0.2431555088000648"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          194.86380701081606,
+          false,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.0008209166278618067,
+          "vel_err": 0.0015998331688335506,
+          "T_star": 8.03423388,
+          "y_dense": 703.8096811021442,
+          "budget_ratio": 879762.1013776802,
+          "zhold_frac": 0.2623163890270021,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s33/clean_step_ineq_final-interface-s33.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 34,
+          "r0": [
+            "-0.33478655006224484",
+            "0.038831814504074705",
+            "1.9842972582721137"
+          ],
+          "v0": [
+            "-0.8002965497806945",
+            "0.3445980309561567",
+            "-0.024645647641051597"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.13332554725750434,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 6.165856550391033e-05,
+          "vel_err": 9.888468283814234e-05,
+          "T_star": 7.21719375,
+          "y_dense": 9.874879570714993e-05,
+          "budget_ratio": 0.12343599463393741,
+          "zhold_frac": 0.42731289568054065,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s34/clean_step_ineq_final-interface-s34.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 35,
+          "r0": [
+            "-0.19542193143891584",
+            "-0.5142727196618532",
+            "1.8476238967118623"
+          ],
+          "v0": [
+            "2.253399097280541",
+            "-0.5913796807416299",
+            "0.7653429608345187"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.18088983583842966,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 9.886329248007069e-05,
+          "vel_err": 0.0003065478225334507,
+          "T_star": 7.78249178,
+          "y_dense": 8.170554481110005e-05,
+          "budget_ratio": 0.10213193101387505,
+          "zhold_frac": 0.5892703917510594,
+          "path_excess": 2.852e-05,
+          "constraint_excess": 2.852e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s35/clean_step_ineq_final-interface-s35.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 36,
+          "r0": [
+            "0.5369590062106095",
+            "1.1229776679027998",
+            "2.51737384026565"
+          ],
+          "v0": [
+            "1.757991404978045",
+            "1.0130305125810621",
+            "0.7122263894739709"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.19187503788289728,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.281049319940277e-05,
+          "vel_err": 0.00021037356416622315,
+          "T_star": 8.30722943,
+          "y_dense": 5.1600426406949986e-05,
+          "budget_ratio": 0.06450053300868748,
+          "zhold_frac": 0.6114045233490079,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s36/clean_step_ineq_final-interface-s36.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 37,
+          "r0": [
+            "-1.3562165949624536",
+            "-1.074464675448584",
+            "1.800337069936705"
+          ],
+          "v0": [
+            "0.18421644816247276",
+            "0.38384085586700817",
+            "-0.126647494001059"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          3.3840019570579747,
+          false,
+          "triggered landing glideslope"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 3.144437310553353e-05,
+          "vel_err": 0.00031164533591889355,
+          "T_star": 6.93519283,
+          "y_dense": 0.12419619159358929,
+          "budget_ratio": 155.2452394919866,
+          "zhold_frac": 0.23285043683493367,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s37/clean_step_ineq_final-interface-s37.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 38,
+          "r0": [
+            "4.087470481518628",
+            "0.7973653555570742",
+            "1.9984149409939773"
+          ],
+          "v0": [
+            "0.801093844666918",
+            "-1.4661361199390393",
+            "0.3173515350734101"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.3529569999999999,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.4332998171207754e-05,
+          "vel_err": 0.00011177628728849424,
+          "T_star": 9.01355282,
+          "y_dense": 8.103992579754996e-05,
+          "budget_ratio": 0.10129990724693744,
+          "zhold_frac": 0.6320088431012267,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s38/clean_step_ineq_final-interface-s38.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 39,
+          "r0": [
+            "0.5095836997688928",
+            "-0.2727287475206313",
+            "2.7497617714705056"
+          ],
+          "v0": [
+            "1.6946762110041078",
+            "0.863526217789502",
+            "-0.5957553565472747"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1001663999999991,
+          true,
+          "triggered landing speed"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010613121218567138,
+          "vel_err": 0.0001911695545844055,
+          "T_star": 7.90258831,
+          "y_dense": 4.118850318789993e-05,
+          "budget_ratio": 0.05148562898487491,
+          "zhold_frac": 0.5793740354924297,
+          "path_excess": 3.478e-05,
+          "constraint_excess": 3.478e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s39/clean_step_ineq_final-interface-s39.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 40,
+          "r0": [
+            "-0.5348740490052316",
+            "0.46739999344752814",
+            "2.413993557069812"
+          ],
+          "v0": [
+            "-1.6064130452079757",
+            "-0.8119354927398326",
+            "0.4444330242970009"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.13011914944245762,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 9.6403911227709e-05,
+          "vel_err": 0.0003882866175906659,
+          "T_star": 7.55496518,
+          "y_dense": 0.00011108500351015015,
+          "budget_ratio": 0.13885625438768767,
+          "zhold_frac": 0.5612822665583748,
+          "path_excess": 2.913e-05,
+          "constraint_excess": 2.913e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s40/clean_step_ineq_final-interface-s40.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 41,
+          "r0": [
+            "-3.2070838780392905",
+            "-2.530335937748453",
+            "2.8724034446543056"
+          ],
+          "v0": [
+            "0.030884955872723774",
+            "-2.2201468736321983",
+            "-0.7083016334163565"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.4337670000000002,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.7338206366288294e-05,
+          "vel_err": 0.00012841165289801388,
+          "T_star": 9.32979815,
+          "y_dense": 4.0979884055099907e-05,
+          "budget_ratio": 0.05122485506887488,
+          "zhold_frac": 0.6530784291405061,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s41/clean_step_ineq_final-interface-s41.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 42,
+          "r0": [
+            "-2.5213119298000475",
+            "1.8562662386796906",
+            "2.8257653552552418"
+          ],
+          "v0": [
+            "2.0399848970975554",
+            "-1.3592343473619346",
+            "0.8872542689860052"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1231131179364936,
+          true,
+          "triggered landing glideslope"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 3.332286602319794e-05,
+          "vel_err": 0.00017542610239072178,
+          "T_star": 6.66776797,
+          "y_dense": 0.00015174236169999988,
+          "budget_ratio": 0.18967795212499983,
+          "zhold_frac": 0.4006496749766174,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s42/clean_step_ineq_final-interface-s42.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 43,
+          "r0": [
+            "-0.3890814486067675",
+            "-1.2053791817275035",
+            "2.7403210661773922"
+          ],
+          "v0": [
+            "-1.1901991908904284",
+            "0.8801601039372895",
+            "0.16634489362622876"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.12044036845268691,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.388257180784598e-05,
+          "vel_err": 0.00022390886963226804,
+          "T_star": 7.68219665,
+          "y_dense": 8.338982000815002e-05,
+          "budget_ratio": 0.10423727501018752,
+          "zhold_frac": 0.5505666715782394,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s43/clean_step_ineq_final-interface-s43.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 44,
+          "r0": [
+            "1.6549492466001707",
+            "-1.5059036254887974",
+            "1.9317835594220105"
+          ],
+          "v0": [
+            "0.3599054910504465",
+            "-0.6980240110248126",
+            "-0.02810632023663768"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.15097334794767203,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 6.539042131688707e-05,
+          "vel_err": 7.9724531356415e-05,
+          "T_star": 7.78745422,
+          "y_dense": 6.172086753120002e-05,
+          "budget_ratio": 0.07715108441400002,
+          "zhold_frac": 0.533935720523568,
+          "path_excess": 6.76e-06,
+          "constraint_excess": 6.76e-06,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s44/clean_step_ineq_final-interface-s44.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 45,
+          "r0": [
+            "0.45860592830048635",
+            "-0.7686576552689641",
+            "2.778836217989598"
+          ],
+          "v0": [
+            "-0.9503450822674516",
+            "-0.4150703284246984",
+            "-0.19047150595972281"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.13219563004070034,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.9860761879094778e-05,
+          "vel_err": 8.093649671192842e-05,
+          "T_star": 7.04935715,
+          "y_dense": 9.072441390115001e-05,
+          "budget_ratio": 0.11340551737643752,
+          "zhold_frac": 0.4804987061834426,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s45/clean_step_ineq_final-interface-s45.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 46,
+          "r0": [
+            "-2.361474672921895",
+            "-0.63934238855604",
+            "2.8929220453116082"
+          ],
+          "v0": [
+            "-0.09446875488734646",
+            "-1.0218154898328575",
+            "0.13969264150769156"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.14493871551747928,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.8203595798632752e-05,
+          "vel_err": 0.00023988513813906855,
+          "T_star": 7.64892394,
+          "y_dense": 7.479359003770008e-05,
+          "budget_ratio": 0.0934919875471251,
+          "zhold_frac": 0.560771106321133,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s46/clean_step_ineq_final-interface-s46.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 47,
+          "r0": [
+            "2.258324441349334",
+            "-0.13525884260360294",
+            "2.518219691025167"
+          ],
+          "v0": [
+            "-0.21927078632763397",
+            "-1.3406006418058576",
+            "0.45734187580353497"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1682750801959947,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.3004006172838677e-05,
+          "vel_err": 0.0002824295474981327,
+          "T_star": 7.78764018,
+          "y_dense": 6.661304922489996e-05,
+          "budget_ratio": 0.08326631153112495,
+          "zhold_frac": 0.5665793408549598,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s47/clean_step_ineq_final-interface-s47.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 48,
+          "r0": [
+            "0.49416658032217914",
+            "-3.2498036431120507",
+            "2.9822922100998164"
+          ],
+          "v0": [
+            "-0.12690366459831018",
+            "-1.3740190682824382",
+            "0.23822653516494324"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.26017899999999994,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.0923278901740044e-05,
+          "vel_err": 0.00012902501152877298,
+          "T_star": 8.88106056,
+          "y_dense": 4.559518015885e-05,
+          "budget_ratio": 0.0569939751985625,
+          "zhold_frac": 0.6305277418353737,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s48/clean_step_ineq_final-interface-s48.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 49,
+          "r0": [
+            "-0.25300681314977924",
+            "0.08024514659816684",
+            "2.363637482945518"
+          ],
+          "v0": [
+            "2.4444099855215624",
+            "0.7465275640593163",
+            "0.1093146164181309"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.20888400000000015,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010510340907886861,
+          "vel_err": 0.0001987690727955433,
+          "T_star": 8.13886142,
+          "y_dense": 7.110045324469997e-05,
+          "budget_ratio": 0.08887556655587496,
+          "zhold_frac": 0.596364791034862,
+          "path_excess": 3.215e-05,
+          "constraint_excess": 3.215e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s49/clean_step_ineq_final-interface-s49.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 50,
+          "r0": [
+            "-0.5538186648036197",
+            "3.5716399760574107",
+            "2.3280865233818924"
+          ],
+          "v0": [
+            "0.2712188894058247",
+            "-0.42027016146291546",
+            "0.017961056121575017"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1360254307871016,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 8.809036383169274e-05,
+          "vel_err": 0.0003892599239582724,
+          "T_star": 7.06970797,
+          "y_dense": 3.947499644145002e-05,
+          "budget_ratio": 0.04934374555181252,
+          "zhold_frac": 0.4978054178382138,
+          "path_excess": 8.573e-05,
+          "constraint_excess": 8.573e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s50/clean_step_ineq_final-interface-s50.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 51,
+          "r0": [
+            "0.8847018225161787",
+            "0.6446720830877953",
+            "2.7002657038738747"
+          ],
+          "v0": [
+            "-1.1018213165363482",
+            "1.0083881908018588",
+            "-0.08716538760411341"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.16029460030460507,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.5115855913576314e-05,
+          "vel_err": 1.6129057629012305e-05,
+          "T_star": 7.77271477,
+          "y_dense": 6.017370789545003e-05,
+          "budget_ratio": 0.07521713486931253,
+          "zhold_frac": 0.44070333613953006,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s51/clean_step_ineq_final-interface-s51.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 52,
+          "r0": [
+            "-1.2124889943047112",
+            "0.20170689047094195",
+            "2.755902920651872"
+          ],
+          "v0": [
+            "0.3051210438002656",
+            "0.8008866360297067",
+            "0.27958011355888673"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.13101529060734007,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00012388769632211264,
+          "vel_err": 3.756161205273277e-05,
+          "T_star": 6.84635601,
+          "y_dense": 5.923821857805002e-05,
+          "budget_ratio": 0.07404777322256252,
+          "zhold_frac": 0.43067493359872766,
+          "path_excess": 3.506e-05,
+          "constraint_excess": 3.506e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s52/clean_step_ineq_final-interface-s52.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 53,
+          "r0": [
+            "2.01084510020414",
+            "3.8353203933550635",
+            "2.7806977879076604"
+          ],
+          "v0": [
+            "-1.3470994475926708",
+            "-2.0694097871206143",
+            "-0.39248146900417985"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.5165639999999999,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 4.386432947167892e-05,
+          "vel_err": 0.0001351754463650851,
+          "T_star": 6.88901358,
+          "y_dense": 7.384301856799995e-05,
+          "budget_ratio": 0.09230377320999994,
+          "zhold_frac": 0.22818941663343328,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s53/clean_step_ineq_final-interface-s53.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 54,
+          "r0": [
+            "1.5598832683596262",
+            "1.9900693957159437",
+            "2.795059415078314"
+          ],
+          "v0": [
+            "-1.6548684690649667",
+            "1.3187488397314104",
+            "-0.05375170642164138"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.20693900000000007,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.018738467459319e-05,
+          "vel_err": 0.00018551555568199668,
+          "T_star": 8.28122248,
+          "y_dense": 7.062533850024996e-05,
+          "budget_ratio": 0.08828167312531245,
+          "zhold_frac": 0.6004893446601377,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s54/clean_step_ineq_final-interface-s54.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 55,
+          "r0": [
+            "0.33687862528394846",
+            "-0.8802633555476862",
+            "2.9419086629528017"
+          ],
+          "v0": [
+            "-1.0345134739066457",
+            "0.9059736909230381",
+            "0.26345363762597457"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.12879441908165834,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.5927464203041533e-05,
+          "vel_err": 0.00013781358931542274,
+          "T_star": 7.0493086,
+          "y_dense": 0.00017193391921049993,
+          "budget_ratio": 0.2149173990131249,
+          "zhold_frac": 0.4980242005577682,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s55/clean_step_ineq_final-interface-s55.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 56,
+          "r0": [
+            "4.231289254182896",
+            "-0.7566114112594816",
+            "2.884257037602482"
+          ],
+          "v0": [
+            "-1.2191224464153225",
+            "1.6908026785424728",
+            "0.3258978516849457"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.13538827658402885,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.2646079130834104e-05,
+          "vel_err": 0.0002779257197525986,
+          "T_star": 7.73976183,
+          "y_dense": 8.779906731849998e-05,
+          "budget_ratio": 0.10974883414812497,
+          "zhold_frac": 0.5553046081264235,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s56/clean_step_ineq_final-interface-s56.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 57,
+          "r0": [
+            "0.5016062306123134",
+            "-0.8300979607680868",
+            "2.198818077794245"
+          ],
+          "v0": [
+            "1.5009813250290571",
+            "2.151269431488619",
+            "0.7477043154401064"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.24835399999999994,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.4288734013941525e-05,
+          "vel_err": 0.0001713360502054369,
+          "T_star": 8.67665768,
+          "y_dense": 6.595403614470001e-05,
+          "budget_ratio": 0.08244254518087502,
+          "zhold_frac": 0.6230407421121171,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s57/clean_step_ineq_final-interface-s57.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 58,
+          "r0": [
+            "0.39719174685180064",
+            "-0.9989724712664353",
+            "2.176724318366833"
+          ],
+          "v0": [
+            "-0.6431753976549637",
+            "0.5789058423012046",
+            "0.22235686468215357"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.11758700089324614,
+          true,
+          "triggered landing glideslope"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.428855903506834e-05,
+          "vel_err": 4.749009791524966e-05,
+          "T_star": 5.96801349,
+          "y_dense": 2.032517983340001e-05,
+          "budget_ratio": 0.02540647479175001,
+          "zhold_frac": 0.35087035971160313,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s58/clean_step_ineq_final-interface-s58.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 59,
+          "r0": [
+            "-1.6843511674139138",
+            "2.3452553292298233",
+            "2.6207170348403954"
+          ],
+          "v0": [
+            "-0.5434314182540433",
+            "0.3296261154208275",
+            "-0.19397460253811313"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          277.451574635634,
+          false,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.002071180827740543,
+          "vel_err": 0.0012380459079129498,
+          "T_star": 7.53189042,
+          "y_dense": 302.569749864504,
+          "budget_ratio": 378212.18733062997,
+          "zhold_frac": 0.36729080559300015,
+          "path_excess": 0.00101174,
+          "constraint_excess": 0.00101174,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s59/clean_step_ineq_final-interface-s59.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 60,
+          "r0": [
+            "-2.521783269050023",
+            "0.16873957734074532",
+            "2.8260095775299616"
+          ],
+          "v0": [
+            "-0.0455872101631729",
+            "-1.5262031174829584",
+            "-0.08498759230277478"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.14130119999999913,
+          true,
+          "triggered landing speed"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00011354621349917399,
+          "vel_err": 5.390772393637112e-05,
+          "T_star": 8.11171592,
+          "y_dense": 5.690980978844999e-05,
+          "budget_ratio": 0.07113726223556248,
+          "zhold_frac": 0.5396788661208441,
+          "path_excess": 4.208e-05,
+          "constraint_excess": 4.208e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s60/clean_step_ineq_final-interface-s60.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 61,
+          "r0": [
+            "2.525664035475612",
+            "1.086254054551362",
+            "2.4860272486662227"
+          ],
+          "v0": [
+            "-0.40435845418573624",
+            "-1.810879393625905",
+            "-0.19177791698940974"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.16874492472488667,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.0001032766081937241,
+          "vel_err": 4.451701472470947e-05,
+          "T_star": 8.01273501,
+          "y_dense": 4.5848748664599985e-05,
+          "budget_ratio": 0.057310935830749976,
+          "zhold_frac": 0.47399545663996695,
+          "path_excess": 3.341e-05,
+          "constraint_excess": 3.341e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s61/clean_step_ineq_final-interface-s61.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 62,
+          "r0": [
+            "-0.6417596009105939",
+            "0.34412295614000465",
+            "1.8517597584128502"
+          ],
+          "v0": [
+            "0.06133576168031374",
+            "1.9413071649053126",
+            "-0.3841825506523584"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          109.07403512290323,
+          false,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.0008502840267228357,
+          "vel_err": 0.0013576965780688999,
+          "T_star": 8.76818076,
+          "y_dense": 310.39678318948967,
+          "budget_ratio": 387995.97898686206,
+          "zhold_frac": 0.39470280377750794,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s62/clean_step_ineq_final-interface-s62.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 63,
+          "r0": [
+            "1.4354177148988436",
+            "4.218775218120429",
+            "2.1001259023234184"
+          ],
+          "v0": [
+            "0.10415939470632787",
+            "0.7802388446827243",
+            "-0.042954149180708424"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.2542920000000001,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.9849755666002543e-05,
+          "vel_err": 0.00011410265071417053,
+          "T_star": 9.23841207,
+          "y_dense": 5.2260831158400004e-05,
+          "budget_ratio": 0.065326038948,
+          "zhold_frac": 0.6442664588785765,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s63/clean_step_ineq_final-interface-s63.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 64,
+          "r0": [
+            "0.8471334617193318",
+            "0.3632329800838682",
+            "2.328668670840403"
+          ],
+          "v0": [
+            "0.16740741540393086",
+            "0.17975559212244643",
+            "0.07064435431108368"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.05841878799245381,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00013497569855348035,
+          "vel_err": 3.9825078782094074e-05,
+          "T_star": 6.16601602,
+          "y_dense": 8.098840375779989e-05,
+          "budget_ratio": 0.10123550469724986,
+          "zhold_frac": 0.36173558790072685,
+          "path_excess": 4.722e-05,
+          "constraint_excess": 4.722e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s64/clean_step_ineq_final-interface-s64.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 65,
+          "r0": [
+            "-0.2624570924525168",
+            "1.1898961620573116",
+            "2.7697198759453"
+          ],
+          "v0": [
+            "-2.6106242051257724",
+            "-0.796954019726157",
+            "0.2624917114288454"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.37444299999999997,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.6464959852605102e-05,
+          "vel_err": 0.0001363547248906322,
+          "T_star": 9.0390811,
+          "y_dense": 9.271044838655006e-05,
+          "budget_ratio": 0.11588806048318756,
+          "zhold_frac": 0.6388637236588129,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s65/clean_step_ineq_final-interface-s65.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 66,
+          "r0": [
+            "-1.253460723065757",
+            "-0.9574570946313898",
+            "1.980339707169051"
+          ],
+          "v0": [
+            "0.3330802571148961",
+            "-2.658868009980344",
+            "-0.6451868514709769"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          1.0070910000000044,
+          false,
+          "triggered stage altitude"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.5701863745650822e-05,
+          "vel_err": 0.00012841824091615645,
+          "T_star": 8.58514143,
+          "y_dense": 8.67884197574499e-05,
+          "budget_ratio": 0.10848552469681237,
+          "zhold_frac": 0.6197082649574941,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s66/clean_step_ineq_final-interface-s66.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 67,
+          "r0": [
+            "-1.5909805216730308",
+            "-1.9600370078641962",
+            "2.600584423667814"
+          ],
+          "v0": [
+            "2.7091805021957778",
+            "-1.0086812108251104",
+            "0.36478891261169033"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.3396349999999999,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010435733467274833,
+          "vel_err": 0.00021372466610103757,
+          "T_star": 8.19506531,
+          "y_dense": 7.199521592310012e-05,
+          "budget_ratio": 0.08999401990387515,
+          "zhold_frac": 0.6066926793045899,
+          "path_excess": 3.041e-05,
+          "constraint_excess": 3.041e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s67/clean_step_ineq_final-interface-s67.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 68,
+          "r0": [
+            "2.570620260593093",
+            "3.4542255669932147",
+            "2.7312090666849835"
+          ],
+          "v0": [
+            "-0.6501270330805468",
+            "-0.7827140351937127",
+            "0.21093790533025794"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          24.152880049539814,
+          false,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.0017156589680353146,
+          "vel_err": 0.012979087480085031,
+          "T_star": 7.21795341,
+          "y_dense": 1.7233285647135101,
+          "budget_ratio": 2154.1607058918876,
+          "zhold_frac": 0.3241902527048869,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s68/clean_step_ineq_final-interface-s68.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 69,
+          "r0": [
+            "1.4156409071542613",
+            "0.36900585268101516",
+            "2.8734285313608403"
+          ],
+          "v0": [
+            "-1.6689069596557076",
+            "-1.9446150744574138",
+            "0.6703654868398031"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.09965339999999934,
+          true,
+          "triggered landing speed"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.6257345638887414e-05,
+          "vel_err": 0.00029452993633924553,
+          "T_star": 7.8107832,
+          "y_dense": 9.856473180960016e-05,
+          "budget_ratio": 0.12320591476200018,
+          "zhold_frac": 0.5803996275303096,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s69/clean_step_ineq_final-interface-s69.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 70,
+          "r0": [
+            "-2.5537359063958447",
+            "0.8051603276001987",
+            "2.378477110678421"
+          ],
+          "v0": [
+            "-0.7336623505764461",
+            "-2.721311992828703",
+            "0.3331287216771512"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          443.6458599801652,
+          false,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.003690227790868743,
+          "vel_err": 0.009454013634896027,
+          "T_star": 8.26054791,
+          "y_dense": 316.9726433270942,
+          "budget_ratio": 396215.80415886774,
+          "zhold_frac": 0.40700617763259245,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s70/clean_step_ineq_final-interface-s70.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 71,
+          "r0": [
+            "-2.1677753995129163",
+            "0.3903599682223257",
+            "2.0833491402838096"
+          ],
+          "v0": [
+            "-1.8366015599239893",
+            "1.032487152952998",
+            "-0.46692110896225975"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.38089999999999996,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010913465673194744,
+          "vel_err": 0.00010411838502397163,
+          "T_star": 8.41297958,
+          "y_dense": 8.934379712040008e-05,
+          "budget_ratio": 0.1116797464005001,
+          "zhold_frac": 0.6178072644269986,
+          "path_excess": 3.135e-05,
+          "constraint_excess": 3.135e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s71/clean_step_ineq_final-interface-s71.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 72,
+          "r0": [
+            "-1.05503065914265",
+            "-1.3337465315133168",
+            "2.441270831067365"
+          ],
+          "v0": [
+            "-0.31722607826903615",
+            "2.8083125380990914",
+            "0.1689026664255034"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.19228529275696848,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.3429391797483775e-05,
+          "vel_err": 0.00021068319273259554,
+          "T_star": 8.47704551,
+          "y_dense": 5.9737145449599814e-05,
+          "budget_ratio": 0.07467143181199977,
+          "zhold_frac": 0.6181002737119905,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s72/clean_step_ineq_final-interface-s72.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 73,
+          "r0": [
+            "0.6579561558981829",
+            "0.09560599118266097",
+            "2.8820676649426797"
+          ],
+          "v0": [
+            "0.40498899870723803",
+            "-1.3043871421700635",
+            "0.3903118382011517"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.15831437822596595,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00011659501061366219,
+          "vel_err": 8.91369811021217e-05,
+          "T_star": 7.38230839,
+          "y_dense": 5.1463671330150025e-05,
+          "budget_ratio": 0.06432958916268752,
+          "zhold_frac": 0.5231242757659978,
+          "path_excess": 3.389e-05,
+          "constraint_excess": 3.389e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s73/clean_step_ineq_final-interface-s73.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 74,
+          "r0": [
+            "-1.1639766657468846",
+            "-1.3793368156922678",
+            "2.7087432466911103"
+          ],
+          "v0": [
+            "1.72046085983794",
+            "-1.4556791213744955",
+            "0.25982844632283536"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.17738777368506087,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.00010199285367122542,
+          "vel_err": 0.0002482834342037342,
+          "T_star": 7.88548382,
+          "y_dense": 5.7196588927850015e-05,
+          "budget_ratio": 0.07149573615981251,
+          "zhold_frac": 0.5919639690542159,
+          "path_excess": 3.206e-05,
+          "constraint_excess": 3.206e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s74/clean_step_ineq_final-interface-s74.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 75,
+          "r0": [
+            "-2.65689085557932",
+            "-1.456418562111658",
+            "2.2708066345512186"
+          ],
+          "v0": [
+            "-1.2545329086042687",
+            "0.4147108807638559",
+            "-0.09458794590990177"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.25734799999999997,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.034469709776973e-05,
+          "vel_err": 0.00010985792188094585,
+          "T_star": 8.99756824,
+          "y_dense": 7.593236990235007e-05,
+          "budget_ratio": 0.09491546237793759,
+          "zhold_frac": 0.6208917055126442,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s75/clean_step_ineq_final-interface-s75.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 76,
+          "r0": [
+            "3.5704610173945084",
+            "-0.813044541271154",
+            "1.8918152211669805"
+          ],
+          "v0": [
+            "0.5034239042850599",
+            "0.27806061922968833",
+            "-0.03697378304989578"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.6029360000000095,
+          true,
+          "triggered stage altitude"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.7420413313122052e-05,
+          "vel_err": 0.00015218068898516658,
+          "T_star": 8.29942472,
+          "y_dense": 6.420884673959999e-05,
+          "budget_ratio": 0.08026105842449999,
+          "zhold_frac": 0.5913662820716566,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s76/clean_step_ineq_final-interface-s76.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 77,
+          "r0": [
+            "0.9283785847268694",
+            "4.366754395632996",
+            "2.2489663554647583"
+          ],
+          "v0": [
+            "-0.0826952186197506",
+            "1.1559725970251762",
+            "0.12916555868241458"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.3695610000000002,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.6649429419652797e-05,
+          "vel_err": 0.00013884866509981288,
+          "T_star": 8.98864006,
+          "y_dense": 2.390470049980001e-05,
+          "budget_ratio": 0.02988087562475001,
+          "zhold_frac": 0.6344137435624494,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s77/clean_step_ineq_final-interface-s77.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 78,
+          "r0": [
+            "2.0712592841590296",
+            "-3.4069787686312063",
+            "2.9061509753212906"
+          ],
+          "v0": [
+            "-1.851479566955573",
+            "0.33476499343845634",
+            "0.5583873707299194"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1272496643866785,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.2277331527810955e-05,
+          "vel_err": 0.0003461529270423695,
+          "T_star": 7.34769876,
+          "y_dense": 0.00012408594575390007,
+          "budget_ratio": 0.15510743219237508,
+          "zhold_frac": 0.5328645631629024,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s78/clean_step_ineq_final-interface-s78.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 79,
+          "r0": [
+            "-0.7831274325077452",
+            "0.2033823925349804",
+            "2.1919936363150323"
+          ],
+          "v0": [
+            "-2.205742815834531",
+            "0.3426943439551975",
+            "-0.5359758224269731"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          395.45487122745914,
+          false,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.0007330990038187203,
+          "vel_err": 0.0012235885353336718,
+          "T_star": 8.82650582,
+          "y_dense": 2918.0040243490184,
+          "budget_ratio": 3647505.0304362727,
+          "zhold_frac": 0.30650356609632873,
+          "path_excess": 0.0002143,
+          "constraint_excess": 0.0002143,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s79/clean_step_ineq_final-interface-s79.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 80,
+          "r0": [
+            "1.8787465613766468",
+            "-0.3570247283243268",
+            "2.8744342228869235"
+          ],
+          "v0": [
+            "-0.007626841429800191",
+            "0.3796861715960395",
+            "0.0679407320513562"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1198421772762126,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.2451742849898564e-05,
+          "vel_err": 0.0002131839564789058,
+          "T_star": 6.61488292,
+          "y_dense": 0.0001991840999491499,
+          "budget_ratio": 0.24898012493643737,
+          "zhold_frac": 0.46480999394619665,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s80/clean_step_ineq_final-interface-s80.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 81,
+          "r0": [
+            "-0.3248798481624923",
+            "-1.5370341439927122",
+            "1.9510908373460172"
+          ],
+          "v0": [
+            "-1.4612336964423673",
+            "-0.043889096393530724",
+            "0.34763316376123127"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.19488519999999898,
+          true,
+          "triggered landing speed"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 8.422118142130279e-05,
+          "vel_err": 0.00021751998390952498,
+          "T_star": 7.41798426,
+          "y_dense": 0.00015108367507370014,
+          "budget_ratio": 0.18885459384212516,
+          "zhold_frac": 0.5134899342587713,
+          "path_excess": 2.707e-05,
+          "constraint_excess": 2.707e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s81/clean_step_ineq_final-interface-s81.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 82,
+          "r0": [
+            "-1.284850514692488",
+            "-3.5164216751090938",
+            "2.7724069456305998"
+          ],
+          "v0": [
+            "1.1836513451851756",
+            "-0.8559324060644622",
+            "0.0980140784986865"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.22843900000000006,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.1541601611765084e-05,
+          "vel_err": 0.00012687319772118933,
+          "T_star": 8.85950752,
+          "y_dense": 7.616339607475014e-05,
+          "budget_ratio": 0.09520424509343767,
+          "zhold_frac": 0.6183187809969827,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s82/clean_step_ineq_final-interface-s82.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 83,
+          "r0": [
+            "-2.8886769597867468",
+            "-1.5785549706202724",
+            "2.1960269193233812"
+          ],
+          "v0": [
+            "1.3425010772484156",
+            "0.2782910359127543",
+            "0.12254083714730958"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.192724,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.1568517623273952e-05,
+          "vel_err": 7.297408992238273e-05,
+          "T_star": 5.96001191,
+          "y_dense": 4.505742021295003e-05,
+          "budget_ratio": 0.05632177526618753,
+          "zhold_frac": 0.339261025067314,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s83/clean_step_ineq_final-interface-s83.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 84,
+          "r0": [
+            "0.6660767265898111",
+            "-2.9946726527133034",
+            "2.2347054697313355"
+          ],
+          "v0": [
+            "0.05723704907863728",
+            "0.29691004146747374",
+            "0.0010356239752982962"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.14293328348199497,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.087880967753366e-05,
+          "vel_err": 0.00014773247307210422,
+          "T_star": 6.88269149,
+          "y_dense": 5.912587181345e-05,
+          "budget_ratio": 0.07390733976681249,
+          "zhold_frac": 0.49341161883169055,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s84/clean_step_ineq_final-interface-s84.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 85,
+          "r0": [
+            "-0.18463393851403392",
+            "0.3447410146719417",
+            "2.9616650305467114"
+          ],
+          "v0": [
+            "-0.7021719700777738",
+            "-2.673301164628604",
+            "0.647208473632201"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.3571350000000001,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.6134976563984132e-05,
+          "vel_err": 0.00014454277602149476,
+          "T_star": 8.67857842,
+          "y_dense": 5.9776647347049986e-05,
+          "budget_ratio": 0.07472080918381248,
+          "zhold_frac": 0.6278352958640433,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s85/clean_step_ineq_final-interface-s85.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 86,
+          "r0": [
+            "1.9356049776719555",
+            "0.4374906571105427",
+            "2.992292338993444"
+          ],
+          "v0": [
+            "0.5008490930243379",
+            "-0.3982083743384286",
+            "0.029558381549830377"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.1545854187796336,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.358726987169138e-05,
+          "vel_err": 0.0003038055776314846,
+          "T_star": 7.14621069,
+          "y_dense": 0.00012442466940634997,
+          "budget_ratio": 0.15553083675793747,
+          "zhold_frac": 0.5203114715331741,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s86/clean_step_ineq_final-interface-s86.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 87,
+          "r0": [
+            "-1.1913698916640938",
+            "0.6380291668784337",
+            "2.880365143704551"
+          ],
+          "v0": [
+            "0.13546084415887172",
+            "2.3838533973942497",
+            "-0.5959870344293746"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          392.39588972235856,
+          false,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 0.0006965837668938316,
+          "vel_err": 0.0015597659589181962,
+          "T_star": 8.15118355,
+          "y_dense": 1337.5872186088654,
+          "budget_ratio": 1671984.0232610817,
+          "zhold_frac": 0.3199590211657054,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": false,
+          "failure_reason": "ctcs_budget",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s87/clean_step_ineq_final-interface-s87.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 88,
+          "r0": [
+            "-0.33650359605843916",
+            "0.046730299940393884",
+            "2.7029884638746973"
+          ],
+          "v0": [
+            "-1.444868713620662",
+            "0.4689590392624956",
+            "0.21263385440755614"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.09129403498631428,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.8968154891818025e-05,
+          "vel_err": 0.0003753311861543083,
+          "T_star": 7.45526861,
+          "y_dense": 7.991876916954994e-05,
+          "budget_ratio": 0.09989846146193743,
+          "zhold_frac": 0.5454847561823798,
+          "path_excess": 2.48e-06,
+          "constraint_excess": 2.48e-06,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s88/clean_step_ineq_final-interface-s88.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 89,
+          "r0": [
+            "3.790583365082119",
+            "0.5947398742443879",
+            "1.933514360775388"
+          ],
+          "v0": [
+            "0.23026179467059416",
+            "0.9175087971914441",
+            "-0.18766427950242842"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.44946900000000234,
+          true,
+          "triggered stage altitude"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.766486059950658e-05,
+          "vel_err": 0.0001262839502866457,
+          "T_star": 8.95082368,
+          "y_dense": 6.203482975269999e-05,
+          "budget_ratio": 0.07754353719087498,
+          "zhold_frac": 0.6153623439491103,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s89/clean_step_ineq_final-interface-s89.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 90,
+          "r0": [
+            "0.8706747897328158",
+            "-1.885980593326036",
+            "2.004759304075894"
+          ],
+          "v0": [
+            "0.5059177420820811",
+            "2.134427527981654",
+            "0.23987066405039842"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.12069247968061125,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.860827772793603e-05,
+          "vel_err": 0.00019963773816590892,
+          "T_star": 7.9084241,
+          "y_dense": 8.356804915210006e-05,
+          "budget_ratio": 0.10446006144012507,
+          "zhold_frac": 0.5721860553735351,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s90/clean_step_ineq_final-interface-s90.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 91,
+          "r0": [
+            "3.2488682588399027",
+            "-1.6010845034022732",
+            "2.1969742733089532"
+          ],
+          "v0": [
+            "0.39933315707394834",
+            "0.17072313546765705",
+            "0.10861473388447024"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.13220938156839734,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.676828852328108e-05,
+          "vel_err": 0.00018325528887320008,
+          "T_star": 7.91919008,
+          "y_dense": 4.539737077585003e-05,
+          "budget_ratio": 0.05674671346981253,
+          "zhold_frac": 0.5758164564727811,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s91/clean_step_ineq_final-interface-s91.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 92,
+          "r0": [
+            "0.2915467966566082",
+            "-2.9774162937956903",
+            "1.965097584952881"
+          ],
+          "v0": [
+            "1.4150209921875685",
+            "-1.8498662664199372",
+            "0.8259841024166287"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.5148690000000001,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.892949814443056e-05,
+          "vel_err": 0.00021937068673822397,
+          "T_star": 8.99772272,
+          "y_dense": 4.687078921780005e-05,
+          "budget_ratio": 0.05858848652225006,
+          "zhold_frac": 0.6548606267786834,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s92/clean_step_ineq_final-interface-s92.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 93,
+          "r0": [
+            "-1.5186522285668895",
+            "-1.9772519504694854",
+            "2.7855824482261013"
+          ],
+          "v0": [
+            "-0.9559045686446215",
+            "0.6414983917224371",
+            "-0.03968224236175912"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.14293786732647007,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.7410117748022268e-05,
+          "vel_err": 0.00023423905950972396,
+          "T_star": 7.68981351,
+          "y_dense": 7.255485861090001e-05,
+          "budget_ratio": 0.09069357326362501,
+          "zhold_frac": 0.5579901989066574,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s93/clean_step_ineq_final-interface-s93.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 94,
+          "r0": [
+            "-0.3401732721000833",
+            "4.022678717277903",
+            "2.0583351561740275"
+          ],
+          "v0": [
+            "-0.008082075708280234",
+            "-2.777158633234877",
+            "-0.4633553263530957"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.3746930000000148,
+          true,
+          "triggered stage altitude"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 5.74080517000882e-05,
+          "vel_err": 0.00013401974518704326,
+          "T_star": 7.374699,
+          "y_dense": 0.00012050138271574995,
+          "budget_ratio": 0.15062672839468744,
+          "zhold_frac": 0.14400587739241968,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s94/clean_step_ineq_final-interface-s94.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 95,
+          "r0": [
+            "-2.2641609479980396",
+            "-2.4653349938935634",
+            "2.8582033183932527"
+          ],
+          "v0": [
+            "-0.34148179706409154",
+            "2.6488928679753005",
+            "-0.428565768840946"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.12246184218540845,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.2733970176808096e-05,
+          "vel_err": 0.0001685185960064942,
+          "T_star": 7.86134868,
+          "y_dense": 6.554656107034997e-05,
+          "budget_ratio": 0.08193320133793745,
+          "zhold_frac": 0.5731566940241608,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s95/clean_step_ineq_final-interface-s95.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 96,
+          "r0": [
+            "-0.925846262518445",
+            "-2.3230627018150973",
+            "2.425991815552593"
+          ],
+          "v0": [
+            "0.08817408105770519",
+            "-2.354451386218255",
+            "0.17265651408666458"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.18044291034025584,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 1.880558959458597e-05,
+          "vel_err": 0.00015367668723654867,
+          "T_star": 8.87660042,
+          "y_dense": 3.8462245695500165e-05,
+          "budget_ratio": 0.048077807119375204,
+          "zhold_frac": 0.621114236208911,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s96/clean_step_ineq_final-interface-s96.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 97,
+          "r0": [
+            "2.6139927314532163",
+            "2.8781746221977773",
+            "2.248897630926412"
+          ],
+          "v0": [
+            "0.43037916756104927",
+            "-0.010888241533690002",
+            "0.0655282199494292"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.14073762207281604,
+          true,
+          "triggered landing tilt"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 5.01745951652826e-06,
+          "vel_err": 0.00020262165999714837,
+          "T_star": 7.81266224,
+          "y_dense": 2.9432152591949993e-05,
+          "budget_ratio": 0.03679019073993749,
+          "zhold_frac": 0.5782877898993878,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s97/clean_step_ineq_final-interface-s97.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 98,
+          "r0": [
+            "-1.4496863094841588",
+            "0.6100821617371396",
+            "2.242012992258134"
+          ],
+          "v0": [
+            "-2.0263998949343236",
+            "1.721566034845576",
+            "-0.950558871046266"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.008253924458372218,
+          true,
+          "triggered line-of-sight"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 7.036004192721888e-05,
+          "vel_err": 0.00016474952321630555,
+          "T_star": 9.03965422,
+          "y_dense": 1.2175648969849933e-05,
+          "budget_ratio": 0.015219561212312415,
+          "zhold_frac": 0.6435704517467705,
+          "path_excess": 2.013e-05,
+          "constraint_excess": 2.013e-05,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s98/clean_step_ineq_final-interface-s98.csv",
+        "matches_restored_original_nodes": true
+      },
+      {
+        "sample": {
+          "sample": 99,
+          "r0": [
+            "-2.3592255409694847",
+            "-2.6069829976238337",
+            "2.1363541626976343"
+          ],
+          "v0": [
+            "0.8442079011631882",
+            "-1.8195393735999552",
+            "-0.1661067316111795"
+          ]
+        },
+        "returncode": 0,
+        "audit": [
+          0.48061400000000004,
+          true,
+          "triggered landing angular rate"
+        ],
+        "certification": {
+          "finite": true,
+          "pos_err": 2.8518769258156988e-05,
+          "vel_err": 5.2140140007483673e-05,
+          "T_star": 8.43609642,
+          "y_dense": 0.00015156845598724995,
+          "budget_ratio": 0.18946056998406244,
+          "zhold_frac": 0.6132064242101206,
+          "path_excess": 0.0,
+          "constraint_excess": 0.0,
+          "physical_success": true,
+          "ctcstc_certified": true,
+          "failure_reason": "",
+          "error": ""
+        },
+        "nodes": "/tmp/comando-fixed-dt-20261105/clean-baseline/final-interface-s99/clean_step_ineq_final-interface-s99.csv",
+        "matches_restored_original_nodes": true
+      }
+    ]
+  },
+  "rh": {
+    "final-pointmass-node": {
+      "returncode": 0,
+      "command": [
+        "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+        "pointmass",
+        "matched",
+        "15",
+        "/tmp/comando-fixed-dt-20261105/clean-baseline/final-pointmass-node",
+        "--audit-loop"
+      ],
+      "profile": {},
+      "summary": {
+        "model": "pointmass",
+        "plant_execution": "matched_discrete",
+        "reference_initial": 0,
+        "staging_initial": 0,
+        "initial_ctcs_ratio": 0,
+        "accepted": 15,
+        "reached": 0,
+        "simulation_time": 30,
+        "ctcs": 0,
+        "ctcs_loop_pass": 0,
+        "staging_transition_pass": 0,
+        "native_ctcs_ratio": 0,
+        "planned_ctcs_ratio": 0,
+        "executed_ctcs_ratio": 0,
+        "loop_pass": 1,
+        "physical_stc_pass": 0,
+        "physical_stc_excess": 0,
+        "standalone_comparisons": 15,
+        "shift_error": 0,
+        "initial_guess_dynamics_error": 0,
+        "planned_physical_stc_excess": 0,
+        "remaining_horizon": 0,
+        "stationary_target": 0,
+        "fixed_dt": 0,
+        "single_horizon": 0,
+        "replay_intervals": 4,
+        "physical_interval_budget": 1e-06,
+        "density_parity_error": 0,
+        "planned_dense_state_defect": 0,
+        "native_solve_pass": 1,
+        "node_loop_pass": 1,
+        "planned_continuous_pass": 0,
+        "planned_dense_excess": 0.6452738160406788,
+        "executed_continuous_pass": 0,
+        "executed_physical_excess": 0.6070316358461354,
+        "native_violation": 0,
+        "root_error": 0,
+        "anchor_difference": 0,
+        "prediction_error": 0
+      },
+      "tail": "=0 executed=0.607032 planned_dense=0.645274\n[MPC] solve 57.9989ms iters=10 n_shift=4\nMEASURED_RH model=pointmass cycle=10 t=22 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0.607032 planned_dense=0.645274\n[MPC] solve 132.239ms iters=23 n_shift=4\nMEASURED_RH model=pointmass cycle=11 t=24 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0.607032 planned_dense=0.645274\n[MPC] solve 2386.54ms iters=296 n_shift=4\nMEASURED_RH model=pointmass cycle=12 t=26 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0.607032 planned_dense=0.645274\n[MPC] solve 63.8982ms iters=11 n_shift=4\nMEASURED_RH model=pointmass cycle=13 t=28 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0.607032 planned_dense=0.645274\n[MPC] solve 89.3683ms iters=15 n_shift=4\nMEASURED_RH model=pointmass cycle=14 t=30 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0.607032 planned_dense=0.645274\n"
+    },
+    "final-pointmass-ctcs": {
+      "returncode": 0,
+      "command": [
+        "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+        "pointmass",
+        "matched",
+        "15",
+        "/tmp/comando-fixed-dt-20261105/clean-baseline/final-pointmass-ctcs",
+        "--audit-loop",
+        "--ctcs"
+      ],
+      "profile": {},
+      "summary": {
+        "model": "pointmass",
+        "plant_execution": "matched_discrete",
+        "reference_initial": 0,
+        "staging_initial": 0,
+        "initial_ctcs_ratio": 178915.81321091304,
+        "accepted": 15,
+        "reached": 0,
+        "simulation_time": 30,
+        "ctcs": 1,
+        "ctcs_loop_pass": 1,
+        "staging_transition_pass": 0,
+        "native_ctcs_ratio": 0.9999537128396285,
+        "planned_ctcs_ratio": 0.9999620111462996,
+        "executed_ctcs_ratio": 0.9999601982716865,
+        "loop_pass": 1,
+        "physical_stc_pass": 1,
+        "physical_stc_excess": 0,
+        "standalone_comparisons": 15,
+        "shift_error": 0,
+        "initial_guess_dynamics_error": 0,
+        "planned_physical_stc_excess": 0,
+        "remaining_horizon": 0,
+        "stationary_target": 0,
+        "fixed_dt": 0,
+        "single_horizon": 0,
+        "replay_intervals": 4,
+        "physical_interval_budget": 1e-06,
+        "density_parity_error": 2.463738349762247e-14,
+        "planned_dense_state_defect": 1.1961682894190417e-09,
+        "native_solve_pass": 1,
+        "node_loop_pass": 1,
+        "planned_continuous_pass": 0,
+        "planned_dense_excess": 0.64866687114416,
+        "executed_continuous_pass": 1,
+        "executed_physical_excess": 0,
+        "native_violation": 0,
+        "root_error": 0,
+        "anchor_difference": 0,
+        "prediction_error": 0
+      },
+      "tail": "iters=12 n_shift=4\nMEASURED_RH model=pointmass cycle=10 t=22 ctcs=1 native=0 budget_native=0.999954 budget_planned=0.999953 budget_executed=0.999953 executed=0 planned_dense=0.648667\n[MPC] solve 605.236ms iters=53 n_shift=4\nMEASURED_RH model=pointmass cycle=11 t=24 ctcs=1 native=0 budget_native=0.999954 budget_planned=0.999962 budget_executed=0.999953 executed=0 planned_dense=0.648667\n[MPC] solve 486.704ms iters=43 n_shift=4\nMEASURED_RH model=pointmass cycle=12 t=26 ctcs=1 native=0 budget_native=0.999954 budget_planned=0.999962 budget_executed=0.99996 executed=0 planned_dense=0.648667\n[MPC] solve 185.799ms iters=16 n_shift=4\nMEASURED_RH model=pointmass cycle=13 t=28 ctcs=1 native=0 budget_native=0.999954 budget_planned=0.999962 budget_executed=0.99996 executed=0 planned_dense=0.648667\n[MPC] solve 173.763ms iters=15 n_shift=4\nMEASURED_RH model=pointmass cycle=14 t=30 ctcs=1 native=0 budget_native=0.999954 budget_planned=0.999962 budget_executed=0.99996 executed=0 planned_dense=0.648667\n"
+    },
+    "final-quad-node": {
+      "returncode": 0,
+      "command": [
+        "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+        "quad",
+        "matched",
+        "40",
+        "/tmp/comando-fixed-dt-20261105/clean-baseline/final-quad-node",
+        "--audit-loop"
+      ],
+      "profile": {
+        "SZMUK_RH_N": "40",
+        "SZMUK_THH": ".16",
+        "SZMUK_MAX_ITER": "120"
+      },
+      "summary": {
+        "model": "quad",
+        "plant_execution": "matched_discrete",
+        "reference_initial": 0,
+        "staging_initial": 0,
+        "initial_ctcs_ratio": 0,
+        "accepted": 19,
+        "reached": 1,
+        "simulation_time": 9.583461963026576,
+        "ctcs": 0,
+        "ctcs_loop_pass": 0,
+        "staging_transition_pass": 0,
+        "native_ctcs_ratio": 0,
+        "planned_ctcs_ratio": 0,
+        "executed_ctcs_ratio": 0,
+        "loop_pass": 1,
+        "physical_stc_pass": 1,
+        "physical_stc_excess": 0,
+        "standalone_comparisons": 19,
+        "shift_error": 1.7763568394002505e-15,
+        "initial_guess_dynamics_error": 0,
+        "planned_physical_stc_excess": 0,
+        "remaining_horizon": 0,
+        "stationary_target": 0,
+        "fixed_dt": 0,
+        "single_horizon": 0,
+        "replay_intervals": 4,
+        "physical_interval_budget": 0.0016,
+        "density_parity_error": 0,
+        "planned_dense_state_defect": 0,
+        "native_solve_pass": 1,
+        "node_loop_pass": 1,
+        "planned_continuous_pass": 1,
+        "planned_dense_excess": 0,
+        "executed_continuous_pass": 1,
+        "executed_physical_excess": 0,
+        "native_violation": 0,
+        "root_error": 0,
+        "anchor_difference": 0,
+        "prediction_error": 1.3322676295501878e-15
+      },
+      "tail": "ycle=13 t=7.37735 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 73.4146ms iters=120 n_shift=4\nMEASURED_RH model=quad cycle=14 t=7.91789 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 72.3021ms iters=120 n_shift=4\nMEASURED_RH model=quad cycle=15 t=8.34226 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 64.46ms iters=111 n_shift=4\nMEASURED_RH model=quad cycle=16 t=8.76067 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 72.9317ms iters=120 n_shift=4\nMEASURED_RH model=quad cycle=17 t=9.17467 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 70.5761ms iters=120 n_shift=4\nMEASURED_RH model=quad cycle=18 t=9.58346 ctcs=0 native=0 budget_native=0 budget_planned=0 budget_executed=0 executed=0 planned_dense=0\n"
+    }
+  },
+  "scope": "Frozen solve time, matched perfect plant, measured roots; quad NODE near-center existing regression, pointmass NODE/CTCS existing reference adapter. Quad CTCS RH, real-time and MC1/MC2 campaigns not validated by this restoration.",
+  "reference_build": "cmake_minimum_required(VERSION 3.12)\nproject(quad_native_baseline CXX)\nset(CMAKE_CXX_STANDARD 17)\nfind_package(Eigen3 REQUIRED NO_MODULE)\nset(NATIVE /home/lab/mavros_ws/src/ALIPDDP-main)\nset(REFERENCE /home/lab/projects/STC/multiquad_carrier_landing/src/examples/quad_sh_ctcs)\nset(ORIGINAL /home/lab/projects/STC/multiquad_carrier_landing/src/solver/ddp)\nadd_library(native STATIC ${NATIVE}/alipddp/alipddp/alipddp.cpp ${NATIVE}/problem_maker/optimal_control_problem.cpp)\ntarget_include_directories(native PUBLIC ${NATIVE}/alipddp ${NATIVE}/problem_maker ${NATIVE}/problem_maker/dynamics)\ntarget_link_libraries(native PUBLIC Eigen3::Eigen)\nadd_executable(quad_native_baseline ${REFERENCE}/quad_sh_ctcs.cpp)\ntarget_include_directories(quad_native_baseline PRIVATE ${NATIVE}/alipddp ${NATIVE}/problem_maker ${NATIVE}/problem_maker/dynamics ${REFERENCE} ${CMAKE_CURRENT_SOURCE_DIR}/include ${NATIVE}/problem_maker/constraint)\ntarget_link_libraries(quad_native_baseline PRIVATE native)\n\ntarget_compile_definitions(quad_native_baseline PRIVATE PORT_NO_LOCAL_AUG)\n\nadd_library(reference STATIC ${ORIGINAL}/alipddp/alipddp/alipddp.cpp ${ORIGINAL}/problem_maker/optimal_control_problem.cpp)\ntarget_include_directories(reference PUBLIC ${ORIGINAL}/alipddp ${ORIGINAL}/problem_maker ${ORIGINAL}/problem_maker/dynamics)\ntarget_link_libraries(reference PUBLIC Eigen3::Eigen)\nadd_executable(quad_reference_fresh ${REFERENCE}/quad_sh_ctcs.cpp)\ntarget_link_libraries(quad_reference_fresh PRIVATE reference)\n",
+  "claude_review": "The clean baseline is the original ALIPDDP solver plus a two-knob profile. Its 100/94 evidence exists only in a `/tmp` scratch directory. ALIPDDP-main is currently checked out on a different solver, and the planner's passing runs were made with that different solver. I edited nothing and ran nothing; I only read files and compared hashes.\n\n## 1. The clean baseline (source)\n\n**Solver:** `src/solver/ddp` (commit 1febc11). It is byte-identical to the ALIPDDP branch `main` at 1bc94647. That holds for `alipddp.h/.tpp/.cpp`, `param.h`, `soc_helper.h`, `problem_parser.h`, the OCP files and `ctcs_stage_constraint.h`. The `.tpp` sha256 starts `481a358d`. It has no `initSlacksFromConstraints`, so slacks and duals start at S = Y = 1. `notes/multiquad-carrier-landing-worklog.md:89` records this as a decision: \"original ALIPDDP + CtcsStageConstraint + 2 getters\".\n\n**Profile:**\n- The `ENV` block in `src/examples/quad_sh_ctcs/run_100ic.py:49-66`.\n- `SZMUK_BOUND_SCALE=1`: scales some constraint rows on the problem side, not in the solver (`ScaledCon`, `quad_sh_parts.h:1017`).\n- `SZMUK_MU=0.1`: sets the initial barrier `param.mu` (`quad_sh_parts.h:1448`).\n- The row was handwritten (`STC_ROW=handwritten`).\n\n## 2. Saved evidence vs stale results\n\n- **The only 100/94 evidence is in `/tmp`:** `/tmp/claude-1000/-home-lab-projects-STC/2938667b-\u2026/scratchpad/ablate2/tune_log.jsonl` has the line `{BOUND_SCALE 1, MU 0.1} none 100 100 94`. The runs are in `tune_runs/cfg_BOUND_SCALE1_MU0.1_none/`.\n  - That binary was a scratch build with an `INIT_ABL` switch. Its `none` mode is equivalent to the committed solver: it uses the original stage NO/SOC init, and the one difference (terminal SOC) doesn't apply because the quad problem has no terminal SOC.\n  - This directory is volatile and the project repo has no copy.\n- **Stale, not baseline:**\n  - `results/quad_sh_ctcs/{header,handwritten,header_norm}` was written 11-04 17:43\u201318:17, before the profile existed. It shows 82/70, 79/65 and 4/9.\n  - `ALIPDDP-main/build` dates from May.\n  - The catkin `build/comando_planner` dates from Oct 20.\n  - The example's own `build/` is current; it links `src/solver/ddp`.\n\n## 3. Why ALIPDDP-main is not the same solver\n\n- **Checkout:** branch `comando-ctcs-interface`, HEAD 56a2b6e2. Its `.tpp` hash is `60b1b100`, the same as 59a169fd and 4d68a48b.\n- **The planner evidence matches HEAD, not `main`:** `CoManDO_planner/logs/frozen_node_baseline_20261104/manifest.json` and `quad_ctcs_fixed/source_manifest.json` both record `solver_tpp_sha256` `60b1b100\u2026`.\n- **Numerical differences, HEAD vs `main`:**\n  - `init` calls `initSlacksFromConstraints`.\n  - `LinvTimesArrow` adds a \"complete column\" term.\n  - In `calcCTres`, the sign of `rd` and the `Vx`/`Vxx` forms differ; `calcECTres` has the same form change.\n  - The convergence test in `solve` adds a primal-error and barrier term, and the final inner tolerance differs.\n  - The `checkRegulate` rule for `step<=3` differs.\n  - `backwardPass` adds constraint curvature (`constraintHessian`) and the DDP tensor terms.\n- **The worktree also has uncommitted edits** in `alipddp.h`, `alipddp.tpp`, `param.h` and `soc_helper.h` (Nov 5, 03:00\u201303:04; `.tpp` hash `9ff8020c`). They gate the `main` branches behind `usesOriginalNumerics() = !use_feasibility_ms && !use_ddp_terms`.\n  - In that mode, `backwardPassOriginal` is identical to `main`'s `backwardPass` once comments and whitespace are stripped (normalized diff is empty).\n  - The other gated pieces equal `main` too.\n  - Leftover non-numerical differences: `all_cost.clear()` and `termination_reason`.\n  - This state matches neither solver and has never been run.\n\n## 4. Recommendation\n\n1. **Don't keep the dirty selector.** The planner already sets `use_ddp_terms=false` (`CoManDO_planner/include/parameters.hpp:148`; `uzun2024_ctcs_mpc.cpp:573`). So that switch silently moves the frozen quad NODE and pointmass RH runs onto `main`'s numerics and voids their evidence. The default flip `use_ddp_terms` true\u2192false in `param.h` does the same for anything that uses a plain `Param{}`.\n2. **Narrow restoration:** add an explicit opt-in flag in `Param` (for example `original_numerics`), default off, and re-key the existing gated branches to it. The branches to re-key are in `init`, `solve`, `checkRegulate`, `calcCTres`, `calcECTres`, the `complete_column=false` argument to `LinvTimesArrow`, and `backwardPassOriginal`. Revert the `use_ddp_terms` default to true. This keeps the planner's numerics as the default and adds no new math.\n3. **Compatibility only, no solver math:**\n   - The getters are already there: `getResK`, `getNumIter`, `getTerminationReason`, `getOptError`, `getError`, `getAllCost`.\n   - Add a `ctcs_stage_constraint.h` alias header that maps the `Ctcs*` names to the renamed `Stc*` names (`StcStageConstraint`, `StcForm`, `StcIntervalDynamics`, `StcImplication`).\n   - The example should include the solver's `dynamics/quad_6dof_dynamics_aug.h`. Its local copy has identical content, and `#pragma once` only protects one file path, so including both would redefine the class.\n\n## 5. Verification\n\n- **Baseline parity:** ALIPDDP built with the flag on vs `src/solver/ddp`, 5 ICs, CSVs byte-identical; then the 100-IC run should give 100/94.\n- **Planner, flag off:** re-run the frozen quad NODE, pointmass NODE and pointmass-ctcs cases and compare against the `manifest.json` summaries (20 accepted / 1 reached; 15 accepted; 15/15 converged).\n\nThe plan is saved at `/home/lab/.claude/plans/the-user-explicitly-asked-distributed-thacker.md`.\n",
+  "raw_results": "/tmp/comando-fixed-dt-20261105/clean-baseline"
+}

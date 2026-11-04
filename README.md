@@ -1,6 +1,6 @@
 # CoManDO planner
 
-Current documentation for the active `mpc` branch, updated 2026-11-04. The MAVROS/PX4 ROS1 planner uses a ROS-independent core for RH replanning and direct MPC. The previous planner is archived in `../comando_planner_old` and excluded from catkin discovery. The shared ROS2 adapter builds; Crazyflie MPC flight validation and deployment remain pending.
+Current documentation for the active `mpc` branch, updated 2026-11-05. The MAVROS/PX4 ROS1 planner uses a ROS-independent core for RH replanning and direct MPC. The previous planner is archived in `../comando_planner_old` and excluded from catkin discovery. The shared ROS2 adapter builds; Crazyflie MPC flight validation and deployment remain pending.
 
 ## Layout
 
@@ -19,8 +19,27 @@ Current documentation for the active `mpc` branch, updated 2026-11-04. The MAVRO
 
 ## Frozen-time measured-state NODE and CTCS baseline
 
-The numerical solver in `../ALIPDDP-main` remains unchanged from algorithm base
-`4d68a48b`. The active planner branch is `mpc`; no new branch was created.
+The active solver is `../ALIPDDP-main` at `002850df`. Its default single-shooting
+iLQR path restores the lab-original numerical implementation from
+`/home/lab/projects/STC/multiquad_carrier_landing/src/solver/ddp` (native `main`
+at `1bc94647`). The previous `4d68a48b` baseline is not that original solver.
+The existing opt-in FDDP/full-DDP extension is retained; pointmass uses its
+existing FDDP setting. No new numerical selector was introduced. The planner
+branch remains `mpc`; its RH loop, OCPs and pointmass adapter are unchanged.
+
+The supplied `src/examples/quad_sh_ctcs/quad_sh_ctcs.cpp`, linked to our solver
+through its public interface (`STC_ROW=header`), reproduces **100/100 landings**
+using the supplied `run_100ic.py` profile. All 100 node CSVs match a direct
+original-core run byte for byte; ICs 0–2 also match fresh builds of the supplied
+reference. The additional existing physical graders report 89/100 compliant
+and certified: 100/100 is a landing result, not a zero-violation claim.
+
+Current frozen measured-root regressions pass: quad NODE lands after 19 replans
+(9.58346 simulated seconds), pointmass NODE completes 15 replans, and pointmass
+CTCS completes 15 replans. Native violation is zero in all three. Pointmass CTCS
+has zero executed obstacle excess and executed budget ratio 0.9999601983.
+NODE between-node checks remain diagnostics. Results, profiles and hashes:
+`logs/frozen_node_baseline_20261104/clean_solver_restoration_20261105.json`.
 
 Pointmass NODE, the current pointmass CTCS reference-adapter case, and quad NODE
 have passing frozen-time results recorded in
@@ -68,7 +87,7 @@ The diagnostic now handles an exhausted finite horizon without attempting to
 compare an empty rejected trajectory with a stale previous request.
 Real-time operation and 100IC/MC1/MC2 validation remain outside these results.
 
-Fixed-duration comparison (2026-11-05): the test adapter removes duration from
+Historical fixed-duration comparison (before restoration, 2026-11-05): the test adapter removes duration from
 optimization entirely (four input decisions per stage), rather than pinning two
 inequality bounds to the same value. It reuses the original model, costs and
 CTCS implications, including their shared-row lifetime. `--fixed-dt 0.1` gives
@@ -91,7 +110,7 @@ control completes40requests with zero native violations. Raw requests, profiles,
 full-horizon trajectories, independent replays and checks are in
 `logs/frozen_node_baseline_20261104/fixed_dt_comparison_20261105`.
 
-Parameter sweep (2026-11-05): 480 fixed-duration quad runs cover interval budgets
+Historical parameter sweep (before restoration, 2026-11-05): 480 fixed-duration quad runs cover interval budgets
 `[1e-6,1e-5,1e-4,.0016,.016]`, row scales `[1,10]`, regularization minima
 `[.01,.1,1]`, fresh initial barriers `[.01,1]`, barrier reductions `[.1,.5]`,
 and a full-horizon solve plus RH execution prefixes `[1,4,16]`. Each RH case

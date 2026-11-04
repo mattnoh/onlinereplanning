@@ -1,10 +1,10 @@
 {
   "solver_repository": "../ALIPDDP-main",
-  "solver_algorithm_base": "4d68a48b94610699510b23ae8b8f86eb830c6254",
-  "solver_restoration_commit": "59a169fd",
-  "matching_solver_check_commit": "56a2b6e2",
+  "solver_algorithm_base": "1bc94647 lab original for default iLQR; existing 4d68a48b FDDP extension retained",
+  "solver_restoration_commit": "002850dfd35f14416e59273bdff8701ecb40a34e",
+  "matching_solver_check_commit": "Current user-scenario results supersede the old analytic KKT evidence; see clean restoration record.",
   "thesis_provenance": "logs/point_mass/paper_mpc/source_revisions.json",
-  "verified_planner_code_commit": "See commit containing frozen_quad_ctcs_fixed and matching verified_source_sha256; prior code eb25e58 is historical.",
+  "verified_planner_code_commit": "03b083a (solver-only restoration; pointmass adapter, RH loop and OCPs unchanged)",
   "planner_repository": "CoManDO_planner",
   "planner_branch": "mpc",
   "mode": "frozen simulation time during every solve; measured-root update after K=4 whole stages",
@@ -2164,6 +2164,52 @@
       "landing_simulation_time": 20.4,
       "max_native_violation": 0,
       "physical_stc_pass": false
+    }
+  },
+  "prior_solver_algorithm_base": "4d68a48b94610699510b23ae8b8f86eb830c6254",
+  "current_clean_solver_restoration": {
+    "solver_commit": "002850dfd35f14416e59273bdff8701ecb40a34e",
+    "original_source": "/home/lab/projects/STC/multiquad_carrier_landing/src/solver/ddp",
+    "original_main_revision": "1bc946476a5160821edb690dfe20dbc65a8de9a0",
+    "numerical_modes": {
+      "default": "Original single-shooting iLQR; original initial slacks/duals, recursion, regularization, stopping rules. use_ddp_terms defaults false.",
+      "retained_extension": "Existing FDDP/full-DDP implementation selected only by existing use_feasibility_ms / use_ddp_terms flags. Pointmass RH keeps its existing FDDP mode.",
+      "numerical_state_reuse": false
+    },
+    "scope": "Frozen solve time, matched perfect plant, measured roots; quad NODE near-center existing regression, pointmass NODE/CTCS existing reference adapter. Quad CTCS RH, real-time and MC1/MC2 campaigns not validated by this restoration.",
+    "evidence": "logs/frozen_node_baseline_20261104/clean_solver_restoration_20261105.json",
+    "quad_single_horizon_counts": {
+      "samples": 100,
+      "landed": 100,
+      "activated_consequence_compliant": 89,
+      "ctcs_certified": 89,
+      "matches_direct_original_core_nodes": 100
+    },
+    "rh": {
+      "final-pointmass-node": {
+        "accepted": 15,
+        "simulation_time": 30,
+        "native_violation": 0,
+        "loop_pass": 1,
+        "executed_physical_excess": 0.6070316358461354,
+        "executed_ctcs_ratio": 0
+      },
+      "final-pointmass-ctcs": {
+        "accepted": 15,
+        "simulation_time": 30,
+        "native_violation": 0,
+        "loop_pass": 1,
+        "executed_physical_excess": 0,
+        "executed_ctcs_ratio": 0.9999601982716865
+      },
+      "final-quad-node": {
+        "accepted": 19,
+        "simulation_time": 9.583461963026576,
+        "native_violation": 0,
+        "loop_pass": 1,
+        "executed_physical_excess": 0,
+        "executed_ctcs_ratio": 0
+      }
     }
   }
 }
