@@ -790,6 +790,20 @@ class ThetaBounds : public StageConstraintBase<Scalar> { Scalar lo_, hi_; public
         J(0,IDX_THETA)=Scalar(1); J(1,IDX_THETA)=Scalar(-1); return J; }};
 
 template<typename Scalar>
+class ScaledCon : public StageConstraintBase<Scalar> {
+    std::shared_ptr<StageConstraintBase<Scalar>> original_;
+    Scalar inverse_;
+public:
+    ScaledCon(std::shared_ptr<StageConstraintBase<Scalar>> original,double scale)
+        :original_(std::move(original)),inverse_(Scalar(1./scale)){
+        this->constraint_type=original_->getConstraintType();this->dim_c=original_->getDimC();
+    }
+    Vector<Scalar> c(const Vector<Scalar>& x,const Vector<Scalar>& u) const override{return original_->c(x,u)*inverse_;}
+    Matrix<Scalar> cx(const Vector<Scalar>& x,const Vector<Scalar>& u) const override{return original_->cx(x,u)*inverse_;}
+    Matrix<Scalar> cu(const Vector<Scalar>& x,const Vector<Scalar>& u) const override{return original_->cu(x,u)*inverse_;}
+};
+
+template<typename Scalar>
 class ZFloorCon : public StageConstraintBase<Scalar> { public:
     ZFloorCon() { this->constraint_type=ConstraintType::NO; this->dim_c=1; }
     Vector<Scalar> c(const Vector<Scalar>& x, const Vector<Scalar>&) const override {
@@ -1073,10 +1087,18 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     for (int k = 0; k < N; ++k) {
         problem->setStageDynamics(k, dyn);
         problem->setStageCost(k, stage_cost);
-        problem->addStageConstraint(k, cfmin);
-        problem->addStageConstraint(k, cfmax);
-        problem->addStageConstraint(k, cmom);
-        problem->addStageConstraint(k, cth);
+        if(envOrInt("SZMUK_BOUND_SCALE",0)==1){
+            // Same positive row factors as the supplied quad_sh_ctcs baseline.
+            problem->addStageConstraint(k,std::make_shared<ScaledCon<double>>(cfmin,FMAX-FMIN));
+            problem->addStageConstraint(k,std::make_shared<ScaledCon<double>>(cfmax,FMAX-FMIN));
+            problem->addStageConstraint(k,cmom);
+            problem->addStageConstraint(k,std::make_shared<ScaledCon<double>>(cth,THH-THL));
+        }else{
+            problem->addStageConstraint(k,cfmin);
+            problem->addStageConstraint(k,cfmax);
+            problem->addStageConstraint(k,cmom);
+            problem->addStageConstraint(k,cth);
+        }
         problem->addStageConstraint(k, czfl);
         problem->addStageConstraint(k, cspeed);
         problem->addStageConstraint(k, cstep);

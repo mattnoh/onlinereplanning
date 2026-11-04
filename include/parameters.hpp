@@ -216,6 +216,9 @@ inline Parameters fromEnvironment() {
     value=std::getenv("SZMUK_STAGE_TRIGGER");if(value)p.constraints.stage_trigger=value;
     value=std::getenv("SZMUK_RH_FEEDBACK_WARM_START");p.horizon.feedback_warm_start=!(value&&std::string(value)=="0");
     p.solver.reg2_min=envOrQ("SZMUK_REG2_MIN",p.solver.reg2_min);
+    p.solver.mu=envOrQ("SZMUK_MU",p.solver.mu);
+    p.solver.muT=envOrQ("SZMUK_MUT",p.solver.mu);
+    p.solver.mu_mul=envOrQ("SZMUK_MU_MUL",p.solver.mu_mul);
     p.solver.rho=envOrQ("SZMUK_RHO",p.solver.rho);p.solver.rhoT=envOrQ("SZMUK_RHOT",p.solver.rhoT);
     p.solver.rho_mul=envOrQ("SZMUK_RHO_MUL",p.solver.rho_mul);
     p.solver.tolerance=envOrQ("SZMUK_TOL",p.solver.tolerance);
