@@ -270,8 +270,9 @@ int main(int argc,char** argv){try{
         diagnoseSavedRequest(std::string(argv[2])=="quad",argv[3],argc==5?argv[4]:"");return 0;
     }
     if(argc==2&&std::string(argv[1])=="--root-consistency"){measuredGuessContract();return 0;}
-    if(argc<5||argc>14)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess] [--audit-loop] [--stationary-target] [--remaining-horizon] [--fixed-dt SECONDS] [--single-horizon]");
+    if(argc<5||argc>16)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess] [--audit-loop] [--stationary-target] [--remaining-horizon] [--fixed-dt SECONDS] [--single-horizon] [--replay-intervals K]");
     bool ctcs=false,native_guess=false,reference_initial=false,staging_initial=false,audit_loop=false,stationary_target=false,remaining_horizon=false,single_horizon=false;double fixed_dt=0.;
+    int replay_intervals=4;
     for(int i=5;i<argc;++i){
         const std::string option=argv[i];
         if(option=="--ctcs")ctcs=true;
@@ -282,6 +283,7 @@ int main(int argc,char** argv){try{
         else if(option=="--stationary-target")stationary_target=true;
         else if(option=="--remaining-horizon")remaining_horizon=true;
         else if(option=="--single-horizon")single_horizon=true;
+        else if(option=="--replay-intervals"){requireRh(i+1<argc,"missing replay interval count");replay_intervals=std::stoi(argv[++i]);requireRh(replay_intervals>0,"invalid replay interval count");}
         else if(option=="--fixed-dt"){requireRh(i+1<argc,"missing fixed dt");fixed_dt=std::stod(argv[++i]);requireRh(fixed_dt>0.,"invalid fixed dt");}
         else throw std::invalid_argument("unknown option "+option);
     }
@@ -293,7 +295,7 @@ int main(int argc,char** argv){try{
     requireRh(fine||std::string(argv[2])=="matched","unknown plant");
     requireRh((fixed_dt==0.&&!single_horizon)||quad,"fixed dt / single horizon are quad-only");
     requireRh(fixed_dt==0.||!remaining_horizon,"fixed-dt comparison uses a fixed node count");
-    const int bound=std::stoi(argv[3]),K=single_horizon?StcLandingNoAugOCP::HORIZON:4;
+    const int bound=std::stoi(argv[3]),K=single_horizon?StcLandingNoAugOCP::HORIZON:replay_intervals;
     requireRh(!single_horizon||bound==1,"single horizon requires one solve");
     const std::filesystem::path out(argv[4]);
     requireRh(bound>0&&bound<=40&&std::filesystem::create_directories(out),"invalid cycle bound/output");
@@ -631,7 +633,7 @@ int main(int argc,char** argv){try{
         <<",\"ctcs\":"<<ctcs<<",\"ctcs_loop_pass\":"<<ctcs_pass<<",\"staging_transition_pass\":"<<staging_transition_pass<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
         <<",\"loop_pass\":"<<loop_pass<<",\"physical_stc_pass\":"<<physical_stc_pass<<",\"physical_stc_excess\":"<<physical_stc_excess<<",\"standalone_comparisons\":"<<standalone_comparisons<<",\"shift_error\":"<<shift_error<<",\"initial_guess_dynamics_error\":"<<guess_dynamics_error
         <<",\"planned_physical_stc_excess\":"<<planned_stc_excess<<",\"remaining_horizon\":"<<remaining_horizon<<",\"stationary_target\":"<<stationary_target
-        <<",\"fixed_dt\":"<<fixed_dt<<",\"single_horizon\":"<<single_horizon
+        <<",\"fixed_dt\":"<<fixed_dt<<",\"single_horizon\":"<<single_horizon<<",\"replay_intervals\":"<<K
         <<",\"physical_interval_budget\":"<<physical_budget<<",\"density_parity_error\":"<<density_parity_error<<",\"planned_dense_state_defect\":"<<dense_state_defect
         <<",\"native_solve_pass\":"<<native_pass<<",\"node_loop_pass\":"<<node_pass<<",\"planned_continuous_pass\":"<<(predicted_dense_error<=1e-6)<<",\"planned_dense_excess\":"<<predicted_dense_error
         <<",\"executed_continuous_pass\":"<<(executed_error<=1e-6)<<",\"executed_physical_excess\":"<<executed_error<<",\"native_violation\":"<<native_error<<",\"root_error\":"<<root_error<<",\"anchor_difference\":"<<anchor_difference

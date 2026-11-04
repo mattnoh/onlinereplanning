@@ -1,0 +1,74 @@
+{
+  "cadence-k1": {
+    "command": [
+      "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+      "quad",
+      "matched",
+      "40",
+      "/tmp/comando-fixed-dt-20261105/cadence-k1",
+      "--ctcs",
+      "--staging-initial",
+      "--audit-loop",
+      "--fixed-dt",
+      "0.1",
+      "--replay-intervals",
+      "1"
+    ],
+    "returncode": 1,
+    "accepted": 5,
+    "sim_time": 0.5,
+    "summary": null,
+    "tail": "[MPC] solve 177.369ms iters=79 n_shift=1\nMEASURED_RH model=quad cycle=0 t=0.1 ctcs=1 native=0 budget_native=1 budget_planned=0.999918 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 1278.81ms iters=485 n_shift=1\nMEASURED_RH model=quad cycle=1 t=0.2 ctcs=1 native=3.23886e-15 budget_native=1 budget_planned=0.999918 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 292.578ms iters=129 n_shift=1\nMEASURED_RH model=quad cycle=2 t=0.3 ctcs=1 native=0 budget_native=1 budget_planned=0.999943 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 243.158ms iters=108 n_shift=1\nMEASURED_RH model=quad cycle=3 t=0.4 ctcs=1 native=0 budget_native=1 budget_planned=0.999943 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 313.345ms iters=138 n_shift=1\nMEASURED_RH model=quad cycle=4 t=0.5 ctcs=1 native=0 budget_native=1 budget_planned=0.999986 budget_executed=0 executed=0 planned_dense=0\n[MPC] infeasible returned primal: constraints=4.32624e-05 dynamics=0 termination=Outer Max/Min\n[MPC] solve 296.13ms iters=121 n_shift=1\nFAILED_REQUEST_FRESH repeat=0 difference=0 native=4.32624e-05\nFAILED_REQUEST_FRESH repeat=1 difference=0 native=4.32624e-05\nFAIL: measured-root solve rejected: synchronous_mpc_primal_not_certified\n",
+    "wall_seconds": 5.573412627010839,
+    "failed_request_initial_max_ctcs_ratio": 0.9999998092498037
+  },
+  "cadence-k8": {
+    "command": [
+      "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+      "quad",
+      "matched",
+      "40",
+      "/tmp/comando-fixed-dt-20261105/cadence-k8",
+      "--ctcs",
+      "--staging-initial",
+      "--audit-loop",
+      "--fixed-dt",
+      "0.1",
+      "--replay-intervals",
+      "8"
+    ],
+    "returncode": 1,
+    "accepted": 1,
+    "sim_time": 0.7999999999999999,
+    "summary": null,
+    "tail": "[MPC] solve 177.183ms iters=79 n_shift=8\nMEASURED_RH model=quad cycle=0 t=0.8 ctcs=1 native=0 budget_native=1 budget_planned=0.999918 budget_executed=0 executed=0 planned_dense=0\n[MPC] infeasible returned primal: constraints=8.34225e-05 dynamics=0 termination=Outer Max/Min\n[MPC] solve 264.996ms iters=127 n_shift=8\nFAILED_REQUEST_FRESH repeat=0 difference=0 native=8.34225e-05\nFAILED_REQUEST_FRESH repeat=1 difference=0 native=8.34225e-05\nFAIL: measured-root solve rejected: synchronous_mpc_primal_not_certified\n",
+    "wall_seconds": 1.1662799610057846,
+    "failed_request_initial_max_ctcs_ratio": 6.0742491058450225
+  },
+  "cadence-k16": {
+    "command": [
+      "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_measured_root_rh",
+      "quad",
+      "matched",
+      "40",
+      "/tmp/comando-fixed-dt-20261105/cadence-k16",
+      "--ctcs",
+      "--staging-initial",
+      "--audit-loop",
+      "--fixed-dt",
+      "0.1",
+      "--replay-intervals",
+      "16"
+    ],
+    "returncode": 1,
+    "accepted": 2,
+    "sim_time": 3.2000000000000006,
+    "summary": null,
+    "tail": "[MPC] solve 175.709ms iters=79 n_shift=16\nMEASURED_RH model=quad cycle=0 t=1.6 ctcs=1 native=0 budget_native=1 budget_planned=0.999918 budget_executed=0 executed=0 planned_dense=0\n[MPC] solve 298.73ms iters=130 n_shift=16\nMEASURED_RH model=quad cycle=1 t=3.2 ctcs=1 native=0 budget_native=1 budget_planned=1.00029 budget_executed=0.999961 executed=0 planned_dense=0\n[MPC] infeasible returned primal: constraints=0.152514 dynamics=0 termination=Outer Max/Min\n[MPC] solve 655.298ms iters=347 n_shift=16\nFAILED_REQUEST_FRESH repeat=0 difference=0 native=0.152514\nFAILED_REQUEST_FRESH repeat=1 difference=0 native=0.152514\nFAIL: measured-root solve rejected: synchronous_mpc_primal_not_certified\n",
+    "wall_seconds": 2.9699648240057286,
+    "failed_request_initial_max_ctcs_ratio": 2.2074185197930762
+  },
+  "scope": "Existing fixed-dt test adapter, staging initial state, matched perfect plant, frozen solve time. Cadence comparison only; not identification of historical clean baseline.",
+  "solver_algorithm_base": "4d68a48b94610699510b23ae8b8f86eb830c6254",
+  "solver_changed": false
+}
