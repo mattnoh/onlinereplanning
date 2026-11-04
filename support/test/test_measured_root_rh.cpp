@@ -1,5 +1,5 @@
 // Frozen simulation-time measured-root RH, through the public full-trajectory
-// interface. Original NODE OCPs, whole K-stage execution, fresh numerical solves.
+// interface. Original NODE/CTCS OCPs, whole K-stage execution, fresh numerical solves.
 #include "pointmass_reference_adapter.hpp"
 #include "planner_core/controller.hpp"
 #include "ocp/ocp_stc_landing_noaug.hpp"
@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <cstring>
+#include <map>
 
 static void requireRh(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 static void ordinaryNodeContract(){
@@ -109,17 +110,24 @@ int main(int argc,char** argv){try{
         diagnoseSavedRequest(std::string(argv[2])=="quad",argv[3]);return 0;
     }
     if(argc==2&&std::string(argv[1])=="--root-consistency"){measuredGuessContract();return 0;}
-    if(argc!=5&&argc!=6)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--native-initial-guess]");
-    const bool native_guess=argc==6&&std::string(argv[5])=="--native-initial-guess";
-    requireRh(argc==5||native_guess,"unknown initial-guess option");
+    if(argc<5||argc>8)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial] [--native-initial-guess]");
+    bool ctcs=false,native_guess=false,reference_initial=false;
+    for(int i=5;i<argc;++i){
+        const std::string option=argv[i];
+        if(option=="--ctcs")ctcs=true;
+        else if(option=="--reference-initial")reference_initial=true;
+        else if(option=="--native-initial-guess")native_guess=true;
+        else throw std::invalid_argument("unknown option "+option);
+    }
     const bool quad=std::string(argv[1])=="quad",fine=std::string(argv[2])=="fine";
     requireRh(quad||std::string(argv[1])=="pointmass","unknown model");
+    requireRh(!reference_initial||quad,"reference initial condition is quad-only");
     requireRh(fine||std::string(argv[2])=="matched","unknown plant");
     const int bound=std::stoi(argv[3]),K=4;
     const std::filesystem::path out(argv[4]);
     requireRh(bound>0&&bound<=40&&std::filesystem::create_directories(out),"invalid cycle bound/output");
-    auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor("stc_landing_noaug_node")):
-        pointmassReferenceDescriptor(100,false,true);
+    auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(ctcs?"stc_landing_noaug":"stc_landing_noaug_node")):
+        pointmassReferenceDescriptor(100,false,!ctcs);
     const auto params=descriptor->getSolverParams();
     std::shared_ptr<OptimalControlProblem<double>> captured_problem;
     OCPCreateArgs captured_args;
@@ -138,13 +146,40 @@ int main(int argc,char** argv){try{
     planner_core::PlannerCoreConfig config;config.ocp_type=descriptor->name;config.n_replay=K;config.enable_terminal_freeze=false;
     planner_core::Controller controller;controller.configureSynchronous(config,descriptor);
     Eigen::VectorXd plant=Eigen::VectorXd::Zero(quad?13:4);
-    if(quad){plant<<-.07320069131,-.04604300079,1.832031775,.07864153001,-.004976944706,.008655228599,
+    if(quad){
+        if(reference_initial)plant<<2.4,2.,2.,0.,-2.,0.,1.,0.,0.,0.,0.,0.,0.;
+        else plant<<-.07320069131,-.04604300079,1.832031775,.07864153001,-.004976944706,.008655228599,
         .999980267207,-.004416340294,.003462269278,-.00282379661,.01105888095,.001028963132,-.002000458539;
         plant.segment<4>(6).normalize();}else plant<<-10,0,0,0;
     if(model.initial_state)plant=model.initial_state(plant,model.hover);
     planner_core::PlannerCoreInput input;input.state_frame="world";input.target_snapshot.valid=true;
     double time=0.,root_error=0.,native_error=0.,executed_error=0.,predicted_dense_error=0.,prediction_error=0.;
     bool reached=false;int accepted=0;double anchor_difference=0.;
+    Problem audit_problem;
+    double native_budget_ratio=0.,planned_budget_ratio=0.,executed_budget_ratio=0.,initial_budget_ratio=0.,density_parity_error=0.,dense_state_defect=0.;
+    int ctcs_rows_seen=0;
+    std::map<std::string,double> trigger_time,triggered_consequence;
+    std::ofstream budgets;
+    if(ctcs){budgets.open(out/"ctcs_intervals.csv");budgets<<std::setprecision(17)
+        <<"cycle,phase,stage,duration,physical_budget,native_budget,native_integral_ratio,independent_integral_ratio\n";}
+    const auto rowAt=[&](int k){
+        std::shared_ptr<StcStageConstraint<double>> result;
+        for(const auto& row:captured_problem->getStageConstraints(k,ConstraintType::NO))
+            if(auto stc=std::dynamic_pointer_cast<StcStageConstraint<double>>(row)){
+                requireRh(!result,"more than one CTCS interval row");result=std::move(stc);
+            }
+        return result;
+    };
+    const auto densityRatio=[&](const Vec& x,const Vec& u){
+        if(quad)return StcLandingNoAugOCP::evalCtcsIntegrand<double>(x,u)/StcLandingNoAugOCP::CTCS_STEP_EPS;
+        double density=0.;for(int j=0;j<NOBS;++j)if(audit_problem.mask[j]){
+            const double excess=std::max(0.,obstacleG(audit_problem,x.head<2>(),j)+audit_problem.delta);
+            density+=excess*excess;
+        }
+        return density/audit_problem.eps;
+    };
+    const double physical_budget=quad?StcLandingNoAugOCP::CTCS_STEP_EPS:audit_problem.eps;
+
     std::ofstream log(out/"cycles.jsonl");log<<std::setprecision(17);
     std::ofstream executed(out/"executed.csv");executed<<std::setprecision(17)<<"t";
     for(int j=0;j<model.nx;++j)executed<<",x"<<j;executed<<'\n';
@@ -153,6 +188,7 @@ int main(int argc,char** argv){try{
             double excess=0.;
             for(auto type:{ConstraintType::NO,ConstraintType::SOC})
                 for(const auto& row:captured_problem->getStageConstraints(0,type)){
+                    if(std::dynamic_pointer_cast<StcStageConstraint<double>>(row))continue;
                     const Vec c=row->c(x,u);
                     excess=std::max(excess,type==ConstraintType::SOC?c(0)+c.tail(c.size()-1).norm():c.maxCoeff());
                 }
@@ -176,8 +212,22 @@ int main(int argc,char** argv){try{
             for(int k=0;k<model.horizon;++k)prepared_u.push_back(captured_problem->getInitialControl(k));}
         saveVectors(request,"prepared_X",prepared_x);saveVectors(request,"prepared_U",prepared_u);
         saveVectors(request,"returned_X",result.solve_result.state_trajectory);saveVectors(request,"returned_U",result.solve_result.control_trajectory);
+        if(ctcs&&captured_problem)for(int k=0;k<model.horizon;++k)if(const auto row=rowAt(k)){
+            const double ratio=row->intervalIntegral(prepared_x[k],prepared_u[k])/row->getEpsilon();
+            initial_budget_ratio=std::max(initial_budget_ratio,ratio);
+            budgets<<cycle<<",initial_guess,"<<k<<','<<(model.stage_duration?model.stage_duration(prepared_x[k],prepared_u[k]):model.dt)<<','<<physical_budget<<','<<row->getEpsilon()<<','<<ratio<<",\n";
+        }
         if(!result.solve_accepted&&captured_problem){
             request<<"rejected_native "<<result.solve_result.primal_constraint_violation<<" tolerance "<<params.tolerance<<'\n';
+            const auto& rejected_x=result.solve_result.state_trajectory;
+            const auto& rejected_u=result.solve_result.control_trajectory;
+            for(size_t k=0;k<rejected_u.size();++k)
+                for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
+                    for(const auto& row:captured_problem->getStageConstraints(k,type)){
+                        const Vec c=row->c(rejected_x[k],rejected_u[k]);
+                        const double excess=type==ConstraintType::SOC?c(0)+c.tail(c.size()-1).norm():type==ConstraintType::EQ?c.cwiseAbs().maxCoeff():c.maxCoeff();
+                        if(excess>params.tolerance)request<<"rejected_stage "<<k<<" type "<<int(type)<<" ctcs "<<bool(std::dynamic_pointer_cast<StcStageConstraint<double>>(row))<<" residual "<<c.transpose()<<'\n';
+                    }
             for(int repeat=0;repeat<2;++repeat){
                 ALIPDDP<double> fresh(*captured_problem);fresh.init(params);fresh.solve();
                 const auto x=fresh.getResX(),u=fresh.getResU();const auto audit=auditPrimal(*captured_problem,x,u,params);
@@ -194,13 +244,26 @@ int main(int argc,char** argv){try{
         const auto relative=planner_core::prepareOcpState(*descriptor,measured,input.target_snapshot);
         root_error=std::max(root_error,(xs.front().head(descriptor->state_dim)-relative.head(descriptor->state_dim)).lpNorm<Eigen::Infinity>());
         requireRh(root_error<=1e-12&&result.x0_source=="measured","root changed/projected/predicted");
+        if(ctcs){
+            for(int j=0;j<NOBS;++j)audit_problem.mask[j]=(audit_problem.s_diag.cwiseProduct(relative.head<2>()-audit_problem.centers[j])).norm()<=6.;
+            const auto row=rowAt(0);
+            if(quad){
+                requireRh(StcLandingNoAugOCP::useTriggeredLandingStc()&&row&&row->numImplications()==8,"original quad STC implications are disabled or missing");
+                requireRh(std::abs(row->getEpsilon()*StcLandingNoAugOCP::CTCS_Y_SCALE-physical_budget)<1e-15,"quad CTCS budget units disagree");
+            }
+            if(row){
+                requireRh(row->getForm()==StcForm::Density&&row->getEpsilon()>0.,"invalid CTCS interval row");
+                for(int j=0;j<row->numImplications();++j)requireRh(row->implication(j).weight>=0.,"negative CTCS density weight");
+                ++ctcs_rows_seen;
+            }
+        }
         if(quad)requireRh(xs.front()(13)==0.,"quad per-solve time state was not reset");
         requireRh(result.path.states.size()==xs.size(),"public interface omitted full state trajectory");
         OCPCreateArgs args;args.current_state=relative;args.target_accel=acceleration;args.t_abs=time;
         auto problem=create(args);
         const auto audit=auditPrimal(*problem,xs,us,params);
         native_error=std::max(native_error,audit.constraints);
-        requireRh(audit.feasible(params.tolerance),"returned NODE trajectory violates native constraints/dynamics");
+        requireRh(audit.feasible(params.tolerance),"returned trajectory violates native constraints/dynamics");
         if(cycle==0){
             ALIPDDP<double> single(*problem);single.init(params);single.solve();
             const auto ax=single.getResX(),au=single.getResU();
@@ -212,18 +275,56 @@ int main(int argc,char** argv){try{
         for(size_t k=0;k<us.size();++k){
             const double h=model.stage_duration?model.stage_duration(xs[k],us[k]):model.dt;
             requireRh(h>0.&&std::isfinite(h),"invalid optimized stage duration");durations.push_back(h);horizon+=h;
-            const int n=std::max(1,int(std::ceil(h/.001)));auto state=xs[k];
-            for(int q=0;q<n;++q){state=model.flow(state,us[k],h/n,false).x;predicted_dense_error=std::max(predicted_dense_error,physical(state,us[k]));}
+            const int n=std::max(1,int(std::ceil(h/.001)));const double step=h/n;auto state=xs[k];double integral=0.;
+            const auto row=ctcs?rowAt(static_cast<int>(k)):nullptr;
+            const double native_ratio=row?row->intervalIntegral(xs[k],us[k])/row->getEpsilon():0.;
+            if(row){
+                native_budget_ratio=std::max(native_budget_ratio,native_ratio);
+                const double reference=densityRatio(xs[k],us[k]);
+                const double error=std::abs(row->density(xs[k],us[k])/row->getEpsilon()-reference)/(1.+std::abs(reference));
+                density_parity_error=std::max(density_parity_error,error);
+                requireRh(error<=1e-11,"independent CTCS density disagrees with original row");
+            }
+            for(int q=0;q<n;++q){
+                const auto next=model.flow(state,us[k],step,false).x;
+                if(ctcs){
+                    const auto mid=model.flow(state,us[k],.5*step,false).x;
+                    integral+=step*(densityRatio(state,us[k])+4.*densityRatio(mid,us[k])+densityRatio(next,us[k]))/6.;
+                }
+                state=next;predicted_dense_error=std::max(predicted_dense_error,physical(state,us[k]));
+            }
+            if(ctcs){
+                dense_state_defect=std::max(dense_state_defect,(state-xs[k+1]).lpNorm<Eigen::Infinity>());
+                planned_budget_ratio=std::max(planned_budget_ratio,integral);
+                budgets<<cycle<<",planned,"<<k<<','<<h<<','<<physical_budget<<','<<(row?row->getEpsilon():0.)<<','<<native_ratio<<','<<integral<<'\n';
+            }
         }
         double prefix=0.;
         for(int k=0;k<K;++k){
             const auto interval_start=plant;const int n=std::max(1,int(std::ceil(durations[k]/.001)));const double h=durations[k]/n;
+            double integral=0.;const auto row=ctcs?rowAt(k):nullptr;
             for(int q=0;q<n;++q){
                 input.absolute_time_sec=time+prefix+q*h;input.current_state=plant;
                 const auto sample=controller.sample(input);
                 requireRh(sample.has_replay_sample&&!sample.stale&&sample.applied_control_index==k,"wrong stage/clock during prefix execution");
                 requireRh((sample.command.control-us[k]).norm()<=1e-12,"controller changed planned ZOH input");
-                plant=fine?world_model.flow(plant,us[k],h,false).x:world_model.flow(interval_start,us[k],(q+1)*h,false).x;
+                const auto next=fine?world_model.flow(plant,us[k],h,false).x:world_model.flow(interval_start,us[k],(q+1)*h,false).x;
+                if(ctcs){
+                    const auto mid=fine?world_model.flow(plant,us[k],.5*h,false).x:world_model.flow(interval_start,us[k],(q+.5)*h,false).x;
+                    const auto a=planner_core::prepareOcpState(*descriptor,plant,targetAt(time+prefix+q*h));
+                    const auto b=planner_core::prepareOcpState(*descriptor,mid,targetAt(time+prefix+(q+.5)*h));
+                    const auto c=planner_core::prepareOcpState(*descriptor,next,targetAt(time+prefix+(q+1)*h));
+                    integral+=h*(densityRatio(a,us[k])+4.*densityRatio(b,us[k])+densityRatio(c,us[k]))/6.;
+                    executed_error=std::max(executed_error,physical(b,us[k]));
+                    if(row)for(int j=0;j<row->numImplications();++j){
+                        const auto& im=row->implication(j);
+                        if(row->triggered(j,b)){
+                            trigger_time[im.name]+=h;
+                            triggered_consequence[im.name]=std::max(triggered_consequence[im.name],std::max(0.,im.consequence(b,us[k])));
+                        }
+                    }
+                }
+                plant=next;
                 executed_error=std::max(executed_error,physical(planner_core::prepareOcpState(*descriptor,plant,targetAt(time+prefix+(q+1)*h)),us[k]));
                 executed<<time+prefix+(q+1)*h;for(int j=0;j<plant.size();++j)executed<<','<<plant(j);executed<<'\n';
             }
@@ -232,6 +333,10 @@ int main(int argc,char** argv){try{
             const auto predicted_world=planner_core::reconstructWorldState(*descriptor,xs[k+1],targetAt(time+prefix+durations[k]));
             prediction_error=std::max(prediction_error,(plant.head(descriptor->state_dim)-predicted_world.head(descriptor->state_dim)).lpNorm<Eigen::Infinity>());
             if(!fine)requireRh(prediction_error<=params.tolerance,"model-matched independent plant disagrees at node");
+            if(ctcs){
+                executed_budget_ratio=std::max(executed_budget_ratio,integral);
+                budgets<<cycle<<",executed,"<<k<<','<<durations[k]<<','<<physical_budget<<','<<(row?row->getEpsilon():0.)<<','<<(row?row->intervalIntegral(xs[k],us[k])/row->getEpsilon():0.)<<','<<integral<<'\n';budgets.flush();
+            }
             prefix+=durations[k];
         }
         time+=prefix;++accepted;input.absolute_time_sec=time;
@@ -240,18 +345,29 @@ int main(int argc,char** argv){try{
         reached=quad&&measured_relative.head<3>().norm()<=.1&&measured_relative.segment<3>(3).norm()<=.3;
         log<<"{\"cycle\":"<<cycle<<",\"epoch\":"<<time<<",\"executed_duration\":"<<prefix<<",\"horizon_duration\":"<<horizon
            <<",\"native_violation\":"<<audit.constraints<<",\"root_error\":"<<root_error<<",\"native_initial_guess\":"<<native_guess
+           <<",\"ctcs\":"<<ctcs<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
            <<",\"optimality_error\":"<<result.solve_result.optimality_error
            <<",\"solve_ms\":"<<result.solve_result.solve_time_ms<<",\"iterations\":"<<result.solve_result.solve_iters<<",\"executed_physical_excess\":"<<executed_error
            <<",\"planned_dense_excess\":"<<predicted_dense_error<<",\"distance\":"<<plant.head(quad?3:2).norm()<<"}\n";log.flush();
-        std::cout<<"MEASURED_RH model="<<(quad?"quad":"pointmass")<<" cycle="<<cycle<<" t="<<time<<" native="<<audit.constraints<<" executed="<<executed_error<<" planned_dense="<<predicted_dense_error<<std::endl;
+        std::cout<<"MEASURED_RH model="<<(quad?"quad":"pointmass")<<" cycle="<<cycle<<" t="<<time<<" ctcs="<<ctcs<<" native="<<audit.constraints<<" budget_native="<<native_budget_ratio<<" budget_planned="<<planned_budget_ratio<<" budget_executed="<<executed_budget_ratio<<" executed="<<executed_error<<" planned_dense="<<predicted_dense_error<<std::endl;
     }
     const bool progress=quad?reached:(plant(0)>0.&&(plant.head<2>()-reference(time)).norm()<1.);
     const bool native_pass=accepted>0&&(quad?reached:accepted==bound)&&progress&&root_error<=1e-12&&native_error<=params.tolerance;
     // NODE acceptance covers shooting nodes. Dense checks remain diagnostics.
     const bool node_pass=native_pass;
-    std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"accepted\":"<<accepted<<",\"reached\":"<<reached<<",\"simulation_time\":"<<time
+    const bool ctcs_pass=ctcs&&native_pass&&ctcs_rows_seen>0&&native_budget_ratio<=1.+1e-6&&planned_budget_ratio<=1.+1e-6&&executed_budget_ratio<=1.+1e-6&&executed_error<=params.tolerance;
+    std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"model\":"<<jstr(quad?"quad":"pointmass")<<",\"plant_execution\":"<<jstr(fine?"refined_1ms":"matched_discrete")<<",\"reference_initial\":"<<reference_initial<<",\"initial_ctcs_ratio\":"<<initial_budget_ratio<<",\"accepted\":"<<accepted<<",\"reached\":"<<reached<<",\"simulation_time\":"<<time
+        <<",\"ctcs\":"<<ctcs<<",\"ctcs_loop_pass\":"<<ctcs_pass<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
+        <<",\"physical_interval_budget\":"<<physical_budget<<",\"density_parity_error\":"<<density_parity_error<<",\"planned_dense_state_defect\":"<<dense_state_defect
         <<",\"native_solve_pass\":"<<native_pass<<",\"node_loop_pass\":"<<node_pass<<",\"planned_continuous_pass\":"<<(predicted_dense_error<=1e-6)<<",\"planned_dense_excess\":"<<predicted_dense_error
         <<",\"executed_continuous_pass\":"<<(executed_error<=1e-6)<<",\"executed_physical_excess\":"<<executed_error<<",\"native_violation\":"<<native_error<<",\"root_error\":"<<root_error<<",\"anchor_difference\":"<<anchor_difference
         <<",\"prediction_error\":"<<prediction_error<<"}\n";
-    return node_pass?0:2;
+    if(ctcs){
+        std::ofstream triggers(out/"trigger_activity.json");triggers<<std::setprecision(17)<<"{\"active_seconds\":{";bool comma=false;
+        for(const auto& [name,value]:trigger_time){if(comma)triggers<<',';comma=true;triggers<<jstr(name)<<':'<<value;}
+        triggers<<"},\"max_positive_consequence_while_triggered\":{";comma=false;
+        for(const auto& [name,value]:triggered_consequence){if(comma)triggers<<',';comma=true;triggers<<jstr(name)<<':'<<value;}
+        triggers<<"}}\n";
+    }
+    return (ctcs?ctcs_pass:node_pass)?0:2;
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

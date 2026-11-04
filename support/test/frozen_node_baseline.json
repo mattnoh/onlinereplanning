@@ -113,7 +113,372 @@
     "include/planner_core/controller.hpp": "707b969a4962160976e79a6d6314a7cf16e6712d008048d8606f0d0c44a1d564",
     "include/ocp/ocp_stc_landing_noaug.hpp": "4df6d4b3811fab642b53aa2c683d5ee971a0f21aabd8572ce9a588e5cd2ec5b5",
     "support/test/pointmass_reference_adapter.hpp": "6d96b7c3d9128da722c3e8ee9cff7c93472e98e414219d5bdae5e6314c660f50",
-    "support/test/test_measured_root_rh.cpp": "c748b1c488f4959f65830c4212625d2e4299d1a6f85f5e37134c2bb85b2f049b"
+    "support/test/test_measured_root_rh.cpp": "3e3003496ebfe29a88cc93a4f8724f2ee6f511392c38f1baa155ff2a469e6528"
   },
-  "scope_limit": "Verifies both ordinary NODE frozen-time loops and original pointmass CTCS. Does not validate quad CTCS RH, real-time delay handling, hardware, or the100IC/MC1/MC2campaign. A separate retained quad CTCS SH check with its legacy profile has a budget-certificate failure and is not claimed fixed."
+  "scope_limit": "Both original NODE frozen-time baselines and CTCS shared-controller baselines pass with matched and refined plants. Quad CTCS passing case has zero densities and does not exercise staging. Additional far quad start fails first OCP. Real-time delay handling, hardware and 100IC/MC1/MC2 robustness are unvalidated. Separate legacy quad SH budget-certificate failure remains unclaimed.",
+  "ctcs_shared_controller": {
+    "result_directory": "logs/frozen_node_baseline_20261104/ctcs_shared",
+    "profile": {
+      "environment": {
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MPC_MAX_ITER": "120",
+        "SZMUK_MAX_ITER": "120",
+        "SZMUK_RH_N": "40",
+        "SZMUK_THH": ".16"
+      },
+      "pointmass": {
+        "N": 16,
+        "dt": 0.5,
+        "K": 4,
+        "max_iter": 300,
+        "substeps": 100,
+        "epsilon": 1e-06,
+        "delta": 0.05,
+        "requests": 15
+      },
+      "quad": {
+        "N": 40,
+        "THH": 0.16,
+        "K": 4,
+        "max_iter": 120,
+        "epsilon": 0.0016,
+        "Y_scale": 10,
+        "request_bound": 40,
+        "initial_world_state": [
+          -0.07320069131,
+          -0.04604300079,
+          1.832031775,
+          0.07864153001,
+          -0.004976944706,
+          0.008655228599,
+          0.999980267207,
+          -0.004416340294,
+          0.003462269278,
+          -0.00282379661,
+          0.01105888095,
+          0.001028963132,
+          -0.002000458539
+        ],
+        "target_acceleration": [
+          0.04306807449,
+          0.07358261346,
+          0
+        ]
+      }
+    },
+    "acceptance": "native constraints/dynamics and measured root; mission progress; native and independent planned/executed CTCS integrals at most epsilon*(1+1e-6); executed ordinary physical bounds at solver tolerance",
+    "quadrature": "independent original physical density; composite Simpson with midpoint on each <=1ms original-model flow segment; reports native budget units separately",
+    "runs": {
+      "pointmass-matched-ctcs": {
+        "returncode": 0,
+        "summary": {
+          "model": "pointmass",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "initial_ctcs_ratio": 178915.81321091304,
+          "accepted": 15,
+          "reached": 0,
+          "simulation_time": 30,
+          "ctcs": 1,
+          "ctcs_loop_pass": 1,
+          "native_ctcs_ratio": 0.9999537128396285,
+          "planned_ctcs_ratio": 0.9999620111462996,
+          "executed_ctcs_ratio": 0.9999601982716865,
+          "physical_interval_budget": 1e-06,
+          "density_parity_error": 2.463738349762247e-14,
+          "planned_dense_state_defect": 1.1961682894190417e-09,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 0,
+          "planned_dense_excess": 0.64866687114416,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 0
+        },
+        "max_iterations_used": 228,
+        "max_optimality_error": 9.345623358423469e-07
+      },
+      "quad-matched-ctcs": {
+        "returncode": 0,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "initial_ctcs_ratio": 0,
+          "accepted": 20,
+          "reached": 1,
+          "simulation_time": 9.929042605170928,
+          "ctcs": 1,
+          "ctcs_loop_pass": 1,
+          "native_ctcs_ratio": 0,
+          "planned_ctcs_ratio": 0,
+          "executed_ctcs_ratio": 0,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 0,
+          "planned_dense_state_defect": 2.2850253689199462e-08,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 8.881784197001252e-16
+        },
+        "max_iterations_used": 120,
+        "max_optimality_error": 1.5299634686279705e-05
+      },
+      "pointmass-fine-ctcs": {
+        "returncode": 0,
+        "summary": {
+          "model": "pointmass",
+          "plant_execution": "refined_1ms",
+          "reference_initial": 0,
+          "initial_ctcs_ratio": 178915.81321094692,
+          "accepted": 15,
+          "reached": 0,
+          "simulation_time": 30,
+          "ctcs": 1,
+          "ctcs_loop_pass": 1,
+          "native_ctcs_ratio": 0.9999537128399776,
+          "planned_ctcs_ratio": 0.9999620111454309,
+          "executed_ctcs_ratio": 0.9999601981953202,
+          "physical_interval_budget": 1e-06,
+          "density_parity_error": 2.4649915222597325e-14,
+          "planned_dense_state_defect": 1.196168698813782e-09,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 0,
+          "planned_dense_excess": 0.6486668711441579,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 1.6722720985740125e-09
+        },
+        "max_iterations_used": 247,
+        "max_optimality_error": 9.345673467316204e-07
+      },
+      "quad-fine-ctcs": {
+        "returncode": 0,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "refined_1ms",
+          "reference_initial": 0,
+          "initial_ctcs_ratio": 0,
+          "accepted": 20,
+          "reached": 1,
+          "simulation_time": 9.929042649106242,
+          "ctcs": 1,
+          "ctcs_loop_pass": 1,
+          "native_ctcs_ratio": 0,
+          "planned_ctcs_ratio": 0,
+          "executed_ctcs_ratio": 0,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 0,
+          "planned_dense_state_defect": 2.2850253689199462e-08,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 4.634525835323089e-08
+        },
+        "max_iterations_used": 120,
+        "max_optimality_error": 1.5299465556122947e-05
+      },
+      "pointmass-matched-node": {
+        "returncode": 0,
+        "summary": {
+          "model": "pointmass",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "initial_ctcs_ratio": 0,
+          "accepted": 15,
+          "reached": 0,
+          "simulation_time": 30,
+          "ctcs": 0,
+          "ctcs_loop_pass": 0,
+          "native_ctcs_ratio": 0,
+          "planned_ctcs_ratio": 0,
+          "executed_ctcs_ratio": 0,
+          "physical_interval_budget": 1e-06,
+          "density_parity_error": 0,
+          "planned_dense_state_defect": 0,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 0,
+          "planned_dense_excess": 0.6452738160406788,
+          "executed_continuous_pass": 0,
+          "executed_physical_excess": 0.6070316358461354,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 0
+        },
+        "max_iterations_used": 296,
+        "max_optimality_error": 1666570.5024087776
+      },
+      "quad-matched-node": {
+        "returncode": 0,
+        "summary": {
+          "model": "quad",
+          "plant_execution": "matched_discrete",
+          "reference_initial": 0,
+          "initial_ctcs_ratio": 0,
+          "accepted": 20,
+          "reached": 1,
+          "simulation_time": 9.929042624733237,
+          "ctcs": 0,
+          "ctcs_loop_pass": 0,
+          "native_ctcs_ratio": 0,
+          "planned_ctcs_ratio": 0,
+          "executed_ctcs_ratio": 0,
+          "physical_interval_budget": 0.0016,
+          "density_parity_error": 0,
+          "planned_dense_state_defect": 0,
+          "native_solve_pass": 1,
+          "node_loop_pass": 1,
+          "planned_continuous_pass": 1,
+          "planned_dense_excess": 0,
+          "executed_continuous_pass": 1,
+          "executed_physical_excess": 0,
+          "native_violation": 0,
+          "root_error": 0,
+          "anchor_difference": 0,
+          "prediction_error": 8.881784197001252e-16
+        },
+        "max_iterations_used": 120,
+        "max_optimality_error": 1.5173656771433896e-05
+      }
+    },
+    "trigger_activity": {
+      "pointmass-matched-ctcs": {
+        "active_seconds": {
+          "obstacle_0": 8.000000000001005,
+          "obstacle_1": 8.000000000001005,
+          "obstacle_2": 6.000000000000338,
+          "obstacle_3": 8.000000000001005,
+          "obstacle_4": 8.000000000001005
+        },
+        "max_positive_consequence_while_triggered": {
+          "obstacle_0": 0.004544336038169394,
+          "obstacle_1": 0.004260700511307336,
+          "obstacle_2": 0.004103772625898561,
+          "obstacle_3": 0.0039009315150611013,
+          "obstacle_4": 0.004740718119784049
+        }
+      },
+      "quad-matched-ctcs": {
+        "active_seconds": {
+          "landing_glideslope": 6.061170532046772,
+          "landing_omega": 6.061170532046772,
+          "landing_speed": 6.061170532046772,
+          "landing_tilt": 6.061170532046772,
+          "loose_omega": 9.92904260517141,
+          "loose_tilt": 9.92904260517141,
+          "los": 9.747502414750615
+        },
+        "max_positive_consequence_while_triggered": {
+          "landing_glideslope": 0,
+          "landing_omega": 0,
+          "landing_speed": 0,
+          "landing_tilt": 0,
+          "loose_omega": 0,
+          "loose_tilt": 0,
+          "los": 0
+        }
+      },
+      "pointmass-fine-ctcs": {
+        "active_seconds": {
+          "obstacle_0": 8.000000000001005,
+          "obstacle_1": 8.000000000001005,
+          "obstacle_2": 6.000000000000338,
+          "obstacle_3": 8.000000000001005,
+          "obstacle_4": 8.000000000001005
+        },
+        "max_positive_consequence_while_triggered": {
+          "obstacle_0": 0.004544336038117214,
+          "obstacle_1": 0.004260700511201421,
+          "obstacle_2": 0.004103772626461888,
+          "obstacle_3": 0.0039009315163771596,
+          "obstacle_4": 0.004740718120227472
+        }
+      },
+      "quad-fine-ctcs": {
+        "active_seconds": {
+          "landing_glideslope": 6.061170555962661,
+          "landing_omega": 6.061170555962661,
+          "landing_speed": 6.061170555962661,
+          "landing_tilt": 6.061170555962661,
+          "loose_omega": 9.929042649105966,
+          "loose_tilt": 9.929042649105966,
+          "los": 9.747502458685263
+        },
+        "max_positive_consequence_while_triggered": {
+          "landing_glideslope": 0,
+          "landing_omega": 0,
+          "landing_speed": 0,
+          "landing_tilt": 0,
+          "loose_omega": 0,
+          "loose_tilt": 0,
+          "los": 0
+        }
+      }
+    },
+    "checks": {
+      "ctcs-parity": 0,
+      "measured-root-contract": 0,
+      "node-contract": 0,
+      "controller": 0,
+      "planner-core": 0,
+      "trajectory-replayer": 0
+    },
+    "quad_coverage_limit": "Near-center start: landing and LOS triggers active, original eight implications retained, staging inactive; all CTCS densities zero. Demonstrates closed-loop execution and audits, not binding-constraint quad CTCS robustness.",
+    "pointmass_coverage_limit": "Independent executed obstacle excess zero; full predicted horizons can cross obstacles outside the original measured-root sensing mask. Those obstacles are not constrained by the reference OCP.",
+    "additional_quad_far_start": {
+      "initial_world_state": [
+        2.4,
+        2,
+        2,
+        0,
+        -2,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "status": "first solve infeasible; no plant execution",
+      "max_iter_120_native_violation": 0.00368503,
+      "max_iter_1200_native_violation": 0.0014300551056671835,
+      "max_iter_1200_iterations_used": 278,
+      "termination": "Outer Max/Min",
+      "dynamics_violation": 0,
+      "fresh_standalone_repeats": 2,
+      "fresh_standalone_trajectory_difference": 0,
+      "failure_rows": "CTCS at stages23-33,34-36,39; ordinary inequalities at34,35,39. Iteration status alone is not the rejection reason.",
+      "scope": "Additional stress case; increasing cap did not restore feasibility. No solver, constraints, budget or initial-guess changes adopted."
+    },
+    "alignment_review": {
+      "status": "GO with recorded coverage limits",
+      "clock_state_check": "Confirmed original evalCtcsIntegrandTerms and all eight makeCtcsConstraint trigger/consequence functions depend only on physical state indices0-12; none reads cumulative clock index13. Executed density/trigger audit is valid for these OCPs.",
+      "source": "logs/frozen_node_baseline_20261104/ctcs_shared/final-review.json"
+    },
+    "optimality_scope": "Acceptance certifies recorded primal feasibility and mission progress; reaching an iteration cap or Outer Max/Min is allowed. Some quad CTCS requests hit120 and have optimality error up to1.53e-5 versus1e-6, so not every return is claimed optimal."
+  }
 }

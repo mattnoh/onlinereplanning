@@ -17,7 +17,7 @@ Current documentation for the active `mpc` branch, updated 2026-11-04. The MAVRO
 | `support/rviz/`, `support/test/` | Retained viewer settings and six opt-in regressions. |
 | `logs/` | Bags, CSVs, applied profiles, source/environment manifests, results, plots and GIFs. |
 
-## Frozen-time measured-state NODE baseline
+## Frozen-time measured-state NODE and CTCS baseline
 
 The default solver is the exact shared algorithm base `4d68a48b` recorded in
 `logs/point_mass/paper_mpc/source_revisions.json`, restored in `../ALIPDDP-main`.
@@ -42,6 +42,46 @@ constraints, excludes its STC interval row, and adds no terminal constraints.
 cmake -S . -B build -DCOMANDO_ROS_VERSION=0 -DCOMANDO_BUILD_TESTS=ON
 cmake --build build --target test_measured_root_rh -j1
 ```
+
+The same controller also passes CTCS for both models, using both a matched
+discrete plant and a separately integrated 1 ms plant. Pointmass completes 15
+replans/30 seconds; its largest independently integrated interval is
+9.999620112e-7 against the unchanged 1e-6 budget, with zero executed obstacle
+excess. Quad lands after 20 replans/9.929 seconds with zero ordinary-bound
+excess and zero CTCS integrals. Its original eight implications remain present;
+landing and LOS triggers activate. This near-center quad case does not activate
+staging or exercise a binding CTCS constraint.
+Some quad solves reach the 120-iteration allowance; these are feasible returns,
+not a claim that every solve reached the optimality tolerance (largest recorded
+optimality error about 1.53e-5 against 1e-6).
+
+These CTCS runs use `stc_landing_noaug` and the original pointmass reference OCP
+through the same synchronous controller. Each request receives the measured
+plant state and fresh numerical solver state. Acceptance checks native rows and
+dynamics plus independent planned and executed interval integrals. The latter
+use the original physical density and composite Simpson integration at no more
+than 1 ms per segment. Finite integral budgets do not imply exact pointwise-zero
+STC consequences. Pointmass retains its original sensing mask: obstacles outside
+that mask are not constrained in the predicted horizon. Results and per-trigger
+activity are in `logs/frozen_node_baseline_20261104/ctcs_shared`; profiles and
+summaries are also tracked in the baseline JSON above.
+
+For a fresh output directory, run either plant mode (`matched` or `fine`):
+
+```bash
+env SZMUK_RH_N=40 SZMUK_THH=.16 SZMUK_MAX_ITER=120 \
+  build/test_measured_root_rh pointmass matched 15 /tmp/ctcs-pointmass --ctcs
+env SZMUK_RH_N=40 SZMUK_THH=.16 SZMUK_MAX_ITER=120 \
+  build/test_measured_root_rh quad matched 40 /tmp/ctcs-quad --ctcs
+```
+
+An additional farther quad start `(2.4, 2, 2, 0, -2, 0, q=identity, omega=0)`
+fails its first OCP. At a 1200-iteration allowance it stops after 278 iterations
+with native violation 0.001430055, including CTCS and ordinary inequality rows.
+Two fresh standalone repeats return identical trajectories. This is an actual
+feasibility failure, not rejection solely for `Outer Max/Min`. The passing
+near-center result does not establish robustness for this farther start or the
+100IC/MC1/MC2 campaigns. No solver or constraint changes were made for these tests.
 
 ## OCPs and execution
 
