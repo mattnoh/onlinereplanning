@@ -22,6 +22,17 @@ static std::map<std::string,std::string> requestEnvironment(){
 }
 
 static void requireRh(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+// Test-only tuning; production descriptors and solver equations are unchanged.
+static void configureTestParameters(OCPDescriptor& descriptor){
+    const auto original=descriptor.getSolverParams;
+    descriptor.getSolverParams=[original]{
+        auto p=original();
+        p.mu=comando_parameters::envOrQ("SZMUK_TEST_MU",p.mu);p.muT=p.mu;
+        p.mu_mul=comando_parameters::envOrQ("SZMUK_TEST_MU_MUL",p.mu_mul);
+        requireRh(p.mu>0.&&p.mu_mul>0.&&p.mu_mul<1.,"invalid test barrier parameters");
+        return p;
+    };
+}
 // Fixed-duration test adapter: eliminate theta from the decision vector.
 // Reuse the same quad equations, costs, ordinary rows and CTCS implications.
 namespace FixedQuadTime {
@@ -214,6 +225,7 @@ static void diagnoseSavedRequest(bool quad,const std::string& path,const std::st
     auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(fixed_dt>0.?ocp.substr(0,ocp.size()-9):ocp)):
         pointmassReferenceDescriptor(100,false,ocp=="existing_pointmass_node");
     if(fixed_dt>0.)descriptor=FixedQuadTime::descriptor(*descriptor,fixed_dt);
+    configureTestParameters(*descriptor);
     auto problem=descriptor->create(args);const int N=problem->getHorizon();
     requireRh(prepared_x.size()==size_t(N+1)&&prepared_u.size()==size_t(N),"saved request shape mismatch");
     for(int k=0;k<=N;++k)problem->setInitialState(k,prepared_x[k]);
@@ -298,10 +310,11 @@ int main(int argc,char** argv){try{
     const int bound=std::stoi(argv[3]),K=single_horizon?StcLandingNoAugOCP::HORIZON:replay_intervals;
     requireRh(!single_horizon||bound==1,"single horizon requires one solve");
     const std::filesystem::path out(argv[4]);
-    requireRh(bound>0&&bound<=40&&std::filesystem::create_directories(out),"invalid cycle bound/output");
+    requireRh(bound>0&&bound<=400&&std::filesystem::create_directories(out),"invalid cycle bound/output");
     auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(ctcs?"stc_landing_noaug":"stc_landing_noaug_node")):
         pointmassReferenceDescriptor(100,false,!ctcs);
     if(fixed_dt>0.)descriptor=FixedQuadTime::descriptor(*descriptor,fixed_dt);
+    configureTestParameters(*descriptor);
     const auto params=descriptor->getSolverParams();
     std::shared_ptr<OptimalControlProblem<double>> captured_problem;
     std::shared_ptr<StcStageConstraint<double>> physical_stc;
@@ -463,7 +476,7 @@ int main(int argc,char** argv){try{
                         const double excess=type==ConstraintType::SOC?c(0)+c.tail(c.size()-1).norm():type==ConstraintType::EQ?c.cwiseAbs().maxCoeff():c.maxCoeff();
                         if(excess>params.tolerance)request<<"rejected_stage "<<k<<" type "<<int(type)<<" ctcs "<<bool(std::dynamic_pointer_cast<StcStageConstraint<double>>(row))<<" residual "<<c.transpose()<<'\n';
                     }
-            for(int repeat=0;repeat<2;++repeat){
+            for(int repeat=0;repeat<comando_parameters::envOrInt("SZMUK_TEST_REPLAY_REPEATS",2);++repeat){
                 ALIPDDP<double> fresh(*captured_problem);fresh.init(params);fresh.solve();
                 const auto x=fresh.getResX(),u=fresh.getResU();const auto audit=auditPrimal(*captured_problem,x,u,params);
                 double diff=0.;for(size_t k=0;k<x.size();++k)diff=std::max(diff,(x[k]-result.solve_result.state_trajectory[k]).lpNorm<Eigen::Infinity>());
