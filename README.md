@@ -45,9 +45,9 @@ Pointmass NODE, the current pointmass CTCS reference-adapter case, and quad NODE
 have passing frozen-time results recorded in
 [`support/test/frozen_node_baseline.json`](support/test/frozen_node_baseline.json).
 Quad interval-only CTCS RH now has a **scoped passing frozen staging/moving-target
-case** using `config/frozen_quad_ctcs.env`. It completes 19 replans / 7.73931 simulated
+case** using `config/frozen_quad_ctcs.env`. It completes 20 replans / 7.73252 simulated
 seconds, with zero executed original physical excess and maximum planned
-physical excess 8.05439e-7 against the unchanged 1e-6 audit threshold. Staging
+physical excess 8.13919e-7 against the unchanged 1e-6 audit threshold. Staging
 starts active and deactivates after capture. Its full-horizon control and first
 RH request have identical prepared and returned trajectories. The solver and
 RH loop remain unchanged; the planner now honors the supplied SH barrier and
@@ -55,16 +55,25 @@ positive thrust/duration-bound scaling settings. The profile uses existing
 physical tightening and stronger terminal position accuracy weights.
 
 This is not a general cold-start fix or a strict integral certificate. The
-maximum native row residual is 3.24973e-9, below native tolerance 1e-6, but the
-raw native budget ratio is 1.00324973 (0.325% overspend). Independent refined
-integrals also exceed the tightened numerical budget; they remain diagnostics.
-Tested stationary-hover, inbound and near-center cold starts still have failures
-with this profile. The literal physical checks and solver tolerance were not
+maximum native row residual is 1.76514e-11, below native tolerance 1e-6. A
+30-case budget/conditioning sweep retained equivalent row scaling Y=0.5 instead
+of 10; the physical budget remains 1e-5. Native budget ratio fell from
+1.00324973 to 1.00000088257 (0.0000883% overspend, or 8.83e-12 physical integral
+units). This is a 3682-fold reduction, not strict-zero budget satisfaction.
+Independent refined ratios remain 1.85482 planned / 1.00443 executed; they are
+diagnostics and do not constitute a passing finer-integral certificate. Both
+the full single-horizon check and a fresh RH repeat pass with the selected
+profile; first-request prepared/returned trajectories are identical. The
+preceding Y10 profile failed some stationary-hover, inbound and near-center
+cold starts; broader coverage with Y0.5 remains unestablished.
+The literal physical checks and solver tolerance were not
 weakened. Native cone-normalization, inner-loop, nominal-hover-tail and
 shrinking-horizon trials did not supply a general fix; their changes were
 removed or left unselected. Profiles, failures and passing regression evidence:
 `logs/frozen_node_baseline_20261104/quad_ctcs_rh_from_sh_20261105.json`;
-passed raw runs are retained alongside it as a `.tar.gz` archive.
+passed raw runs are retained alongside it as a `.tar.gz` archive. The later
+30-case tuning sweep and selected single/RH runs are retained in
+`quad_ctcs_budget_tuning_20261105.tar.gz` alongside that record.
 
 ```bash
 # Use a shell without inherited SZMUK_*/STC_*/MPC_* overrides.
