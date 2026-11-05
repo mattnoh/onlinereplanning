@@ -123,6 +123,31 @@ source config/frozen_quad_ctcs_coarse.env
 $BIN quad matched 40 /tmp/checkpoint-quad-ctcs-coarse --ctcs --staging-initial --audit-loop --replay-intervals 3
 ```
 
+Independent measured-plant follow-up (frozen clock): the shared loop also
+accepts independently integrated physical state via the same public API. The
+existing harness now accepts `--plant-acceleration-x MPS2` with `fine` plant
+execution, adding unmodelled physical acceleration at 1 ms steps; default zero
+preserves the historical tests. This is test-plant support only. The solver,
+production shared loop, constraints and acceptance tolerances are unchanged.
+
+With finer integration alone, quad NODE and pointmass NODE/CTCS pass, but N80
+quad CTCS rejects solve 14 on future interval rows. With acceleration 0.01 m/s²
+and baseline cadence, quad NODE still lands; quad CTCS rejects solve 15 on
+future CTCS rows, while pointmass NODE and CTCS reject solve 7 at stage 0.
+All saved prepared and returned roots, including rejected requests, equal the
+measured root exactly. A one-interval cadence diagnostic lets pointmass CTCS
+complete 60 replans / 30 s with zero executed obstacle excess, but its refined
+executed integral still exceeds epsilon. It does not fix pointmass NODE.
+The optional coarser quad profile also fails this independent-plant follow-up.
+These are recorded failures, not a completed measured-plant or real-time fix.
+
+Detailed results are under `independent_measured_plant_next_step` in the
+existing checkpoint JSON, with console logs, cycles and first/last requests
+inside the existing budget archive under `measured_plant/`. No new results
+folder. Reproduce using the same profiles/commands above, replacing `matched`
+with `fine`; add `--plant-acceleration-x 0.01` for the disturbed test. Numerical
+barrier/slack/multiplier state is still freshly initialized on every request.
+
 The historical `d588218` passing quad result
 used extra conditional nodal guards and a guided cold initializer. That result
 was rejected as insufficient for the requested formulation. Both additions have

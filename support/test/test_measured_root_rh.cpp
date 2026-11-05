@@ -282,8 +282,8 @@ int main(int argc,char** argv){try{
         diagnoseSavedRequest(std::string(argv[2])=="quad",argv[3],argc==5?argv[4]:"");return 0;
     }
     if(argc==2&&std::string(argv[1])=="--root-consistency"){measuredGuessContract();return 0;}
-    if(argc<5||argc>16)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess] [--audit-loop] [--stationary-target] [--remaining-horizon] [--fixed-dt SECONDS] [--single-horizon] [--replay-intervals K]");
-    bool ctcs=false,native_guess=false,reference_initial=false,staging_initial=false,audit_loop=false,stationary_target=false,remaining_horizon=false,single_horizon=false;double fixed_dt=0.;
+    if(argc<5||argc>16)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess] [--audit-loop] [--stationary-target] [--remaining-horizon] [--fixed-dt SECONDS] [--single-horizon] [--replay-intervals K] [--plant-acceleration-x MPS2]");
+    bool ctcs=false,native_guess=false,reference_initial=false,staging_initial=false,audit_loop=false,stationary_target=false,remaining_horizon=false,single_horizon=false;double fixed_dt=0.,plant_acceleration_x=0.;
     int replay_intervals=4;
     for(int i=5;i<argc;++i){
         const std::string option=argv[i];
@@ -296,6 +296,7 @@ int main(int argc,char** argv){try{
         else if(option=="--remaining-horizon")remaining_horizon=true;
         else if(option=="--single-horizon")single_horizon=true;
         else if(option=="--replay-intervals"){requireRh(i+1<argc,"missing replay interval count");replay_intervals=std::stoi(argv[++i]);requireRh(replay_intervals>0,"invalid replay interval count");}
+        else if(option=="--plant-acceleration-x"){requireRh(i+1<argc,"missing plant acceleration");plant_acceleration_x=std::stod(argv[++i]);requireRh(std::isfinite(plant_acceleration_x),"invalid plant acceleration");}
         else if(option=="--fixed-dt"){requireRh(i+1<argc,"missing fixed dt");fixed_dt=std::stod(argv[++i]);requireRh(fixed_dt>0.,"invalid fixed dt");}
         else throw std::invalid_argument("unknown option "+option);
     }
@@ -307,6 +308,7 @@ int main(int argc,char** argv){try{
     requireRh(fine||std::string(argv[2])=="matched","unknown plant");
     requireRh((fixed_dt==0.&&!single_horizon)||quad,"fixed dt / single horizon are quad-only");
     requireRh(fixed_dt==0.||!remaining_horizon,"fixed-dt comparison uses a fixed node count");
+    requireRh(plant_acceleration_x==0.||fine,"plant disturbance requires fine independent integration");
     const int bound=std::stoi(argv[3]),K=single_horizon?StcLandingNoAugOCP::HORIZON:replay_intervals;
     requireRh(!single_horizon||bound==1,"single horizon requires one solve");
     const std::filesystem::path out(argv[4]);
@@ -352,6 +354,15 @@ int main(int argc,char** argv){try{
         target.position=.5*acceleration*t*t;target.velocity=acceleration*t;target.acceleration=acceleration;return target;};
     auto model=descriptor->make_model(acceleration);
     const auto world_model=descriptor->make_model(Eigen::Vector3d::Zero());
+    // Exogenous plant acceleration is absent from the solver's prediction.
+    // Applied only to the independently integrated physical state, never its
+    // measured root or the constraints. Zero preserves the historical path.
+    const auto plantFlow=[&](const Eigen::VectorXd& state,const Eigen::VectorXd& control,double h){
+        Eigen::VectorXd next=world_model.flow(state,control,h,false).x;
+        next(0)+=.5*plant_acceleration_x*h*h;
+        next(quad?3:2)+=plant_acceleration_x*h;
+        return next;
+    };
     planner_core::PlannerCoreConfig config;config.ocp_type=descriptor->name;config.n_replay=K;config.enable_terminal_freeze=false;
     config.preserve_remaining_trajectory=remaining_horizon;
     planner_core::Controller controller;controller.configureSynchronous(config,descriptor);
@@ -591,9 +602,9 @@ int main(int argc,char** argv){try{
                 const auto sample=controller.sample(input);
                 requireRh(sample.has_replay_sample&&!sample.stale&&sample.applied_control_index==k,"wrong stage/clock during prefix execution");
                 requireRh((sample.command.control-us[k]).norm()<=1e-12,"controller changed planned ZOH input");
-                const auto next=fine?world_model.flow(plant,us[k],h,false).x:world_model.flow(interval_start,us[k],(q+1)*h,false).x;
+                const auto next=fine?plantFlow(plant,us[k],h):world_model.flow(interval_start,us[k],(q+1)*h,false).x;
                 if(ctcs){
-                    const auto mid=fine?world_model.flow(plant,us[k],.5*h,false).x:world_model.flow(interval_start,us[k],(q+.5)*h,false).x;
+                    const auto mid=fine?plantFlow(plant,us[k],.5*h):world_model.flow(interval_start,us[k],(q+.5)*h,false).x;
                     const auto a=planner_core::prepareOcpState(*descriptor,plant,targetAt(time+prefix+q*h));
                     const auto b=planner_core::prepareOcpState(*descriptor,mid,targetAt(time+prefix+(q+.5)*h));
                     const auto c=planner_core::prepareOcpState(*descriptor,next,targetAt(time+prefix+(q+1)*h));
@@ -642,7 +653,7 @@ int main(int argc,char** argv){try{
     // Independent integrals diagnose quadrature. They do not redefine the
     // native CTCS row or substitute for checking the physical implications.
     const bool ctcs_pass=ctcs&&loop_pass&&ctcs_rows_seen>0&&physical_stc_pass&&(!(reference_initial||staging_initial)||staging_transition_pass);
-    std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"model\":"<<jstr(quad?"quad":"pointmass")<<",\"plant_execution\":"<<jstr(fine?"refined_1ms":"matched_discrete")<<",\"reference_initial\":"<<reference_initial<<",\"staging_initial\":"<<staging_initial<<",\"initial_ctcs_ratio\":"<<initial_budget_ratio<<",\"accepted\":"<<accepted<<",\"reached\":"<<reached<<",\"simulation_time\":"<<time
+    std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"model\":"<<jstr(quad?"quad":"pointmass")<<",\"plant_execution\":"<<jstr(fine?"refined_1ms":"matched_discrete")<<",\"plant_acceleration_x\":"<<plant_acceleration_x<<",\"reference_initial\":"<<reference_initial<<",\"staging_initial\":"<<staging_initial<<",\"initial_ctcs_ratio\":"<<initial_budget_ratio<<",\"accepted\":"<<accepted<<",\"reached\":"<<reached<<",\"simulation_time\":"<<time
         <<",\"ctcs\":"<<ctcs<<",\"ctcs_loop_pass\":"<<ctcs_pass<<",\"staging_transition_pass\":"<<staging_transition_pass<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
         <<",\"loop_pass\":"<<loop_pass<<",\"physical_stc_pass\":"<<physical_stc_pass<<",\"physical_stc_excess\":"<<physical_stc_excess<<",\"standalone_comparisons\":"<<standalone_comparisons<<",\"shift_error\":"<<shift_error<<",\"initial_guess_dynamics_error\":"<<guess_dynamics_error
         <<",\"planned_physical_stc_excess\":"<<planned_stc_excess<<",\"remaining_horizon\":"<<remaining_horizon<<",\"stationary_target\":"<<stationary_target
