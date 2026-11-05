@@ -156,6 +156,15 @@ public:
         return (active_N > 0) ? nodeTime(active_N, ocp_dt) : 0.0;
     }
 
+    bool activeControlAtElapsed(double elapsed,double ocp_dt,Eigen::VectorXd* control) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if(state_trajectory_.size()<2||control_trajectory_.empty()||elapsed<0.)return false;
+        const int N=static_cast<int>(state_trajectory_.size())-1;
+        if(elapsed>nodeTimeFrom(state_trajectory_,has_variable_dt_,state_dim_,N,ocp_dt))return false;
+        const int k=findLowerNodeFrom(state_trajectory_,has_variable_dt_,state_dim_,elapsed,N,ocp_dt);
+        *control=control_trajectory_[std::min(k,int(control_trajectory_.size())-1)];return true;
+    }
+
     bool sampleActiveAtElapsed(double elapsed, double ocp_dt, ReplaySample* out) const {
         if (out == nullptr) {
             return false;

@@ -396,6 +396,9 @@ struct PlannerCoreConfig {
     std::string world_frame = "world";
     double solve_lead_guard_sec = 0.05;
     double initial_solve_lead_sec = 0.20;
+    // Opt-in: propagate the full measured physical state under committed
+    // inputs to the scheduled activation, without clipped tracking corrections.
+    bool measured_state_delay_compensation = false;
     // Seeding the replan from the MEASURED state.
     //
     //   x0 = plan(t_activation) + clamp(alpha * (live(now) - plan(now)))

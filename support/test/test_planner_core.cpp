@@ -99,6 +99,62 @@ planner_core::PlannerCoreInput inputAt(const Clock::time_point& now) {
 int main() {
     try {
         const auto t0 = Clock::now();
+        // Analytic delay predictor: full measured state, known committed input,
+        // correct future epoch; signed acceleration is not quad thrust.
+        {
+            auto desc=std::make_shared<OCPDescriptor>();desc->name="analytic_pointmass";
+            desc->state_dim=4;desc->control_dim=2;desc->dt=.1;
+            desc->getSolverParams=[](){return Param{};};
+            desc->make_model=[](const Eigen::Vector3d&){
+                OCPDescriptor::Model model;model.nx=4;model.nu=2;model.dt=.1;model.horizon=20;
+                model.hover=Eigen::Vector2d(-.25,0.);
+                model.flow=[](const Eigen::VectorXd& x,const Eigen::VectorXd& u,double h,bool){
+                    OCPDescriptor::Flow result;result.x=x;
+                    result.x.head<2>()+=h*x.tail<2>()+.5*h*h*u;
+                    result.x.tail<2>()+=h*u;return result;
+                };return model;
+            };
+            auto cfg=hoverConfig();cfg.ocp_type=desc->name;cfg.ocp_dt=.1;
+            cfg.measured_state_delay_compensation=true;cfg.initial_solve_lead_sec=.2;cfg.solve_lead_guard_sec=.05;
+            planner_core::PlannerCore core;core.configure(cfg,desc);
+            auto input=inputAt(t0);input.current_state=Eigen::Vector4d(0.,0.,1.,0.);
+            planner_core::PlannerCoreStepResult out;planner_core::PlannerCoreTestAccess::HandoffSchedule schedule;
+            require(planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,input,out,schedule),"delay schedule missing");
+            require(std::abs(std::chrono::duration<double>(schedule.activation_time-t0).count()-.25)<1e-9,"wrong activation timestamp");
+            double p=0,v=0;std::string source;
+            auto root=planner_core::PlannerCoreTestAccess::selectInitialState(core,input.current_state,input.target_snapshot,schedule,&p,&v,source,out);
+            require(source=="measured_rollout"&&std::abs(root(0)-(.25-.125*.25*.25))<1e-10&&std::abs(root(2)-.9375)<1e-10,"measured rollout does not match analytic plant");
+            input.current_state(2)=2.;
+            auto changed=planner_core::PlannerCoreTestAccess::selectInitialState(core,input.current_state,input.target_snapshot,schedule,&p,&v,source,out);
+            require(std::abs(changed(0)-root(0)-.25)<1e-10,"delay root ignored changed measurement");
+            auto result=solved(t0,0.);result.state_trajectory=std::vector<Eigen::VectorXd>(8,input.current_state);
+            result.control_trajectory=std::vector<Eigen::VectorXd>(7,Eigen::Vector2d(-.5,0));
+            result.solve_start_time=t0;result.solve_finish_time=t0+std::chrono::milliseconds(20);
+            const auto accepted=core.acceptSolvedResult(input,input.current_state,result);
+            require(accepted.solve_accepted,"signed pointmass acceleration rejected as quad thrust");
+            require(!core.sampleReplay(t0+std::chrono::milliseconds(50),input.target_snapshot).has_replay_sample,"first plan applied before scheduled activation");
+            input.now=t0+std::chrono::milliseconds(300);input.current_state=Eigen::Vector4d(0.,0.,1.,0.);
+            planner_core::PlannerCoreTestAccess::HandoffSchedule next;
+            require(planner_core::PlannerCoreTestAccess::prepareHandoffSchedule(core,input,out,next),"successor delay schedule missing");
+            auto successor=planner_core::PlannerCoreTestAccess::selectInitialState(core,input.current_state,input.target_snapshot,next,&p,&v,source,out);
+            const double dt=std::chrono::duration<double>(next.activation_time-input.now).count();
+            require(std::abs(successor(0)-(dt-.25*dt*dt))<1e-10&&std::abs(successor(2)-(1.-.5*dt))<1e-10,"successor root did not use measured state and committed signed controls");
+        }
+ // Shift-only initial guesses must never carry an old feedback policy into
+ // a newly measured-root factory. Numerical solver state is fresh as before.
+ {
+  auto desc=std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor("stc_landing_noaug_node"));
+  desc->warm_start=OCPDescriptor::WarmStart::Shift;const auto create=desc->create;bool saw_controls=false;
+  desc->create=[&](const OCPCreateArgs& args){
+   require(args.prev_K.empty(),"shift-only initial guess reused feedback gains");
+   saw_controls=saw_controls||!args.prev_U.empty();return create(args);
+  };
+  OcpSolver::Config c;c.ocp_type=desc->name;c.descriptor=desc;c.n_shift=0;OcpSolver solver(c);
+  Eigen::VectorXd x=Eigen::VectorXd::Zero(13);x(2)=1.85;x(6)=1.;
+  auto first=solver.solve(x);require(first.success&&!first.feedback_gains.empty(),"shift-only contract needs a valid previous feedback policy");
+  auto next=solver.solve(x);require(next.success&&saw_controls,"shift-only contract did not exercise a subsequent initial guess");
+ }
+
         for(const char* name:{"landing_rh","stc_landing_noaug"}) {
             auto cfg=hoverConfig();cfg.ocp_type=name;cfg.platform=planner_core::Platform::Mavros;cfg.ocp_dt=.1;cfg.n_replay=1;
             planner_core::PlannerCore core;core.configure(cfg);

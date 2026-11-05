@@ -221,9 +221,11 @@ namespace planner_core {
 class PlannerCore {
     friend struct PlannerCoreTestAccess;
 public:
-    void configure(const PlannerCoreConfig& config) {
+    void configure(const PlannerCoreConfig& config,std::shared_ptr<const OCPDescriptor> descriptor={}) {
         config_ = config;
-        desc_ = OCPRegistry::getDescriptor(config_.ocp_type);
+        desc_ = descriptor?*descriptor:OCPRegistry::getDescriptor(config_.ocp_type);
+        if(config_.measured_state_delay_compensation)
+            desc_.warm_start=OCPDescriptor::WarmStart::Shift; // control initial guess only
         if (config_.ocp_dt <= 0.0) {
             config_.ocp_dt = desc_.dt;
         }
@@ -340,18 +342,27 @@ public:
         planner_config.mass_kg = desc_.default_mass_kg;
         planner_config.t_start_abs = input.absolute_time_sec;
 
+        const double activation_delay=config_.measured_state_delay_compensation?
+            std::max(0.,std::chrono::duration<double>(handoff.activation_time-input.now).count()):0.;
+        const auto solve_target=predictTargetSnapshot(input.target_snapshot,activation_delay);
+        const double solve_epoch=input.absolute_time_sec+activation_delay;
+        planner_config.t_start_abs=solve_epoch;
         std::any extra;
         if (desc_.prepare_extra) {
-            extra = desc_.prepare_extra(planner_config, input.absolute_time_sec, input.target_snapshot);
+            extra = desc_.prepare_extra(planner_config, solve_epoch, solve_target);
         }
 
         const Eigen::Vector3d target_accel =
             input.target_snapshot.valid ? input.target_snapshot.acceleration : Eigen::Vector3d::Zero();
         const auto warm_start_before_solve = mpc_->snapshotWarmStart();
-        auto raw = mpc_->solve(x0, target_accel, extra, input.absolute_time_sec);
-        SolverResult result = toSolverResult(raw, input.target_snapshot);
+        auto raw = mpc_->solve(x0, target_accel, extra, solve_epoch);
+        SolverResult result = toSolverResult(raw, solve_target);
         if (desc_.post_process_result) {
-            desc_.post_process_result(result, input.target_snapshot);
+            desc_.post_process_result(result, solve_target);
+        }
+        if(config_.measured_state_delay_compensation&&result.solve_finish_time>handoff.activation_time){
+            mpc_->restoreWarmStart(warm_start_before_solve);out.solve_attempted=true;
+            out.solve_result=result;out.rejection_reason="missed_measured_handoff";return out;
         }
         const bool keep_controls_seed = shouldKeepRejectedControlsSeed(result);
         PlannerCoreStepResult solved_out = acceptSolvedResult(input, x0, result, out);
@@ -401,7 +412,9 @@ public:
         const double previous_replan_delay_sec = last_replan_delay_sec_;
         last_replan_delay_sec_ = replayAdvanceTime(result.state_trajectory);
 
-        Clock::time_point plan_origin_time = result.solve_finish_time;
+        Clock::time_point plan_origin_time = config_.measured_state_delay_compensation?
+            input.now+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(config_.initial_solve_lead_sec+config_.solve_lead_guard_sec)):
+            result.solve_finish_time;
         if (!first_plan) {
             if (out.activation_elapsed_sec > 0.0 && previous_plan_origin != Clock::time_point{}) {
                 plan_origin_time = previous_plan_origin + std::chrono::duration_cast<Clock::duration>(
@@ -474,6 +487,7 @@ public:
         if (!primed_) {
             return out;
         }
+        if(config_.measured_state_delay_compensation&&now<replayer_.activePlanOriginTime())return out;
         auto replay = replayer_.sample(now, config_.ocp_dt);
         if (!replay.has_plan) {
             return out;
@@ -602,6 +616,7 @@ private:
         double activation_elapsed = 0.0;
         double solve_lead_sec = 0.0;
         int warm_start_shift = 0;
+        Clock::time_point measurement_time{};
         Clock::time_point active_origin{};
         Clock::time_point activation_time{};
     };
@@ -624,6 +639,7 @@ private:
         cfg.ocp_type = config_.ocp_type;
         cfg.terminal_state = config_.terminal_state;
         cfg.n_shift = config_.n_replay;
+        cfg.descriptor = std::make_shared<OCPDescriptor>(desc_);
         mpc_ = std::make_unique<OcpSolver>(cfg);
     }
 
@@ -660,9 +676,14 @@ private:
     bool prepareHandoffSchedule(const PlannerCoreInput& input,
                                 PlannerCoreStepResult& out,
                                 HandoffSchedule& handoff) const {
+        handoff.measurement_time=input.now;
         handoff.first_plan = !primed_;
         if (!primed_) {
             out.x0_source = "live_first";
+            if(config_.measured_state_delay_compensation){
+                handoff.activation_time=input.now+std::chrono::duration_cast<Clock::duration>(
+                    std::chrono::duration<double>(config_.initial_solve_lead_sec+config_.solve_lead_guard_sec));
+            }
             return true;
         }
 
@@ -732,6 +753,27 @@ private:
         if (handoff_pos_err) *handoff_pos_err = 0.0;
         if (handoff_vel_err) *handoff_vel_err = 0.0;
         x0_source = handoff.first_plan ? "live_first" : "live";
+        if(config_.measured_state_delay_compensation){
+            if(!desc_.make_model)throw std::runtime_error("measured delay compensation requires model");
+            const auto world_model=desc_.make_model(Eigen::Vector3d::Zero());
+            auto state=reconstructWorldState(desc_,live_x0,target_snapshot);
+            if(world_model.initial_state)state=world_model.initial_state(state,world_model.hover);
+            const double delay=std::max(0.,std::chrono::duration<double>(handoff.activation_time-handoff.measurement_time).count());
+            // Integer clock ticks keep sampling exactly consistent at ZOH
+            // boundaries, rather than accumulating floating-point time drift.
+            for(auto stamp=handoff.measurement_time;stamp<handoff.activation_time;stamp+=std::chrono::milliseconds(1)){
+                Eigen::VectorXd u=world_model.hover;
+                if(!handoff.first_plan&&stamp>=handoff.active_origin){
+                    const double active_elapsed=std::chrono::duration<double>(stamp-handoff.active_origin).count();
+                    if(!replayer_.activeControlAtElapsed(active_elapsed,config_.ocp_dt,&u))
+                        throw std::runtime_error("measured delay rollout exceeded committed plan");
+                }
+                const double h=std::min(.001,std::chrono::duration<double>(handoff.activation_time-stamp).count());
+                state=world_model.flow(state,u,h,false).x;
+            }
+            x0_source="measured_rollout";
+            return prepareOcpState(desc_,state,predictTargetSnapshot(target_snapshot,delay));
+        }
         if (handoff.first_plan || !desc_.use_predicted_handoff_state) {
             return live_x0;
         }
@@ -894,7 +936,9 @@ private:
         const double learned = (solve_time_ema_sec_ > 0.0)
             ? solve_time_ema_sec_
             : config_.initial_solve_lead_sec;
-        return std::max(0.0, learned + config_.solve_lead_guard_sec);
+        const double lead=config_.measured_state_delay_compensation?
+            std::max(config_.initial_solve_lead_sec,learned):learned;
+        return std::max(0.0, lead + config_.solve_lead_guard_sec);
     }
 
     void updateSolveTimeEma(double solve_time_ms) {
@@ -1005,7 +1049,7 @@ private:
         for (int i = 0; i < static_cast<int>(X.size()); ++i) {
             const auto& x = X[i];
             if (x.size() < desc_.state_dim) continue;
-            if (!desc_.skip_altitude_validation && x.size() >= 3 && x(2) < -0.05) {
+            if (desc_.state_dim >= 13 && !desc_.skip_altitude_validation && x.size() >= 3 && x(2) < -0.05) {
                 detail = "altitude node=" + std::to_string(i) +
                          " z=" + std::to_string(x(2)) + " floor=-0.05";
                 return false;
@@ -1023,7 +1067,7 @@ private:
         }
         for (int i = 0; i < static_cast<int>(U.size()); ++i) {
             const auto& u = U[i];
-            if (u.size() > 0 && (u(0) < -0.1 || u(0) > 50.0)) {
+            if (desc_.state_dim >= 13 && u.size() > 0 && (u(0) < -0.1 || u(0) > 50.0)) {
                 detail = "thrust node=" + std::to_string(i) +
                          " u0=" + std::to_string(u(0)) + " range=[-0.1,50]";
                 return false;

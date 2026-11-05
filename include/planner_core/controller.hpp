@@ -9,7 +9,8 @@ public:
     ~Controller();
     Controller(const Controller&)=delete;
     Controller& operator=(const Controller&)=delete;
-    void configure(const PlannerCoreConfig&);
+    // Optional RH descriptor supports ROS-free plants through the same runtime.
+    void configure(const PlannerCoreConfig&, std::shared_ptr<const OCPDescriptor> descriptor={});
     // Frozen simulation time during solves; execute whole stages between solves.
     void configureSynchronous(const PlannerCoreConfig&, std::shared_ptr<const OCPDescriptor> descriptor={});
     PlannerCoreStepResult solveSynchronous(const PlannerCoreInput&);

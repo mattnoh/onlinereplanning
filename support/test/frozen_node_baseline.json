@@ -3241,5 +3241,441 @@
     "archive_prefix": "measured_plant/",
     "source_test_sha256": "cdea14fadabd0456aaacfee30dacbbcd7fe905f0b0b23149ef6c0f12dbdb79b5",
     "next_scope": "First establish independent-plant robustness. The ROS asynchronous path and real-time measured feedback have not been changed or validated."
+  },
+  "wall_clock_non_sitl_20261106": {
+    "status": "Scoped ROS-free wall-clock runs complete for quad/pointmass NODE and CTCS; physical/node audits pass, strict quad CTCS budget remains unresolved.",
+    "base_commit": "e2e45ee",
+    "planner_branch": "mpc",
+    "solver_commit": "002850dfd35f14416e59273bdff8701ecb40a34e",
+    "solver_changed": false,
+    "shared_runtime": "Controller::configure / trySolve / sample -> PlannerCore; same asynchronous implementation used by ROS transports.",
+    "activation": "Opt in through PlannerCoreConfig.measured_state_delay_compensation=true. ROS transports retain their existing default behavior; no flight/SITL deployment.",
+    "measurement": "Full measured physical state propagated in the world frame under already committed controls to the scheduled activation. No clipped position correction or borrowed future state. Root is explicitly labelled measured_rollout, not the instantaneous measurement.",
+    "initial_guess": "Shifted controls; old feedback gains are cleared for Shift policy; fresh native solver/init each request. No IP/AL continuation.",
+    "timing": {
+      "clock": "steady_clock; independent solver and 1ms plant threads",
+      "plant_step_seconds": 0.001,
+      "initial_compute_lead_seconds": 1.2,
+      "guard_seconds": 0.3,
+      "lead_rule": "max(initial compute lead, observed solve-time EMA) + guard; activation snapped to an active-plan shooting node; first plan waits until activation.",
+      "deadline_miss": "Late plans rejected, old numerical initial guess restored; no custom optimizer stopping rule.",
+      "old_plan_execution": "Continues throughout optimization. Four intervals are the minimum replay amount, not a fixed wall-clock replan period."
+    },
+    "paper": {
+      "title": "An Efficient Real-Time NMPC for Quadrotor Position Control under Communication Time-Delay",
+      "url": "https://arxiv.org/html/2010.11264#S2.SS2",
+      "scope": "State prediction over delay only. Native lab solver retained; no RTI/SQP or dual continuation adopted."
+    },
+    "final_runs": {
+      "quad-node": {
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_wall_clock_rh",
+          "quad",
+          "node",
+          "20",
+          "/tmp/comando-wall-clock-rh-20261106/final/quad-node",
+          "delay-compensated"
+        ],
+        "profile": {
+          "SZMUK_RH_N": "40",
+          "SZMUK_THH": ".16",
+          "SZMUK_MAX_ITER": "120"
+        },
+        "summary": {
+          "model": "quad",
+          "ctcs": 0,
+          "runtime_complete": 1,
+          "reached": 1,
+          "simulation_time": 10.379,
+          "wall_seconds": 10.380637218,
+          "attempted": 8,
+          "accepted": 8,
+          "delay_compensated": 1,
+          "measurement_to_root_change": 0.4789378941983937,
+          "measured_root_error": null,
+          "max_request_age_seconds": 0.0779999999999994,
+          "plant_change_during_solve": 0.05749836756758553,
+          "plant_steps_while_solving": 614,
+          "stale_samples": 0,
+          "native_violation": 0,
+          "native_CTCS_budget_ratio": 0,
+          "physical_STC_excess": 0,
+          "hard_constraint_excess": 0,
+          "obstacle_excess_diagnostic": 0,
+          "tracking_position_rmse": 0,
+          "max_tracking_error": 0,
+          "failure": "",
+          "continuous_CTCS_certified": false
+        },
+        "executed_node_audit": {
+          "unique_executed_node_times": 71,
+          "evaluated_node_samples": 75,
+          "executed_node_speed_floor_excess": 0.0
+        }
+      },
+      "quad-ctcs": {
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_wall_clock_rh",
+          "quad",
+          "ctcs",
+          "20",
+          "/tmp/comando-wall-clock-rh-20261106/final/quad-ctcs",
+          "delay-compensated"
+        ],
+        "profile": {
+          "SZMUK_N": "80",
+          "SZMUK_MAX_ITER": "1200",
+          "SZMUK_W_EPS": "0.0",
+          "SZMUK_W_TOUCH_VEL": "0.0",
+          "SZMUK_R_THETA": "0.0",
+          "SZMUK_W_POS_XY": "0.0",
+          "SZMUK_W_POS_Z": "0.0",
+          "SZMUK_W_VEL": "0.0",
+          "SZMUK_RHO": "100.0",
+          "SZMUK_RHO_MUL": "10.0",
+          "SZMUK_REG2_MIN": "0.1",
+          "SZMUK_CTCS_MODE": "step_ineq",
+          "SZMUK_CTCS_Y_SCALE": "0.5",
+          "SZMUK_CTCS_STEP_EPS": "1e-05",
+          "SZMUK_LOS_TRIGGER_FLOOR": "0.0",
+          "SZMUK_W_LAND_SPEED": "100",
+          "SZMUK_W_LAND_TILT": "300000000",
+          "SZMUK_W_LAND_OMEGA": "1000000",
+          "SZMUK_W_LAND_GS": "7500",
+          "SZMUK_W_STC_STAGE": "100",
+          "SZMUK_W_STC_LOS": "200",
+          "SZMUK_BOUND_SCALE": "1",
+          "SZMUK_MU": "0.1",
+          "SZMUK_RH_N": "80",
+          "SZMUK_CTCS_TRIGGER_MARGIN": ".05",
+          "SZMUK_CTCS_GEOMETRIC_MARGIN": "0.02",
+          "SZMUK_CTCS_SPEED_MARGIN": ".05",
+          "SZMUK_CTCS_TILT_MARGIN_DEG": ".2",
+          "SZMUK_CTCS_PATH_TILT_MARGIN_DEG": ".5",
+          "SZMUK_CTCS_RATE_MARGIN": ".005",
+          "SZMUK_RHOT": "100",
+          "SZMUK_TERM_W_POS_XY": "100000",
+          "SZMUK_TERM_W_POS_Z": "10000",
+          "SZMUK_SOLVER_VERBOSE": "0",
+          "SZMUK_TH0": ".07",
+          "SZMUK_THL": ".05",
+          "SZMUK_THH": ".12",
+          "SZMUK_MUT": ".1",
+          "SZMUK_MU_MUL": ".1",
+          "SZMUK_FORWARD_FILTER": "1",
+          "SZMUK_TOL": "1e-6",
+          "SZMUK_QUAD_TRIG_STC": "1",
+          "SZMUK_STAGE_TRIGGER": "radius",
+          "SZMUK_STAGE_TRIGGER_FLOOR": "0",
+          "SZMUK_RH_CAPTURE_LANDING_TRIGGER": "0"
+        },
+        "summary": {
+          "model": "quad",
+          "ctcs": 1,
+          "runtime_complete": 1,
+          "reached": 1,
+          "simulation_time": 9.209,
+          "wall_seconds": 9.213972515,
+          "attempted": 7,
+          "accepted": 7,
+          "delay_compensated": 1,
+          "measurement_to_root_change": 0.7877224776616469,
+          "measured_root_error": null,
+          "max_request_age_seconds": 0.812,
+          "plant_change_during_solve": 0.4554098296438207,
+          "plant_steps_while_solving": 4766,
+          "stale_samples": 0,
+          "native_violation": 9.488827480280275e-08,
+          "native_CTCS_budget_ratio": 1.0047444137401402,
+          "physical_STC_excess": 0,
+          "hard_constraint_excess": 0,
+          "obstacle_excess_diagnostic": 0,
+          "tracking_position_rmse": 0,
+          "max_tracking_error": 0,
+          "failure": "",
+          "continuous_CTCS_certified": false
+        },
+        "executed_node_audit": {
+          "unique_executed_node_times": 96,
+          "evaluated_node_samples": 98,
+          "executed_node_speed_floor_excess": 0.0
+        }
+      },
+      "pointmass-node": {
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_wall_clock_rh",
+          "pointmass",
+          "node",
+          "30",
+          "/tmp/comando-wall-clock-rh-20261106/final/pointmass-node",
+          "delay-compensated"
+        ],
+        "profile": {},
+        "summary": {
+          "model": "pointmass",
+          "ctcs": 0,
+          "runtime_complete": 1,
+          "reached": 0,
+          "simulation_time": 30,
+          "wall_seconds": 30.001050779,
+          "attempted": 16,
+          "accepted": 16,
+          "delay_compensated": 1,
+          "measurement_to_root_change": 4.7783809565355195,
+          "measured_root_error": null,
+          "max_request_age_seconds": 1.5099999999999998,
+          "plant_change_during_solve": 3.1135883210325095,
+          "plant_steps_while_solving": 4784,
+          "stale_samples": 0,
+          "native_violation": 0,
+          "native_CTCS_budget_ratio": 0,
+          "physical_STC_excess": 0,
+          "hard_constraint_excess": 0,
+          "obstacle_excess_diagnostic": 0.6112991527440145,
+          "tracking_position_rmse": 1.252516414065987,
+          "max_tracking_error": 4.999749950673785,
+          "failure": "",
+          "continuous_CTCS_certified": false
+        },
+        "executed_node_audit": {
+          "unique_executed_node_times": 58,
+          "evaluated_node_samples": 72,
+          "executed_node_obstacle_excess": 0.0
+        }
+      },
+      "pointmass-ctcs": {
+        "command": [
+          "/tmp/comando-ordinary-node-rh-20261104/primary-planner/build/test_wall_clock_rh",
+          "pointmass",
+          "ctcs",
+          "30",
+          "/tmp/comando-wall-clock-rh-20261106/final/pointmass-ctcs",
+          "delay-compensated"
+        ],
+        "profile": {},
+        "summary": {
+          "model": "pointmass",
+          "ctcs": 1,
+          "runtime_complete": 1,
+          "reached": 0,
+          "simulation_time": 30,
+          "wall_seconds": 30.000576668,
+          "attempted": 16,
+          "accepted": 16,
+          "delay_compensated": 1,
+          "measurement_to_root_change": 4.826485077142975,
+          "measured_root_error": null,
+          "max_request_age_seconds": 0.9379999999999997,
+          "plant_change_during_solve": 2.0916708947367835,
+          "plant_steps_while_solving": 7716,
+          "stale_samples": 0,
+          "native_violation": 0,
+          "native_CTCS_budget_ratio": 0.9999537038930483,
+          "physical_STC_excess": 0,
+          "hard_constraint_excess": 0,
+          "obstacle_excess_diagnostic": 0,
+          "tracking_position_rmse": 1.2593641859286535,
+          "max_tracking_error": 4.999749950673785,
+          "failure": "",
+          "continuous_CTCS_certified": false
+        },
+        "executed_node_audit": {
+          "unique_executed_node_times": 58,
+          "evaluated_node_samples": 72,
+          "executed_node_obstacle_excess": 0.0
+        }
+      }
+    },
+    "quad_repeats": {
+      "shift-only-contract/quad-node": {
+        "summary": {
+          "model": "quad",
+          "ctcs": 0,
+          "runtime_complete": 1,
+          "reached": 1,
+          "simulation_time": 10.299,
+          "wall_seconds": 10.300065101,
+          "attempted": 8,
+          "accepted": 8,
+          "delay_compensated": 1,
+          "measurement_to_root_change": 0.48010691196175537,
+          "measured_root_error": null,
+          "max_request_age_seconds": 0.08000000000000007,
+          "plant_change_during_solve": 0.05567954842661127,
+          "plant_steps_while_solving": 596,
+          "stale_samples": 0,
+          "native_violation": 0,
+          "native_CTCS_budget_ratio": 0,
+          "physical_STC_excess": 0,
+          "hard_constraint_excess": 0,
+          "obstacle_excess_diagnostic": 0,
+          "tracking_position_rmse": 0,
+          "max_tracking_error": 0,
+          "failure": "",
+          "continuous_CTCS_certified": false
+        },
+        "node_audit": {
+          "unique_executed_node_times": 72,
+          "evaluated_node_samples": 74,
+          "executed_node_speed_floor_excess": 0.0
+        }
+      },
+      "shift-only-contract/quad-ctcs": {
+        "summary": {
+          "model": "quad",
+          "ctcs": 1,
+          "runtime_complete": 1,
+          "reached": 1,
+          "simulation_time": 9.546,
+          "wall_seconds": 9.550389803,
+          "attempted": 7,
+          "accepted": 7,
+          "delay_compensated": 1,
+          "measurement_to_root_change": 0.7874975308082102,
+          "measured_root_error": null,
+          "max_request_age_seconds": 1.0249999999999986,
+          "plant_change_during_solve": 0.660385129512556,
+          "plant_steps_while_solving": 5236,
+          "stale_samples": 0,
+          "native_violation": 5.2885041312608736e-09,
+          "native_CTCS_budget_ratio": 1.0002644252065631,
+          "physical_STC_excess": 0,
+          "hard_constraint_excess": 0,
+          "obstacle_excess_diagnostic": 0,
+          "tracking_position_rmse": 0,
+          "max_tracking_error": 0,
+          "failure": "",
+          "continuous_CTCS_certified": false
+        },
+        "node_audit": {
+          "unique_executed_node_times": 94,
+          "evaluated_node_samples": 97,
+          "executed_node_speed_floor_excess": 0.0
+        }
+      },
+      "repeat-quad/quad-node": {
+        "summary": {
+          "model": "quad",
+          "ctcs": 0,
+          "runtime_complete": 1,
+          "reached": 1,
+          "simulation_time": 10.347,
+          "wall_seconds": 10.347784662,
+          "attempted": 8,
+          "accepted": 8,
+          "delay_compensated": 1,
+          "measurement_to_root_change": 0.4815629272832094,
+          "measured_root_error": null,
+          "max_request_age_seconds": 0.07800000000000029,
+          "plant_change_during_solve": 0.054522962652661544,
+          "plant_steps_while_solving": 598,
+          "stale_samples": 0,
+          "native_violation": 0,
+          "native_CTCS_budget_ratio": 0,
+          "physical_STC_excess": 0,
+          "hard_constraint_excess": 0,
+          "obstacle_excess_diagnostic": 0,
+          "tracking_position_rmse": 0,
+          "max_tracking_error": 0,
+          "failure": "",
+          "continuous_CTCS_certified": false
+        },
+        "node_audit": {
+          "unique_executed_node_times": 72,
+          "evaluated_node_samples": 74,
+          "executed_node_speed_floor_excess": 0.0
+        }
+      },
+      "repeat-quad/quad-ctcs": {
+        "summary": {
+          "model": "quad",
+          "ctcs": 1,
+          "runtime_complete": 1,
+          "reached": 1,
+          "simulation_time": 9.567,
+          "wall_seconds": 9.568922197,
+          "attempted": 7,
+          "accepted": 7,
+          "delay_compensated": 1,
+          "measurement_to_root_change": 0.7877224776616469,
+          "measured_root_error": null,
+          "max_request_age_seconds": 0.807,
+          "plant_change_during_solve": 0.4370978617370689,
+          "plant_steps_while_solving": 4875,
+          "stale_samples": 0,
+          "native_violation": 1.1391047704423257e-07,
+          "native_CTCS_budget_ratio": 1.0056955238522116,
+          "physical_STC_excess": 0,
+          "hard_constraint_excess": 0,
+          "obstacle_excess_diagnostic": 0,
+          "tracking_position_rmse": 0,
+          "max_tracking_error": 0,
+          "failure": "",
+          "continuous_CTCS_certified": false
+        },
+        "node_audit": {
+          "unique_executed_node_times": 94,
+          "evaluated_node_samples": 97,
+          "executed_node_speed_floor_excess": 0.0
+        }
+      }
+    },
+    "frozen_regression": {
+      "quad-node": {
+        "requests_compared": 19,
+        "max_returned_state_control_difference": 0.0
+      },
+      "quad-ctcs": {
+        "requests_compared": 20,
+        "max_returned_state_control_difference": 0.0
+      },
+      "pointmass-node": {
+        "requests_compared": 15,
+        "max_returned_state_control_difference": 0.0
+      },
+      "pointmass-ctcs": {
+        "requests_compared": 15,
+        "max_returned_state_control_difference": 0.0
+      }
+    },
+    "checks": {
+      "analytic_and_runtime_core_ctest": "pass",
+      "measured_root_contract": "pass",
+      "ordinary_node_contract": "pass",
+      "native_numerics_unchanged": "pass",
+      "frozen_returned_state_control_comparisons": "all69 requests maxdifference0",
+      "protected_files": "unchanged"
+    },
+    "retained_changes": [
+      "Optional RH descriptor injection for the shared asynchronous controller.",
+      "Opt-in full measured-state delay rollout and matching target/OCP/activation epochs.",
+      "Shift-only policy clears feedback gains; no barrier/slack/multiplier state carried over.",
+      "Quad-specific thrust/altitude sanity guards no longer reject 4-state pointmass acceleration. Native model constraints remain enforced.",
+      "Standalone wall-clock harness and analytic clock/initial-guess tests."
+    ],
+    "rejected_or_invalid_trials": [
+      "Earlier uncompensated measured roots were scheduled in the future without time alignment and did not establish a working loop.",
+      "Early quad wall-clock trials passed four physical controls directly to a five-slot model input: invalid evidence; adapter now restores duration slot.",
+      "Early double-accumulated plant/predictor clocks were replaced with integer ticks.",
+      "Low-lead and alternate epsilon/scale/rho trials did not establish repeatable quad CTCS completion. Their parameters were not retained."
+    ],
+    "limits": [
+      "Matched dynamics/parameters with finer physical integration; no sensor noise, unmodelled disturbances, actuator lag, network transport or hard real-time guarantee validated.",
+      "Quad CTCS native row tolerances pass but raw integral budget can overshoot. Maximum final/repeat ratio1.0056955238522116 (0.5695523852% excess). No strict continuous CTCS certificate.",
+      "Pointmass NODE inter-node excess0.611299 is a diagnostic, not a NODE failure. Its executed shooting-node obstacle excess is zero.",
+      "Physical constraints are audited at 1ms samples; no analytic between-sample certificate."
+    ],
+    "source_sha256": {
+      "CMakeLists.txt": "d43d781f6575ddefdf7c98ee8f65cb500851eb8ed65017949b6783dc6401ccd8",
+      "include/planner_core/controller.hpp": "962a618a0dabbd996c5c51d1d7760adacaf3dc034916f41f633b4ede0321b60c",
+      "include/planner_core/types.hpp": "049010366d49ff687f2469a3b0a6438917363a8c0e1bf968e0b6b9667f7a3acf",
+      "include/trajectory_replayer.hpp": "f4cb35d8a2e0ca9e9f1869c3369db5a33a0ecb7f812b2fa2954bac76d20649d3",
+      "src/controller.cpp": "b8bc97c2ca29ffb9ce6c6ec976adfaee6c04528bdb722e88839d8daf4bfc022c",
+      "src/controller_internal.hpp": "77b230df7348abeea9555a890db62d882b074576533bae6798aa3910f0b8d4a4",
+      "support/test/test_planner_core.cpp": "d64d33420e1d5cb30164aa691061a86c2874041408cefd9f9089fc63aca6e411",
+      "support/test/test_wall_clock_rh.cpp": "c72c49a05e0ad0c201fe3f7421507d2dd13aca43b65e3e164caedd03862cb4e2"
+    },
+    "archive": "logs/frozen_node_baseline_20261104/quad_ctcs_budget_tuning_20261105.tar.gz",
+    "archive_prefix": "wall_clock_20261106/"
   }
 }

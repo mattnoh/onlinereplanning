@@ -148,6 +148,65 @@ folder. Reproduce using the same profiles/commands above, replacing `matched`
 with `fine`; add `--plant-acceleration-x 0.01` for the disturbed test. Numerical
 barrier/slack/multiplier state is still freshly initialized on every request.
 
+ROS-free wall-clock RH checkpoint (2026-11-06): the standalone
+`test_wall_clock_rh` harness now calls the shared production asynchronous
+`Controller::configure/trySolve/sample` API while a separate 1 ms physical
+plant keeps running. This is not the frozen `solveSynchronous` API or SITL.
+Opt in with `PlannerCoreConfig.measured_state_delay_compensation=true`.
+The full measured state is propagated under committed controls to the chosen
+activation; target prediction, cost epoch and plan origin use that same time.
+The state-predictor idea follows [Carlos et al., Section II-B](https://arxiv.org/html/2010.11264#S2.SS2);
+the lab solver is retained, with no RTI/SQP or numerical-state continuation.
+
+The standalone settings reserve an initial compute lead of 1.2 s plus a 0.3 s
+guard, retaining that minimum when solve-time EMA decreases. Four intervals
+are the minimum replay amount; real handoffs occur later when the computation
+lead requires it. The plant executes the old control sequence during solves.
+First activation also waits for its scheduled time. Late results are rejected;
+there is no custom optimizer early stopping. Shift-only initial guesses now
+clear previous feedback gains, matching their intended meaning. Model-specific
+native constraints remain active; quad-only altitude/thrust sanity checks no
+longer treat 4-state pointmass velocity/acceleration as quad altitude/thrust.
+
+Final runs: quad NODE lands after 8 accepted solves / 10.379 wall-sim seconds;
+quad CTCS after 7 / 9.209 s; both pointmass variants complete 16 solves / 30 s.
+Quad sampled physical excess is zero. Pointmass CTCS obstacle excess is zero;
+pointmass NODE executed shooting-node excess is zero (58 distinct nodes / 72
+node samples), with expected inter-node excess retained as a diagnostic. The
+quad repeats also complete. Raw quad CTCS budget ratios still exceed one
+(maximum final/repeat ratio 1.00569552); no strict integral certificate is claimed.
+All four frozen regressions still pass, with returned X/U identical numerically
+to their previous saved runs on all 69 requests. Analytic delay-rollout,
+shift-only-policy and existing core tests pass. Neither native solver equations
+nor constraints/tolerances were changed.
+
+The ROS transports retain their existing default execution policy; this flag
+has not been deployed there. These tests cover a matched-parameter plant with
+finer integration, without sensor noise, actuator lag or hard real-time claims.
+Earlier invalid quad adapter trials and unsuccessful timing/tuning trials are
+explicitly marked in the evidence, not counted as passes.
+
+Build and run in fresh shells without inherited SZMUK/STC/MPC overrides:
+
+```bash
+cmake -S . -B build -DCOMANDO_ROS_VERSION=0 -DCOMANDO_BUILD_TESTS=ON
+cmake --build build --target test_wall_clock_rh -j1
+# Quad NODE:
+SZMUK_RH_N=40 SZMUK_THH=.16 SZMUK_MAX_ITER=120 build/test_wall_clock_rh quad node 20 /tmp/wall-quad-node delay-compensated
+# Quad CTCS (separate fresh shell):
+source config/frozen_quad_ctcs.env
+build/test_wall_clock_rh quad ctcs 20 /tmp/wall-quad-ctcs delay-compensated
+# Pointmass (separate fresh shell, no quad profile):
+build/test_wall_clock_rh pointmass node 30 /tmp/wall-pm-node delay-compensated
+build/test_wall_clock_rh pointmass ctcs 30 /tmp/wall-pm-ctcs delay-compensated
+```
+
+Each run stores `plant.csv`, `solves.jsonl`, all accepted horizons in one
+`plans.jsonl`, a summary, and the latest/rejected request for inspection. The
+existing checkpoint JSON records results under `wall_clock_non_sitl_20261106`;
+selected raw runs are in the existing budget archive under `wall_clock_20261106/`.
+No new repository results/log directory or branch was created.
+
 The historical `d588218` passing quad result
 used extra conditional nodal guards and a guided cold initializer. That result
 was rejected as insufficient for the requested formulation. Both additions have

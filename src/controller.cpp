@@ -17,12 +17,14 @@ struct Controller::Impl {
 };
 Controller::Controller():impl_(std::make_unique<Impl>()){}
 Controller::~Controller()=default;
-void Controller::configure(const PlannerCoreConfig& c) {
+void Controller::configure(const PlannerCoreConfig& c,std::shared_ptr<const OCPDescriptor> descriptor) {
     std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);
     impl_->direct.stop();impl_->synchronous.stop();impl_->synchronous_mode=false;impl_->config=c;impl_->accepted=0;
-    impl_->mode=OCPRegistry::getDescriptor(c.ocp_type).execution_mode;
+    impl_->mode=(descriptor?*descriptor:OCPRegistry::getDescriptor(c.ocp_type)).execution_mode;
+    if(descriptor&&impl_->mode==ExecutionMode::DirectMpc)
+        throw std::invalid_argument("descriptor injection supports RH execution only");
     if(impl_->mode==ExecutionMode::DirectMpc) impl_->direct.configure(c);
-    else impl_->rh.configure(c);
+    else impl_->rh.configure(c,std::move(descriptor));
     impl_->configured=true;
 }
 void Controller::configureSynchronous(const PlannerCoreConfig& c,std::shared_ptr<const OCPDescriptor> descriptor) {
@@ -214,6 +216,9 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
                 warm_x = makeXshifted(warm_shift);
                 warm_k = makeKshifted(warm_shift);
             } else {
+                // Shift-only means a control initial guess, not an old
+                // feedback policy evaluated against a different measured root.
+                warm_k.clear();
                 const int Nu = static_cast<int>(prev_U_.size());
                 const int Nx = static_cast<int>(prev_X_.size());
                 const int shift = std::max(0, std::min(warm_shift, std::max(1, Nu - 1)));
