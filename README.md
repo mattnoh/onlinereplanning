@@ -82,6 +82,47 @@ build/test_measured_root_rh quad matched 1 /tmp/quad-ctcs-single --ctcs --stagin
 build/test_measured_root_rh quad matched 40 /tmp/quad-ctcs-rh --ctcs --staging-initial --audit-loop
 ```
 
+Frozen-time checkpoint (2026-11-05): the four recorded loop regressions pass
+under their existing respective checks: quad NODE (19 replans), quad CTCS N80
+(20), pointmass NODE (15), and pointmass CTCS (15). This is scoped matched-plant
+validation, not a general initial-condition or real-time claim. Quad CTCS is
+not strictly integral-budget certified, as quantified above.
+
+The optional `config/frozen_quad_ctcs_coarse.env` preserves the N80 nominal
+horizon time while using N60, initial duration .0933333 s, duration bounds
+.0666667–.16 s, and **three** executed intervals per replan. This tuned case
+passes its single-horizon and RH physical checks (20 replans / 7.70133 s,
+zero executed physical excess, planned excess 8.51501e-7). Mean solve time in
+this run was 483 ms versus 656 ms for N80. Native budget overspend remains
+2.26%, so the N80 profile remains the baseline. The 59 tested coupled parameter
+configurations / 78 runs, failures and selected profile are recorded under
+`coarse_dt_tuning` in the existing evidence JSON. Selected raw runs were added
+to the existing budget archive under `coarse/`; no new results directory.
+
+The shared loop is `src/synchronous_mpc_internal.hpp`; quad NODE and CTCS
+factories share `include/ocp/ocp_stc_landing_noaug.hpp`. Pointmass NODE and CTCS
+in this harness use `support/test/pointmass_reference_adapter.hpp`, importing
+`../ALIPDDP-main/problem_examples/uzun2024_ctcs_mpc.cpp`. The single regression
+entry point is `support/test/test_measured_root_rh.cpp`. Full checkpoint status
+and summaries are in `support/test/frozen_node_baseline.json`.
+
+Run each command in a fresh shell without inherited SZMUK/STC/MPC overrides;
+use a new output path per run:
+
+```bash
+# Same executable target for all four, built from this repository.
+BIN=build/test_measured_root_rh
+$BIN quad matched 40 /tmp/checkpoint-quad-node --audit-loop
+$BIN pointmass matched 15 /tmp/checkpoint-pointmass-node --audit-loop
+$BIN pointmass matched 15 /tmp/checkpoint-pointmass-ctcs --ctcs --audit-loop
+# Quad CTCS N80 (fresh shell):
+source config/frozen_quad_ctcs.env
+$BIN quad matched 40 /tmp/checkpoint-quad-ctcs --ctcs --staging-initial --audit-loop
+# Optional N60 (separate fresh shell):
+source config/frozen_quad_ctcs_coarse.env
+$BIN quad matched 40 /tmp/checkpoint-quad-ctcs-coarse --ctcs --staging-initial --audit-loop --replay-intervals 3
+```
+
 The historical `d588218` passing quad result
 used extra conditional nodal guards and a guided cold initializer. That result
 was rejected as insufficient for the requested formulation. Both additions have
