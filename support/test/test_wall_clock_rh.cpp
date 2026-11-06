@@ -10,7 +10,58 @@
 #include <chrono>
 #include <iostream>
 using Clock=std::chrono::steady_clock;
+extern char** environ;
+namespace saved_wall_audit {
+namespace Q=StcLandingNoAugOCP;
+struct Saved{int id=0;double epoch;std::vector<Vec>x,u;std::shared_ptr<OptimalControlProblem<double>> problem;std::shared_ptr<StcStageConstraint<double>> physical;Problem p;};
+Vec readvec(std::istream& in){int n;if(!(in>>n)||n<=0||n>10000)throw std::runtime_error("invalid saved vector dimension");Vec x(n);for(int i=0;i<n;++i)in>>x(i);return x;}
+int run(int argc,char**argv){try{
+ if(argc!=3)throw std::runtime_error("input output required");std::ifstream in(argv[1]);bool quad,ctcs;int count;if(!(in>>quad>>ctcs>>count)||count<=0||count>10000)throw std::runtime_error("invalid saved plan count");
+ auto desc=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(ctcs?"stc_landing_noaug":"stc_landing_noaug_node")):pointmassReferenceDescriptor(100,false,!ctcs);
+ const double tolerance=desc->getSolverParams().tolerance;
+ const Eigen::Vector3d acc=quad?Eigen::Vector3d(.04306807449,.07358261346,0.):Eigen::Vector3d::Zero();const auto model=desc->make_model(acc),world=desc->make_model(Eigen::Vector3d::Zero());
+ std::vector<Saved> plans;plans.reserve(count);double planned_physical=0,planned_hard=0,native=0,native_ratio=0,dense_ratio=0,planned_all_obstacles=0,defect=0;std::map<std::string,double> planned_terms,executed_terms;double peak=0.,peak_time=0.;int peak_plan=-1;std::string peak_name;
+ auto hard=[&](const Saved& p,const Vec& x,const Vec&u){double v=0.;for(auto type:{ConstraintType::NO,ConstraintType::SOC})for(const auto&row:p.problem->getStageConstraints(0,type)){
+  if(std::dynamic_pointer_cast<StcStageConstraint<double>>(row))continue;const Vec c=row->c(x,u);if(c.size())v=std::max(v,type==ConstraintType::SOC?c(0)+c.tail(c.size()-1).norm():c.maxCoeff());}return v;};
+ auto physical=[&](const Saved&p,const Vec&x,const Vec&u,std::map<std::string,double>&terms){double v=0.;if(quad){if(ctcs)for(int j=0;j<p.physical->numImplications();++j)if(p.physical->triggered(j,x)){const auto&im=p.physical->implication(j);const double c=im.consequence(x,u);v=std::max(v,c);if(&terms==&planned_terms&&c>peak){peak=c;peak_time=x(13);peak_plan=p.id;peak_name=im.name;}terms[im.name]=std::max(terms[im.name],c);}}else for(int j=0;j<NOBS;++j)if(p.p.mask[j]){double c=obstacleG(p.p,x.head<2>(),j);v=std::max(v,c);terms["active_obstacle_"+std::to_string(j)]=std::max(terms["active_obstacle_"+std::to_string(j)],c);}return v;};
+ auto density=[&](const Saved&p,const Vec&x,const Vec&u){if(quad)return Q::evalCtcsIntegrand<double>(x,u)/Q::CTCS_STEP_EPS;double v=0.;for(int j=0;j<NOBS;++j)if(p.p.mask[j]){const double c=std::max(0.,obstacleG(p.p,x.head<2>(),j)+p.p.delta);v+=c*c/p.p.eps;}return v;};
+ for(int z=0;z<count;++z){Saved p;p.id=z;int nx,nu;in>>p.epoch>>nx>>nu;for(int i=0;i<nx;++i)p.x.push_back(readvec(in));for(int i=0;i<nu;++i)p.u.push_back(readvec(in));
+  OCPCreateArgs args;args.current_state=p.x.front();args.target_accel=acc;args.horizon=nu;args.t_abs=p.epoch;p.problem=desc->create(args);
+  for(int j=0;j<NOBS;++j)p.p.mask[j]=(p.p.s_diag.cwiseProduct(p.x.front().head<2>()-p.p.centers[j])).norm()<=6.;
+  if(quad&&ctcs){auto dyn=std::dynamic_pointer_cast<Q::Quad6DOFVarTimeRelativePred<double>>(p.problem->getDynamics(0));p.physical=Q::makeCtcsConstraint<double>(dyn,Q::CTCS_STEP_EPS/Q::CTCS_Y_SCALE,Q::IDX_THETA,0.,1,false);}
+  native=std::max(native,auditPrimal(*p.problem,p.x,p.u,desc->getSolverParams()).constraints);
+  for(int k=0;k<nu;++k){auto x=p.x[k];const auto&u=p.u[k];const double h=quad?u(4):model.dt;const int n=std::max(1,int(std::ceil(h/.001)));const double dt=h/n;double integral=0.;
+   if(ctcs)for(const auto&c:p.problem->getStageConstraints(k,ConstraintType::NO))if(auto row=std::dynamic_pointer_cast<StcStageConstraint<double>>(c))native_ratio=std::max(native_ratio,row->intervalIntegral(x,u)/row->getEpsilon());
+   for(int i=0;i<n;++i){auto mid=model.flow(x,u,.5*dt,false).x;auto next=model.flow(x,u,dt,false).x;
+    if(ctcs){planned_physical=std::max({planned_physical,physical(p,x,u,planned_terms),physical(p,mid,u,planned_terms),physical(p,next,u,planned_terms)});integral+=dt*(density(p,x,u)+4*density(p,mid,u)+density(p,next,u))/6.;}
+    planned_hard=std::max({planned_hard,hard(p,x,u),hard(p,mid,u),hard(p,next,u)});
+    if(!quad)for(int j=0;j<NOBS;++j)planned_all_obstacles=std::max({planned_all_obstacles,obstacleG(p.p,x.head<2>(),j),obstacleG(p.p,mid.head<2>(),j)});x=next;
+   }defect=std::max(defect,(x-p.x[k+1]).lpNorm<Eigen::Infinity>());dense_ratio=std::max(dense_ratio,integral);
+  }
+  if(ctcs)planned_physical=std::max(planned_physical,physical(p,p.x.back(),p.u.back(),planned_terms));plans.push_back(std::move(p));
+ }
+ int samples;in>>samples;std::vector<double> t;std::vector<Vec> state;t.reserve(samples);state.reserve(samples);for(int i=0;i<samples;++i){double v;in>>v;t.push_back(v);state.push_back(readvec(in));}
+ double executed_physical=0,executed_hard=0,executed_ratio=0,integral=0;int current_plan=-1,current_stage=-1;int intervals=0;double executed_node_hard=0;
+ auto relative=[&](const Vec&x,double epoch){TargetSnapshot target;target.valid=true;target.position=.5*acc*epoch*epoch;target.velocity=acc*epoch;return planner_core::prepareOcpState(*desc,x,target);};
+ for(int i=0;i+1<samples;++i){int z=-1;for(int j=0;j<count;++j)if(plans[j].epoch<=t[i]+1e-10)z=j;if(z<0)continue;const auto&p=plans[z];int k=0;double elapsed=t[i]-p.epoch;
+  if(quad){while(k+1<int(p.u.size())&&p.x[k+1](13)<=elapsed+1e-10)++k;}else k=std::min(int(p.u.size())-1,int(std::floor((elapsed+1e-10)/model.dt)));
+  const bool node_changed=z!=current_plan||k!=current_stage;
+  if(node_changed){integral=0.;++intervals;current_plan=z;current_stage=k;}
+  const auto&u=p.u[k];const double dt=t[i+1]-t[i];const auto a=relative(state[i],t[i]),b=relative(world.flow(state[i],u,.5*dt,false).x,t[i]+.5*dt),c=relative(state[i+1],t[i+1]);
+  if(node_changed)executed_node_hard=std::max(executed_node_hard,hard(p,a,u));
+  if(ctcs){executed_physical=std::max({executed_physical,physical(p,a,u,executed_terms),physical(p,b,u,executed_terms),physical(p,c,u,executed_terms)});integral+=dt*(density(p,a,u)+4*density(p,b,u)+density(p,c,u))/6.;executed_ratio=std::max(executed_ratio,integral);}
+  executed_hard=std::max({executed_hard,hard(p,a,u),hard(p,b,u),hard(p,c,u)});
+ }
+ const bool audit_pass=native<=tolerance&&executed_node_hard<=tolerance&&(!ctcs||(planned_physical<=tolerance&&executed_physical<=tolerance&&planned_hard<=tolerance&&executed_hard<=tolerance));
+ std::ofstream out(argv[2]);out<<std::setprecision(17)<<"{\"audit_tolerance\":"<<tolerance<<",\"saved_constraint_audit_pass\":"<<audit_pass<<",\"executed_node_hard_excess\":"<<executed_node_hard<<",\"plans\":"<<count<<",\"samples\":"<<samples<<",\"native_violation\":"<<native<<",\"planned_physical_STC_or_active_obstacle_excess\":"<<planned_physical<<",\"executed_physical_STC_or_active_obstacle_excess\":"<<executed_physical<<",\"planned_hard_excess\":"<<planned_hard<<",\"executed_hard_excess\":"<<executed_hard<<",\"native_budget_ratio\":"<<native_ratio<<",\"planned_dense_budget_ratio\":"<<dense_ratio<<",\"executed_budget_ratio\":"<<executed_ratio<<",\"planned_all_obstacles_diagnostic\":"<<planned_all_obstacles<<",\"dense_dynamics_defect\":"<<defect<<",\"executed_intervals\":"<<intervals;
+ auto terms=[&](const char*name,const auto& map){out<<",\""<<name<<"\":{";bool first=true;for(const auto&[key,value]:map){if(!first)out<<',';first=false;out<<std::quoted(key)<<':'<<value;}out<<'}';};out<<",\"planned_peak_solve\":"<<peak_plan<<",\"planned_peak_horizon_time\":"<<peak_time<<",\"planned_peak_implication\":"<<std::quoted(peak_name);terms("planned_implications",planned_terms);terms("executed_implications",executed_terms);out<<"}\n";
+ return audit_pass?0:2;
+}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+
+} // namespace saved_wall_audit
+
 int main(int argc,char** argv){try{
+ if(argc==4&&std::string(argv[1])=="--audit-saved")return saved_wall_audit::run(argc-1,argv+1);
  if(argc!=5&&argc!=6)throw std::invalid_argument("usage: test_wall_clock_rh quad|pointmass node|ctcs SECONDS OUTPUT [delay-compensated]");
  const bool quad=std::string(argv[1])=="quad",ctcs=std::string(argv[2])=="ctcs";
  if((!quad&&std::string(argv[1])!="pointmass")||(!ctcs&&std::string(argv[2])!="node"))throw std::invalid_argument("invalid model/mode");
@@ -18,6 +69,11 @@ int main(int argc,char** argv){try{
  if(argc==6&&!compensated)throw std::invalid_argument("unknown timing mode");
  const double seconds=std::stod(argv[3]);const std::filesystem::path out(argv[4]);
  if(seconds<=0||seconds>120||!std::filesystem::create_directories(out))throw std::invalid_argument("invalid duration/new output path");
+ {std::ofstream profile(out/"profile.json");profile<<'{';bool first=true;
+  for(char** e=environ;*e;++e){const std::string entry(*e);const auto equal=entry.find('=');const std::string key=entry.substr(0,equal);
+   if(key.rfind("SZMUK_",0)&&key.rfind("STC_",0)&&key.rfind("MPC_",0)&&key.rfind("WALL_RH_",0))continue;
+   if(!first)profile<<',';first=false;profile<<std::quoted(key)<<':'<<std::quoted(entry.substr(equal+1));
+  }profile<<"}\n";}
  auto desc=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(ctcs?"stc_landing_noaug":"stc_landing_noaug_node")):pointmassReferenceDescriptor(100,false,!ctcs);
  // Explicit full measured root: the default ROS blended/predicted root is NOT
  // silently counted as measured feedback in this experiment.

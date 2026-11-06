@@ -168,7 +168,7 @@ clear previous feedback gains, matching their intended meaning. Model-specific
 native constraints remain active; quad-only altitude/thrust sanity checks no
 longer treat 4-state pointmass velocity/acceleration as quad altitude/thrust.
 
-Final runs: quad NODE lands after 8 accepted solves / 10.379 wall-sim seconds;
+Runtime-completion results (not full constraint passes): quad NODE reaches the landing gate after 8 accepted solves / 10.379 wall-sim seconds;
 quad CTCS after 7 / 9.209 s; both pointmass variants complete 16 solves / 30 s.
 Quad sampled physical excess is zero. Pointmass CTCS obstacle excess is zero;
 pointmass NODE executed shooting-node excess is zero (58 distinct nodes / 72
@@ -179,6 +179,29 @@ All four frozen regressions still pass, with returned X/U identical numerically
 to their previous saved runs on all 69 requests. Analytic delay-rollout,
 shift-only-policy and existing core tests pass. Neither native solver equations
 nor constraints/tolerances were changed.
+
+**Constraint-review correction:** the complete saved-trajectory audit fails
+quad CTCS. The fourth proposed horizon has nominal LOS excess 1.49830e-6 at
+horizon time 4.71903 s, above the unchanged 1e-6 threshold. Executed physical
+excess remains zero. Its native planned budget ratio is 1.00474441; the finer
+planned integral ratio is 1.56890080, while executed integral ratio is
+0.99529422. Pointmass CTCS physical excess is zero and its planned/executed
+integral ratios remain below one. Quad NODE and pointmass NODE pass their
+native and executed-node checks. Therefore all four runtime completions must
+not be presented as four complete constraint passes. Quad CTCS still needs work.
+
+`runtime_complete` deliberately describes runtime progress only. The separate
+saved constraint audit reuses the native rows and the frozen harness' nominal
+implication/Simpson checks; it returns exit code 2 for this quad CTCS run.
+It reads saved plans and plant samples without re-solving or modifying them:
+
+```bash
+python3 support/tools/analysis/audit_wall_clock.py /tmp/wall-quad-ctcs --binary build/test_wall_clock_rh --output /tmp/wall-quad-ctcs-audit.json
+```
+
+New standalone runs save their parameter environment in `profile.json`; the
+audit also accepts the earlier grouped run metadata. Detailed findings are
+under `saved_constraint_review_20261106` in the existing checkpoint record.
 
 The ROS transports retain their existing default execution policy; this flag
 has not been deployed there. These tests cover a matched-parameter plant with

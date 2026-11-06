@@ -3243,7 +3243,7 @@
     "next_scope": "First establish independent-plant robustness. The ROS asynchronous path and real-time measured feedback have not been changed or validated."
   },
   "wall_clock_non_sitl_20261106": {
-    "status": "Scoped ROS-free wall-clock runs complete for quad/pointmass NODE and CTCS; physical/node audits pass, strict quad CTCS budget remains unresolved.",
+    "status": "Four runtime completions; full saved constraint audit passes quad NODE and pointmass NODE/CTCS, but quad CTCS FAILS its planned-horizon physical LOS check.",
     "base_commit": "e2e45ee",
     "planner_branch": "mpc",
     "solver_commit": "002850dfd35f14416e59273bdff8701ecb40a34e",
@@ -3311,7 +3311,8 @@
           "unique_executed_node_times": 71,
           "evaluated_node_samples": 75,
           "executed_node_speed_floor_excess": 0.0
-        }
+        },
+        "full_saved_constraint_audit_pass": true
       },
       "quad-ctcs": {
         "command": [
@@ -3399,7 +3400,8 @@
           "unique_executed_node_times": 96,
           "evaluated_node_samples": 98,
           "executed_node_speed_floor_excess": 0.0
-        }
+        },
+        "full_saved_constraint_audit_pass": false
       },
       "pointmass-node": {
         "command": [
@@ -3441,7 +3443,8 @@
           "unique_executed_node_times": 58,
           "evaluated_node_samples": 72,
           "executed_node_obstacle_excess": 0.0
-        }
+        },
+        "full_saved_constraint_audit_pass": true
       },
       "pointmass-ctcs": {
         "command": [
@@ -3483,7 +3486,8 @@
           "unique_executed_node_times": 58,
           "evaluated_node_samples": 72,
           "executed_node_obstacle_excess": 0.0
-        }
+        },
+        "full_saved_constraint_audit_pass": true
       }
     },
     "quad_repeats": {
@@ -3644,7 +3648,8 @@
       "ordinary_node_contract": "pass",
       "native_numerics_unchanged": "pass",
       "frozen_returned_state_control_comparisons": "all69 requests maxdifference0",
-      "protected_files": "unchanged"
+      "protected_files": "unchanged",
+      "full_saved_constraints": "FAIL quad CTCS: future planned LOS1.4983e-6 >1e-6. PASS other three cases."
     },
     "retained_changes": [
       "Optional RH descriptor injection for the shared asynchronous controller.",
@@ -3660,6 +3665,7 @@
       "Low-lead and alternate epsilon/scale/rho trials did not establish repeatable quad CTCS completion. Their parameters were not retained."
     ],
     "limits": [
+      "Correction: earlier wall-clock completion did not include full dense proposed-horizon physical checks. The saved full audit now exposes a quad CTCS failure; do not call allfour constraint-violation-free.",
       "Matched dynamics/parameters with finer physical integration; no sensor noise, unmodelled disturbances, actuator lag, network transport or hard real-time guarantee validated.",
       "Quad CTCS native row tolerances pass but raw integral budget can overshoot. Maximum final/repeat ratio1.0056955238522116 (0.5695523852% excess). No strict continuous CTCS certificate.",
       "Pointmass NODE inter-node excess0.611299 is a diagnostic, not a NODE failure. Its executed shooting-node obstacle excess is zero.",
@@ -3676,6 +3682,169 @@
       "support/test/test_wall_clock_rh.cpp": "c72c49a05e0ad0c201fe3f7421507d2dd13aca43b65e3e164caedd03862cb4e2"
     },
     "archive": "logs/frozen_node_baseline_20261104/quad_ctcs_budget_tuning_20261105.tar.gz",
-    "archive_prefix": "wall_clock_20261106/"
+    "archive_prefix": "wall_clock_20261106/",
+    "saved_constraint_review_20261106": {
+      "status": "quad CTCS is not fully validated; completion is not constraint feasibility.",
+      "runtime_source_commit": "4a32175",
+      "no_optimization_or_resimulation": true,
+      "method": "Same native OCP rows, nominal STC implications and per-interval 1ms Simpson density integration used by test_measured_root_rh; evaluate saved full plans and executed plant samples.",
+      "tolerance": 1e-06,
+      "results": {
+        "quad-node": {
+          "audit_tolerance": 1e-06,
+          "saved_constraint_audit_pass": 1,
+          "executed_node_hard_excess": 0,
+          "plans": 8,
+          "samples": 10380,
+          "native_violation": 0,
+          "planned_physical_STC_or_active_obstacle_excess": 0,
+          "executed_physical_STC_or_active_obstacle_excess": 0,
+          "planned_hard_excess": 0,
+          "executed_hard_excess": 0,
+          "native_budget_ratio": 0,
+          "planned_dense_budget_ratio": 0,
+          "executed_budget_ratio": 0,
+          "planned_all_obstacles_diagnostic": 0,
+          "dense_dynamics_defect": 6.713435393157496e-07,
+          "executed_intervals": 69,
+          "planned_peak_solve": -1,
+          "planned_peak_horizon_time": 0,
+          "planned_peak_implication": "",
+          "planned_implications": {},
+          "executed_implications": {},
+          "audit_returncode": 0,
+          "run": "/tmp/comando-wall-clock-rh-20261106/final/quad-node"
+        },
+        "quad-ctcs": {
+          "audit_tolerance": 1e-06,
+          "saved_constraint_audit_pass": 0,
+          "executed_node_hard_excess": 0,
+          "plans": 7,
+          "samples": 9210,
+          "native_violation": 9.488827480280275e-08,
+          "planned_physical_STC_or_active_obstacle_excess": 1.498298198645662e-06,
+          "executed_physical_STC_or_active_obstacle_excess": 0,
+          "planned_hard_excess": 2.901323403214448e-07,
+          "executed_hard_excess": 0,
+          "native_budget_ratio": 1.0047444137401402,
+          "planned_dense_budget_ratio": 1.5689007993746067,
+          "executed_budget_ratio": 0.9952942196789927,
+          "planned_all_obstacles_diagnostic": 0,
+          "dense_dynamics_defect": 1.540909785185951e-08,
+          "executed_intervals": 93,
+          "planned_peak_solve": 3,
+          "planned_peak_horizon_time": 4.719029274691172,
+          "planned_peak_implication": "los",
+          "planned_implications": {
+            "landing_glideslope": 0,
+            "landing_omega": 0,
+            "landing_speed": 0,
+            "landing_tilt": 0,
+            "loose_omega": 0,
+            "loose_tilt": 0,
+            "los": 1.498298198645662e-06,
+            "staging": 0
+          },
+          "executed_implications": {
+            "landing_glideslope": 0,
+            "landing_omega": 0,
+            "landing_speed": 0,
+            "landing_tilt": 0,
+            "loose_omega": 0,
+            "loose_tilt": 0,
+            "los": 0,
+            "staging": 0
+          },
+          "audit_returncode": 2,
+          "run": "/tmp/comando-wall-clock-rh-20261106/final/quad-ctcs"
+        },
+        "pointmass-node": {
+          "audit_tolerance": 1e-06,
+          "saved_constraint_audit_pass": 1,
+          "executed_node_hard_excess": 0,
+          "plans": 16,
+          "samples": 30001,
+          "native_violation": 0,
+          "planned_physical_STC_or_active_obstacle_excess": 0,
+          "executed_physical_STC_or_active_obstacle_excess": 0,
+          "planned_hard_excess": 0.6613028449123466,
+          "executed_hard_excess": 0.6613028449121954,
+          "native_budget_ratio": 0,
+          "planned_dense_budget_ratio": 0,
+          "executed_budget_ratio": 0,
+          "planned_all_obstacles_diagnostic": 0.9946744279880451,
+          "dense_dynamics_defect": 3.077538224260934e-12,
+          "executed_intervals": 57,
+          "planned_peak_solve": -1,
+          "planned_peak_horizon_time": 0,
+          "planned_peak_implication": "",
+          "planned_implications": {},
+          "executed_implications": {},
+          "audit_returncode": 0,
+          "run": "/tmp/comando-wall-clock-rh-20261106/final/pointmass-node"
+        },
+        "pointmass-ctcs": {
+          "audit_tolerance": 1e-06,
+          "saved_constraint_audit_pass": 1,
+          "executed_node_hard_excess": 0,
+          "plans": 16,
+          "samples": 30001,
+          "native_violation": 0,
+          "planned_physical_STC_or_active_obstacle_excess": 0,
+          "executed_physical_STC_or_active_obstacle_excess": 0,
+          "planned_hard_excess": 0,
+          "executed_hard_excess": 0,
+          "native_budget_ratio": 0.9999537038930483,
+          "planned_dense_budget_ratio": 0.9999761826643955,
+          "executed_budget_ratio": 0.9999761827355585,
+          "planned_all_obstacles_diagnostic": 0.6486649357965131,
+          "dense_dynamics_defect": 4.871354777891135e-10,
+          "executed_intervals": 57,
+          "planned_peak_solve": -1,
+          "planned_peak_horizon_time": 0,
+          "planned_peak_implication": "",
+          "planned_implications": {
+            "active_obstacle_0": 0,
+            "active_obstacle_1": 0,
+            "active_obstacle_2": 0,
+            "active_obstacle_3": 0,
+            "active_obstacle_4": 0
+          },
+          "executed_implications": {
+            "active_obstacle_0": 0,
+            "active_obstacle_1": 0,
+            "active_obstacle_2": 0,
+            "active_obstacle_3": 0,
+            "active_obstacle_4": 0
+          },
+          "audit_returncode": 0,
+          "run": "/tmp/comando-wall-clock-rh-20261106/final/pointmass-ctcs"
+        }
+      },
+      "quad_failure": {
+        "implication": "los",
+        "zero_based_solve_index": 3,
+        "horizon_time": 4.719029274691172,
+        "planned_excess": 1.498298198645662e-06,
+        "executed_excess": 0,
+        "planned_native_budget_ratio": 1.0047444137401402,
+        "planned_dense_budget_ratio": 1.5689007993746067,
+        "executed_budget_ratio": 0.9952942196789927
+      },
+      "interpretation": [
+        "NODE dense between-node obstacle crossings remain diagnostics, not NODE failures.",
+        "Pointmass full-plan nominal obstacle audit respects the original sensed/active obstacle set; all-obstacle tail metrics are separately labelled diagnostics.",
+        "Independent dense budgets are reported separately from the native row; they do not redefine the OCP acceptance tolerance.",
+        "The new saved_constraint_audit_pass fails quad CTCS on planned physical excess above the existing threshold; its executable/driver exit code is2.",
+        "Strict quad CTCS budget certification was already unresolved and remains unresolved."
+      ],
+      "tool": "support/tools/analysis/audit_wall_clock.py",
+      "native_mode": "test_wall_clock_rh --audit-saved INPUT OUTPUT",
+      "source_sha256": {
+        "support/test/test_wall_clock_rh.cpp": "518ef1b9aa0119bd3f2586e59beffe840bdcc938eac772e7161f6dbd49459be7",
+        "support/tools/analysis/audit_wall_clock.py": "04d4393cb9e45475b36555725f6a19b0dda5c20ff5c129dcdd659ad37551fa17"
+      },
+      "archive_prefix": "wall_clock_20261106/constraint_review/"
+    }
   }
 }
