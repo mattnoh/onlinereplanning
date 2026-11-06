@@ -190,6 +190,26 @@ integral ratios remain below one. Quad NODE and pointmass NODE pass their
 native and executed-node checks. Therefore all four runtime completions must
 not be presented as four complete constraint passes. Quad CTCS still needs work.
 
+Wall-clock quad CTCS tuning now has a separate optional profile:
+source `config/frozen_quad_ctcs.env`, then
+`config/wall_clock_quad_ctcs.env`, before the same wall-clock command below.
+Only horizontal terminal weight (100000 to 200000) and CTCS row scale
+(0.5 to 2) change. The physical interval budget, solver/audit tolerances,
+triggers, timing, native solver and shared loop stay unchanged.
+Across 52 distinct profiles, this selection passed six repeated measured
+wall-clock runs (42 accepted horizons) and the full single-horizon checks.
+Worst proposed nominal LOS excess is 8.54438e-7, below the unchanged 1e-6
+threshold; executed physical excess and planned/executed hard excess are zero.
+This supersedes the untuned physical-audit failure above for this scoped test.
+It does **not** establish strict CTCS budget satisfaction: worst native,
+finer planned and executed budget ratios are 1.00046470, 1.80057045 and
+1.77024742. Positive sub-tolerance LOS excess remains. Neither zero violation
+nor a continuous-time certificate is claimed. Experimental substep changes
+were removed; the frozen defaults and other three cases are unchanged.
+Trial profiles/outcomes and selected raw runs reuse the existing archive under
+`wall_clock_tuning_20261106/`; the checkpoint record stores all six audits in
+`wall_clock_non_sitl_20261106.parameter_tuning_20261106`.
+
 `runtime_complete` deliberately describes runtime progress only. The separate
 saved constraint audit reuses the native rows and the frozen harness' nominal
 implication/Simpson checks; it returns exit code 2 for this quad CTCS run.
