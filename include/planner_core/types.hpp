@@ -399,6 +399,9 @@ struct PlannerCoreConfig {
     // Opt-in: propagate the full measured physical state under committed
     // inputs to the scheduled activation, without clipped tracking corrections.
     bool measured_state_delay_compensation = false;
+    // Use the OCP's native initial controls instead of shifting the last plan.
+    // This affects only the initial guess; every numerical solve is fresh.
+    bool use_native_initial_guess = false;
     // Seeding the replan from the MEASURED state.
     //
     //   x0 = plan(t_activation) + clamp(alpha * (live(now) - plan(now)))

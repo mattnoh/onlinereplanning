@@ -203,11 +203,14 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
     try {
         target_accel_ = target_accel;
 
-        std::vector<Eigen::VectorXd> warm_u = prev_U_;
-        std::vector<Eigen::VectorXd> warm_x = prev_X_;
-        std::vector<Eigen::MatrixXd> warm_k = prev_K_;
+        std::vector<Eigen::VectorXd> warm_u;
+        std::vector<Eigen::VectorXd> warm_x;
+        std::vector<Eigen::MatrixXd> warm_k;
+        if (!config_.use_native_initial_guess) {
+            warm_u = prev_U_; warm_x = prev_X_; warm_k = prev_K_;
+        }
 
-        if (!prev_U_.empty()) {
+        if (!prev_U_.empty() && !config_.use_native_initial_guess) {
             auto desc = descriptor();
             const int warm_shift = next_warm_start_unshifted_ ? 0 :
                 (next_warm_start_shift_ >= 0 ? next_warm_start_shift_ : config_.n_shift);

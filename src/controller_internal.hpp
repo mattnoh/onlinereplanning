@@ -95,6 +95,7 @@ public:
         int n_shift = 1;
         // Legacy flag: numerical state is always initialized for each request.
         bool reuse_solver = false;
+        bool use_native_initial_guess = false;
         std::shared_ptr<const OCPDescriptor> descriptor;
 
         Config() {
@@ -640,6 +641,7 @@ private:
         cfg.terminal_state = config_.terminal_state;
         cfg.n_shift = config_.n_replay;
         cfg.descriptor = std::make_shared<OCPDescriptor>(desc_);
+        cfg.use_native_initial_guess = config_.use_native_initial_guess;
         mpc_ = std::make_unique<OcpSolver>(cfg);
     }
 

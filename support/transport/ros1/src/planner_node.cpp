@@ -440,6 +440,8 @@ private:
                   core_cfg.initial_solve_lead_sec);
         nh_.param("solve_lead_guard_sec", core_cfg.solve_lead_guard_sec,
                   core_cfg.solve_lead_guard_sec);
+        nh_.param("use_native_initial_guess", core_cfg.use_native_initial_guess,
+                  core_cfg.use_native_initial_guess);
         core_cfg.max_constraint_error    = max_constraint_error_;
         core_cfg.skip_trajectory_validation = skip_trajectory_validation_;
         core_cfg.seed_alpha_pos          = seed_alpha_pos_;

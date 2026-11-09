@@ -155,6 +155,20 @@ int main() {
   auto next=solver.solve(x);require(next.success&&saw_controls,"shift-only contract did not exercise a subsequent initial guess");
  }
 
+ {
+  auto desc=std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor("stc_landing_noaug_node"));
+  const auto create=desc->create;int requests=0;
+  desc->create=[&](const OCPCreateArgs& args){
+   require(args.prev_U.empty()&&args.prev_X.empty()&&args.prev_K.empty(),"native initial guess received a previous trajectory or gains");
+   ++requests;return create(args);
+  };
+  OcpSolver::Config c;c.ocp_type=desc->name;c.descriptor=desc;c.use_native_initial_guess=true;OcpSolver solver(c);
+  Eigen::VectorXd x=Eigen::VectorXd::Zero(13);x(2)=1.85;x(6)=1.;
+  require(solver.solve(x).success,"native initial guess first solve");
+  require(solver.hasPreviousTrajectory(),"native initial guess test needs a previous result");
+  require(solver.solve(x).success&&requests==2,"native initial guess subsequent solve");
+ }
+
         for(const char* name:{"landing_rh","stc_landing_noaug"}) {
             auto cfg=hoverConfig();cfg.ocp_type=name;cfg.platform=planner_core::Platform::Mavros;cfg.ocp_dt=.1;cfg.n_replay=1;
             planner_core::PlannerCore core;core.configure(cfg);
