@@ -173,6 +173,48 @@ private:
 };
 
 namespace planner_core {
+inline Eigen::Vector2d advanceTrackingError(double error,double rate,
+                                           double stiffness,double damping,double dt) {
+    const double a=.5*damping,b2=a*a-stiffness;
+    double c,s;
+    if(std::abs(b2)<1e-12){c=1.;s=dt;}
+    else if(b2>0.){const double b=std::sqrt(b2);c=std::cosh(b*dt);s=std::sinh(b*dt)/b;}
+    else {const double b=std::sqrt(-b2);c=std::cos(b*dt);s=std::sin(b*dt)/b;}
+    return std::exp(-a*dt)*Eigen::Vector2d((c+a*s)*error+s*rate,
+                                          -stiffness*s*error+(c-a*s)*rate);
+}
+
+// Local cascade model of the tracker: position/velocity PD and attitude/rate
+// feedback about the committed world reference. Unlike raw-input propagation,
+// all measured errors evolve under stabilizing feedback. This is a local
+// prediction model, not a state projection or a physical-feasibility guarantee.
+inline Eigen::VectorXd predictTrackingState(const Eigen::VectorXd& measured,
+        const Eigen::VectorXd& reference_now,const Eigen::VectorXd& reference_after,double dt) {
+    auto result=reference_after;
+    const auto& gains=comando_parameters::defaults.px4;
+    for(int j=0;j<3;++j){
+        const double d=j<2?gains.velocity_d_xy:gains.velocity_d_z;
+        const double kv=gains.velocity_p(j)/(1.+d);
+        const auto e=advanceTrackingError(measured(j)-reference_now(j),
+            measured(j+3)-reference_now(j+3),kv*gains.position_p(j),kv,dt);
+        result(j)+=e(0);result(j+3)+=e(1);
+    }
+    auto quaternion=[](const Eigen::VectorXd& x){return Eigen::Quaterniond(x(6),x(7),x(8),x(9)).normalized();};
+    const auto initial_rotation=quaternion(reference_now).conjugate()*quaternion(measured);
+    const Eigen::AngleAxisd angle(initial_rotation);
+    const Eigen::Vector3d theta=angle.angle()*angle.axis();
+    const Eigen::Vector3d rate=measured.segment<3>(10)-initial_rotation.conjugate()*reference_now.segment<3>(10);
+    Eigen::Vector3d after_theta,after_rate;
+    const double tau=comando_parameters::defaults.mpc.rate_tau;
+    for(int j=0;j<3;++j){const auto e=advanceTrackingError(theta(j),rate(j),gains.attitude_p(j)/tau,1./tau,dt);after_theta(j)=e(0);after_rate(j)=e(1);}
+    Eigen::Quaterniond rotation=Eigen::Quaterniond::Identity();
+    if(after_theta.norm()>1e-12)rotation=Eigen::Quaterniond(Eigen::AngleAxisd(after_theta.norm(),after_theta.normalized()));
+    const auto q=(quaternion(reference_after)*rotation).normalized();
+    result.segment<4>(6)<<q.w(),q.x(),q.y(),q.z();
+    result.segment<3>(10)=rotation.conjugate()*reference_after.segment<3>(10)+after_rate;
+    return result;
+}
+
 // File I/O never runs on the controller sampling thread. Memory is bounded.
 class AsyncCsvWriter {
     std::mutex mutex_;
@@ -225,6 +267,9 @@ public:
     void configure(const PlannerCoreConfig& config,std::shared_ptr<const OCPDescriptor> descriptor={}) {
         config_ = config;
         desc_ = descriptor?*descriptor:OCPRegistry::getDescriptor(config_.ocp_type);
+        if(config_.predict_tracking_error&&(!config_.measured_state_delay_compensation||
+           config_.platform!=Platform::Mavros||desc_.command_mode!=OCPDescriptor::CommandMode::CmdFullState||desc_.state_dim<13))
+            throw std::invalid_argument("tracking prediction requires measured-state MAVROS full-state RH");
         if(config_.measured_state_delay_compensation)
             desc_.warm_start=OCPDescriptor::WarmStart::Shift; // control initial guess only
         if (config_.ocp_dt <= 0.0) {
@@ -761,6 +806,23 @@ private:
             auto state=reconstructWorldState(desc_,live_x0,target_snapshot);
             if(world_model.initial_state)state=world_model.initial_state(state,world_model.hover);
             const double delay=std::max(0.,std::chrono::duration<double>(handoff.activation_time-handoff.measurement_time).count());
+            if(config_.predict_tracking_error){
+                auto reference=[&](Clock::time_point stamp){
+                    if(handoff.first_plan){
+                        auto hold=state;hold.segment<3>(3).setZero();hold.segment<3>(10).setZero();
+                        const Eigen::Quaterniond q(state(6),state(7),state(8),state(9));
+                        const double yaw=std::atan2(2*(q.w()*q.z()+q.x()*q.y()),1-2*(q.y()*q.y()+q.z()*q.z()));
+                        hold.segment<4>(6)<<std::cos(.5*yaw),0,0,std::sin(.5*yaw);return hold;
+                    }
+                    const double elapsed=std::max(0.,std::chrono::duration<double>(stamp-handoff.active_origin).count());
+                    TrajectoryReplayer::ReplaySample sample;
+                    if(!replayer_.sampleActiveAtElapsed(elapsed,config_.ocp_dt,&sample))throw std::runtime_error("missing tracking reference");
+                    return reconstructWorldState(desc_,sample.x_cmd,targetAtPlanElapsed(sample.active_solve_num,elapsed,target_snapshot));
+                };
+                state=predictTrackingState(state,reference(handoff.measurement_time),reference(handoff.activation_time),delay);
+                x0_source="measured_tracking_rollout";
+                return prepareOcpState(desc_,state,predictTargetSnapshot(target_snapshot,delay));
+            }
             // Integer clock ticks keep sampling exactly consistent at ZOH
             // boundaries, rather than accumulating floating-point time drift.
             for(auto stamp=handoff.measurement_time;stamp<handoff.activation_time;stamp+=std::chrono::milliseconds(1)){

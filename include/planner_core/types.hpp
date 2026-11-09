@@ -402,6 +402,9 @@ struct PlannerCoreConfig {
     // Use the OCP's native initial controls instead of shifting the last plan.
     // This affects only the initial guess; every numerical solve is fresh.
     bool use_native_initial_guess = false;
+    // PX4 full-state tracking: propagate measured error with local closed-loop
+    // dynamics instead of treating the reference controls as plant inputs.
+    bool predict_tracking_error = false;
     // Seeding the replan from the MEASURED state.
     //
     //   x0 = plan(t_activation) + clamp(alpha * (live(now) - plan(now)))

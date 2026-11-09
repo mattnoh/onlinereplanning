@@ -99,6 +99,17 @@ planner_core::PlannerCoreInput inputAt(const Clock::time_point& now) {
 int main() {
     try {
         const auto t0 = Clock::now();
+        {
+            const auto e=planner_core::advanceTrackingError(1.,0.,1.,2.,1.);
+            require(std::abs(e(0)-2./std::exp(1.))<1e-12&&std::abs(e(1)+1./std::exp(1.))<1e-12,"critical tracking error solution");
+            const auto free=planner_core::advanceTrackingError(.2,.3,0.,0.,.4);
+            require(std::abs(free(0)-.32)<1e-12&&std::abs(free(1)-.3)<1e-12,"free tracking error solution");
+            auto nominal=state(0.);auto live=nominal;live(0)=.1;live(3)=.2;live(10)=.03;
+            auto predicted=planner_core::predictTrackingState(live,nominal,nominal,0.);
+            require((predicted-live).norm()<1e-12,"zero-delay tracking predictor changed measured state");
+            auto moved=planner_core::predictTrackingState(live,nominal,nominal,.25);
+            require(moved(0)>0.&&moved(10)!=0.&&std::abs(moved(10))<.03,"tracking predictor lost measured position/rate error");
+        }
         // Analytic delay predictor: full measured state, known committed input,
         // correct future epoch; signed acceleration is not quad thrust.
         {

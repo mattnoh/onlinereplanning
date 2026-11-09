@@ -121,6 +121,11 @@ struct MpcParameters {
 // Native PX4 position-controller coefficients, not planner feedback gains.
 // They must match MPC_ACC_DECOUPLE and MPC_XY/Z_VEL_D_ACC on the FCU.
 struct Px4TrackingParameters {
+    // PX4 multicopter_position_control_gain_params.c / mc_att_control_params.c.
+    // Local tracking-error prediction; these must match the FCU parameters.
+    Eigen::Vector3d position_p{.95,.95,1.};
+    Eigen::Vector3d velocity_p{1.8,1.8,4.};
+    Eigen::Vector3d attitude_p{4.,4.,2.8};
     bool decouple_acceleration = true;
     double velocity_d_xy = .2;
     double velocity_d_z = 0.;

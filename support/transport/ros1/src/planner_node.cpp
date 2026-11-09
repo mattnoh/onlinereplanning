@@ -442,6 +442,8 @@ private:
                   core_cfg.solve_lead_guard_sec);
         nh_.param("use_native_initial_guess", core_cfg.use_native_initial_guess,
                   core_cfg.use_native_initial_guess);
+        nh_.param("predict_tracking_error", core_cfg.predict_tracking_error,
+                  core_cfg.predict_tracking_error);
         core_cfg.max_constraint_error    = max_constraint_error_;
         core_cfg.skip_trajectory_validation = skip_trajectory_validation_;
         core_cfg.seed_alpha_pos          = seed_alpha_pos_;
