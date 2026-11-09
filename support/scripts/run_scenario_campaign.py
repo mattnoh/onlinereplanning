@@ -229,7 +229,7 @@ def campaign_identity(args):
         target_publisher_sha256=sha256(os.path.join(DEVEL, "target_publisher")),
         planner_launch_sha256=sha256(os.path.join(launch, "planner_launch.launch")),
         target_launch_sha256=sha256(os.path.join(launch, "target_launch.launch")),
-        hover_thrust=args.hover_thrust, stc_z_stage=args.stc_z_stage,
+        hover_thrust=args.hover_thrust, hover_height=getattr(args, "hover_height", 2.05), stc_z_stage=args.stc_z_stage,
         stc_los_alt_trig=args.stc_los_alt_trig, start=args.start,
         staging=args.staging, bearing_policy=args.bearing_policy,
         shape_random=args.shape_random, landing_timeout=args.landing_timeout,
@@ -544,7 +544,7 @@ def run_cell(motion, level, trial, outdir, args):
                f"rosparam set /comando_planner/land_action none && "
                f"rosparam set /comando_planner/hover_target_x {hx:.3f} && "
                f"rosparam set /comando_planner/hover_target_y {hy:.3f} && "
-               f"rosparam set /comando_planner/hover_target_z 2.05 && "
+               f"rosparam set /comando_planner/hover_target_z {getattr(args, 'hover_height', 2.05)} && "
                f"rosparam set /comando_planner/command_seq 1")
         sh(f"{SETUP} && {hov}", timeout=60)
         settled, z, vz = wait_settle()
@@ -615,7 +615,7 @@ def run_cell(motion, level, trial, outdir, args):
             shutil.move(f, os.path.join(cell, b))
 
     meta = dict(motion=motion, uncertainty=level, trial=trial, seed=seed,
-                profile=args.profile, hover_thrust=args.hover_thrust, start=getattr(args,"start","original"),
+                profile=args.profile, hover_thrust=args.hover_thrust, hover_height=getattr(args,"hover_height",2.05), start=getattr(args,"start","original"),
                 stage_xy=[round(hx,3), round(hy,3)] if "hx" in dir() else None,
                 result=result, settle_z=z, settle_vz=vz, teardown=clean,
                 # Geometry actually achieved at activation. stage_alpha is what
@@ -646,6 +646,8 @@ def main():
     ap.add_argument("--start", choices=("original","cone"),default="original",help="cone: target-following preparation and measured initial-feasibility gate")
     ap.add_argument("--profile", default=os.path.join(PKG,"config/ros1/profile_stc_landing_noaug_sitl.yaml"))
     ap.add_argument("--hover-thrust", type=float, default=0.3)
+    ap.add_argument("--hover-height", type=float, default=2.05,
+                    help="world-frame staging hover target; historical default is unchanged")
     ap.add_argument("--stc-z-stage", type=float, default=1.55)
     ap.add_argument("--stc-los-alt-trig", type=float, default=1.2)
     ap.add_argument("--motions", default=",".join(MOTIONS))

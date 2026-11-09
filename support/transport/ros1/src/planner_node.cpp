@@ -432,6 +432,14 @@ private:
         core_cfg.solver_type             = solver_type_;
         core_cfg.ocp_dt                  = ocp_dt_;
         core_cfg.n_replay                = n_replay_;
+        // Opt in to the same measured-state handoff used by the wall-clock
+        // harness. Leave the existing ROS execution policy unchanged by default.
+        nh_.param("measured_state_delay_compensation", core_cfg.measured_state_delay_compensation,
+                  core_cfg.measured_state_delay_compensation);
+        nh_.param("initial_solve_lead_sec", core_cfg.initial_solve_lead_sec,
+                  core_cfg.initial_solve_lead_sec);
+        nh_.param("solve_lead_guard_sec", core_cfg.solve_lead_guard_sec,
+                  core_cfg.solve_lead_guard_sec);
         core_cfg.max_constraint_error    = max_constraint_error_;
         core_cfg.skip_trajectory_validation = skip_trajectory_validation_;
         core_cfg.seed_alpha_pos          = seed_alpha_pos_;
@@ -452,6 +460,10 @@ private:
         core_cfg.max_relative_vertical_abs  = max_relative_vertical_abs_;
         core_cfg.max_relative_velocity_norm = max_relative_velocity_norm_;
         planner_core_.configure(core_cfg);
+        ROS_INFO("RH measured-state delay compensation=%s initial_lead=%.3f guard=%.3f n_replay=%d",
+                 core_cfg.measured_state_delay_compensation ? "true" : "false",
+                 core_cfg.initial_solve_lead_sec, core_cfg.solve_lead_guard_sec,
+                 core_cfg.n_replay);
         if (planner_core_.isDirect()) {
             std::string directory; nh_.param<std::string>("log_dir", directory, "/tmp");
             planner_core_.openControlLog(directory + "/direct_mpc_controls.csv");
