@@ -135,12 +135,13 @@ inline bool useRhFeedbackWarmStart(){return defaults.horizon.feedback_warm_start
 inline std::string stageTriggerMode(){return defaults.constraints.stage_trigger;}
 
 struct CtcsMargins {
-    double trigger=0., geometric=0., speed=0., tilt_deg=0., path_tilt_deg=0., rate=0.;
+    double trigger=0., geometric=0., speed=0., tilt_deg=0., path_tilt_deg=0., rate=0., los=0.;
 };
 inline const CtcsMargins CTCS_MARGINS{
     envOrQ("SZMUK_CTCS_TRIGGER_MARGIN",0.),envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.),
     envOrQ("SZMUK_CTCS_SPEED_MARGIN",0.),envOrQ("SZMUK_CTCS_TILT_MARGIN_DEG",0.),
-    envOrQ("SZMUK_CTCS_PATH_TILT_MARGIN_DEG",0.),envOrQ("SZMUK_CTCS_RATE_MARGIN",0.)};
+    envOrQ("SZMUK_CTCS_PATH_TILT_MARGIN_DEG",0.),envOrQ("SZMUK_CTCS_RATE_MARGIN",0.),
+    envOrQ("SZMUK_CTCS_LOS_MARGIN",envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.))};
 inline CtcsMargins ctcsMargins(bool tightened){return tightened?CTCS_MARGINS:CtcsMargins{};}
 
 // ── Sigmoid helpers ───────────────────────────────────────────────────────────
@@ -470,7 +471,7 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
             : Scalar(0);
     const double los_tan=LOS_CONE_TAN;
     out.los = posPart(lateral - Scalar(los_tan) * axial
-        + Scalar(margins.geometric)*std::tanh(axial/Scalar(GS_APEX_OFFSET)));
+        + Scalar(margins.los)*std::tanh(axial/Scalar(GS_APEX_OFFSET)));
 
     // NOTE: no thrust STC blocks — faithful to quad_single_horizon_noaug_stc,
     // whose integrand carries only stage/LOS/landing. Thrust limits stay
@@ -838,7 +839,8 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
     const auto margins=ctcsMargins(tightened);
     if(margins.trigger<0.||margins.trigger>=STAGE_RADIUS||margins.geometric<0.||margins.speed<0.||margins.speed>=SPD_STC_MAX||
         margins.tilt_deg<0.||margins.tilt_deg>=ALPHA_THETA_STC*THETA_STC_DEG||margins.path_tilt_deg<0.||margins.path_tilt_deg>=THETA_PHASE0_DEG||margins.rate<0.||margins.rate>=OMEGA_STC_MAX||
-        margins.geometric/GS_APEX_OFFSET>=LOS_CONE_TAN)
+        margins.los<0.||margins.los/GS_APEX_OFFSET>=LOS_CONE_TAN||
+        margins.geometric>=GS_CONE_TAN*GS_APEX_OFFSET)
         throw std::invalid_argument("invalid CTCS physical tightening margins");
     auto row=std::make_shared<StcStageConstraint<Scalar>>(StcForm::Density, eps);
     const auto zero = [](const Vec& x) -> Vec { return Vec::Zero(x.size()); };
@@ -920,7 +922,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             // For axial<0, |tanh(s)|<=|s| and margin/range<tan(angle) keep the
             // entire rear half-space infeasible. The landing point is retained.
             return std::sqrt(posPart(lateral2)+Scalar(1e-12)) - Scalar(los_tan)*axial
-                + Scalar(margins.geometric)*std::tanh(axial/Scalar(GS_APEX_OFFSET));
+                + Scalar(margins.los)*std::tanh(axial/Scalar(GS_APEX_OFFSET));
         };
         GradFn dlos = [=](const Vec& x) -> Vec {
             const Scalar w=x(6), a=x(7), b=x(8), c=x(9);
@@ -934,7 +936,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             da.template segment<4>(6) = db.transpose()*x.template head<3>();
             const Scalar lateral2 = x.template head<3>().squaredNorm()-axial*axial;
             const Scalar taper=std::tanh(axial/Scalar(GS_APEX_OFFSET));
-            Vec g = (-Scalar(los_tan)+Scalar(margins.geometric/GS_APEX_OFFSET)*(Scalar(1)-taper*taper))*da;
+            Vec g = (-Scalar(los_tan)+Scalar(margins.los/GS_APEX_OFFSET)*(Scalar(1)-taper*taper))*da;
             if (lateral2 > Scalar(0)) {
                 Vec dl = -Scalar(2)*axial*da; dl.template head<3>() += Scalar(2)*x.template head<3>();
                 g += dl/(Scalar(2)*std::sqrt(lateral2+Scalar(1e-12)));

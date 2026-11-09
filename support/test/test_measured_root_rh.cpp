@@ -285,6 +285,7 @@ int main(int argc,char** argv){try{
     if(argc<5||argc>16)throw std::invalid_argument("usage: test_measured_root_rh pointmass|quad matched|fine CYCLES OUTPUT [--ctcs] [--reference-initial|--staging-initial] [--native-initial-guess] [--audit-loop] [--stationary-target] [--remaining-horizon] [--fixed-dt SECONDS] [--single-horizon] [--replay-intervals K] [--plant-acceleration-x MPS2]");
     bool ctcs=false,native_guess=false,reference_initial=false,staging_initial=false,audit_loop=false,stationary_target=false,remaining_horizon=false,single_horizon=false;double fixed_dt=0.,plant_acceleration_x=0.;
     int replay_intervals=4;
+    std::string initial_state_file;
     for(int i=5;i<argc;++i){
         const std::string option=argv[i];
         if(option=="--ctcs")ctcs=true;
@@ -295,6 +296,7 @@ int main(int argc,char** argv){try{
         else if(option=="--stationary-target")stationary_target=true;
         else if(option=="--remaining-horizon")remaining_horizon=true;
         else if(option=="--single-horizon")single_horizon=true;
+        else if(option=="--initial-state"){requireRh(i+1<argc,"missing initial state file");initial_state_file=argv[++i];}
         else if(option=="--replay-intervals"){requireRh(i+1<argc,"missing replay interval count");replay_intervals=std::stoi(argv[++i]);requireRh(replay_intervals>0,"invalid replay interval count");}
         else if(option=="--plant-acceleration-x"){requireRh(i+1<argc,"missing plant acceleration");plant_acceleration_x=std::stod(argv[++i]);requireRh(std::isfinite(plant_acceleration_x),"invalid plant acceleration");}
         else if(option=="--fixed-dt"){requireRh(i+1<argc,"missing fixed dt");fixed_dt=std::stod(argv[++i]);requireRh(fixed_dt>0.,"invalid fixed dt");}
@@ -374,6 +376,12 @@ int main(int argc,char** argv){try{
         else plant<<-.07320069131,-.04604300079,1.832031775,.07864153001,-.004976944706,.008655228599,
         .999980267207,-.004416340294,.003462269278,-.00282379661,.01105888095,.001028963132,-.002000458539;
         plant.segment<4>(6).normalize();}else plant<<-10,0,0,0;
+    if(!initial_state_file.empty()){
+        std::ifstream source(initial_state_file);requireRh(bool(source),"initial state file missing");
+        for(int j=0;j<plant.size();++j)requireRh(bool(source>>plant(j)),"initial state file has too few values");
+        std::string extra;requireRh(!(source>>extra)&&plant.allFinite(),"invalid initial state file");
+        if(quad){requireRh(plant.segment<4>(6).norm()>1e-8,"invalid measured quaternion");plant.segment<4>(6).normalize();}
+    }
     if(model.initial_state)plant=model.initial_state(plant,model.hover);
     planner_core::PlannerCoreInput input;input.state_frame="world";input.target_snapshot.valid=true;
     double time=0.,root_error=0.,native_error=0.,executed_error=0.,predicted_dense_error=0.,prediction_error=0.;
