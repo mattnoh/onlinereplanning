@@ -229,7 +229,9 @@ def campaign_identity(args):
         target_publisher_sha256=sha256(os.path.join(DEVEL, "target_publisher")),
         planner_launch_sha256=sha256(os.path.join(launch, "planner_launch.launch")),
         target_launch_sha256=sha256(os.path.join(launch, "target_launch.launch")),
-        hover_thrust=args.hover_thrust, hover_height=getattr(args, "hover_height", 2.05), stc_z_stage=args.stc_z_stage,
+        hover_thrust=args.hover_thrust, hover_height=getattr(args, "hover_height", 2.05),
+        settle_min_z=getattr(args,"settle_min_z",1.70), settle_max_z=getattr(args,"settle_max_z",1.90),
+        stc_z_stage=args.stc_z_stage,
         stc_los_alt_trig=args.stc_los_alt_trig, start=args.start,
         staging=args.staging, bearing_policy=args.bearing_policy,
         shape_random=args.shape_random, landing_timeout=args.landing_timeout,
@@ -343,9 +345,9 @@ def fcu_armed_offboard():
     return ("armed: True" in out) and ("OFFBOARD" in out)
 
 
-def wait_settle(timeout=90):
+def wait_settle(timeout=90, min_z=1.70, max_z=1.90):
     """Require a genuine hover settle, not a fixed sleep: |vz|<0.05 and
-    1.70<z<1.90 for 5 consecutive odom samples."""
+    min_z<z<max_z for 5 consecutive odom samples; defaults preserve history."""
     ok = 0
     t_end = time.time() + timeout
     last = (0.0, 9.0)
@@ -361,7 +363,7 @@ def wait_settle(timeout=90):
         except Exception:
             time.sleep(2); continue
         last = (z, vz)
-        ok = ok + 1 if (abs(vz) < 0.05 and 1.70 < z < 1.90) else 0
+        ok = ok + 1 if (abs(vz) < 0.05 and min_z < z < max_z) else 0
         if ok >= 5:
             return True, z, vz
         time.sleep(2)
@@ -547,7 +549,8 @@ def run_cell(motion, level, trial, outdir, args):
                f"rosparam set /comando_planner/hover_target_z {getattr(args, 'hover_height', 2.05)} && "
                f"rosparam set /comando_planner/command_seq 1")
         sh(f"{SETUP} && {hov}", timeout=60)
-        settled, z, vz = wait_settle()
+        settled, z, vz = wait_settle(min_z=getattr(args,"settle_min_z",1.70),
+                                    max_z=getattr(args,"settle_max_z",1.90))
         if not settled:
             result = "NO_SETTLE"
         else:
@@ -648,6 +651,8 @@ def main():
     ap.add_argument("--hover-thrust", type=float, default=0.3)
     ap.add_argument("--hover-height", type=float, default=2.05,
                     help="world-frame staging hover target; historical default is unchanged")
+    ap.add_argument("--settle-min-z", type=float, default=1.70)
+    ap.add_argument("--settle-max-z", type=float, default=1.90)
     ap.add_argument("--stc-z-stage", type=float, default=1.55)
     ap.add_argument("--stc-los-alt-trig", type=float, default=1.2)
     ap.add_argument("--motions", default=",".join(MOTIONS))
