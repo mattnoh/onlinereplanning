@@ -136,12 +136,22 @@ inline std::string stageTriggerMode(){return defaults.constraints.stage_trigger;
 
 struct CtcsMargins {
     double trigger=0., geometric=0., speed=0., tilt_deg=0., path_tilt_deg=0., rate=0., los=0.;
+    // Staging-radius tightening, separate from the altitude-trigger margin so
+    // the staging hold ends inside the LOS cone without raising the tightened
+    // LOS trigger into the hover band. Defaults to `trigger`.
+    double stage_radius=0.;
+    // Glideslope half-angle tightening [deg]; grows with height, unlike the
+    // additive geometric margin, which the cone apex caps at tan(gs)*apex.
+    double gs_angle_deg=0.;
 };
 inline const CtcsMargins CTCS_MARGINS{
     envOrQ("SZMUK_CTCS_TRIGGER_MARGIN",0.),envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.),
     envOrQ("SZMUK_CTCS_SPEED_MARGIN",0.),envOrQ("SZMUK_CTCS_TILT_MARGIN_DEG",0.),
     envOrQ("SZMUK_CTCS_PATH_TILT_MARGIN_DEG",0.),envOrQ("SZMUK_CTCS_RATE_MARGIN",0.),
-    envOrQ("SZMUK_CTCS_LOS_MARGIN",envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.))};
+    envOrQ("SZMUK_CTCS_LOS_MARGIN",envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.)),
+    envOrQ("SZMUK_CTCS_STAGE_RADIUS_MARGIN",envOrQ("SZMUK_CTCS_TRIGGER_MARGIN",0.)),
+    envOrQ("SZMUK_CTCS_GS_ANGLE_MARGIN_DEG",0.)};
+inline double gsConeTan(const CtcsMargins& m){return std::tan((GS_CONE_HALF_ANGLE_DEG-m.gs_angle_deg)*M_PI/180.0);}
 inline CtcsMargins ctcsMargins(bool tightened){return tightened?CTCS_MARGINS:CtcsMargins{};}
 
 // ── Sigmoid helpers ───────────────────────────────────────────────────────────
@@ -419,7 +429,7 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     const Scalar om2    = x.template segment<3>(10).squaredNorm();
     const Scalar rxy    = std::sqrt(rxy2 + Scalar(1e-12));
     const Scalar stage_radius_margin =
-        (rxy - Scalar(STAGE_RADIUS-margins.trigger)) / Scalar(STAGE_TRIGGER_SCALE);
+        (rxy - Scalar(STAGE_RADIUS-margins.stage_radius)) / Scalar(STAGE_TRIGGER_SCALE);
     const Scalar stage_radius_trig =
         (stage_radius_margin > Scalar(0))
             ? Scalar(STAGE_TRIGGER_FLOOR) + stage_radius_margin
@@ -446,7 +456,7 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     out.speed      = posPart(v2     - Scalar(std::pow(SPD_STC_MAX-margins.speed,2)));
     out.tilt       = posPart(qperp2 - tilt_lim);
     out.omega      = posPart(om2    - Scalar(std::pow(OMEGA_STC_MAX-margins.rate,2)));
-    const Scalar gs_val = rxy - Scalar(GS_CONE_TAN) * (x(2) + Scalar(GS_APEX_OFFSET));
+    const Scalar gs_val = rxy - Scalar(gsConeTan(margins)) * (x(2) + Scalar(GS_APEX_OFFSET));
     out.glideslope = posPart(gs_val+Scalar(margins.geometric));
 
     const Scalar qw = x(6), qx = x(7), qy = x(8), qz = x(9);
@@ -837,10 +847,11 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
     using StateFn = std::function<Scalar(const Vec&)>;
     using GradFn = std::function<Vec(const Vec&)>;
     const auto margins=ctcsMargins(tightened);
-    if(margins.trigger<0.||margins.trigger>=STAGE_RADIUS||margins.geometric<0.||margins.speed<0.||margins.speed>=SPD_STC_MAX||
+    if(margins.trigger<0.||margins.trigger>=STAGE_RADIUS||margins.stage_radius<0.||margins.stage_radius>=STAGE_RADIUS||margins.geometric<0.||margins.speed<0.||margins.speed>=SPD_STC_MAX||
         margins.tilt_deg<0.||margins.tilt_deg>=ALPHA_THETA_STC*THETA_STC_DEG||margins.path_tilt_deg<0.||margins.path_tilt_deg>=THETA_PHASE0_DEG||margins.rate<0.||margins.rate>=OMEGA_STC_MAX||
         margins.los<0.||margins.los/GS_APEX_OFFSET>=LOS_CONE_TAN||
-        margins.geometric>=GS_CONE_TAN*GS_APEX_OFFSET)
+        margins.gs_angle_deg<0.||margins.gs_angle_deg>=GS_CONE_HALF_ANGLE_DEG||
+        margins.geometric>=gsConeTan(margins)*GS_APEX_OFFSET)
         throw std::invalid_argument("invalid CTCS physical tightening margins");
     auto row=std::make_shared<StcStageConstraint<Scalar>>(StcForm::Density, eps);
     const auto zero = [](const Vec& x) -> Vec { return Vec::Zero(x.size()); };
@@ -878,7 +889,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             if (settle) return -(posPart(tilt(x) - settleTilt) +
                 posPart(omega(x) - Scalar(STAGE_SETTLE_OMEGA_MAX*STAGE_SETTLE_OMEGA_MAX)));
             const Scalar margin = (std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) -
-                                   Scalar(STAGE_RADIUS-margins.trigger)) / Scalar(STAGE_TRIGGER_SCALE);
+                                   Scalar(STAGE_RADIUS-margins.stage_radius)) / Scalar(STAGE_TRIGGER_SCALE);
             return margin > Scalar(0) ? -(Scalar(STAGE_TRIGGER_FLOOR) + margin) : Scalar(0);
         };
         GradFn dstage = [=](const Vec& x) -> Vec {
@@ -888,7 +899,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
                 if (omega(x) > Scalar(STAGE_SETTLE_OMEGA_MAX*STAGE_SETTLE_OMEGA_MAX)) g -= domega(x);
             } else {
                 const Scalar r = std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
-                if (r > Scalar(STAGE_RADIUS-margins.trigger)) {
+                if (r > Scalar(STAGE_RADIUS-margins.stage_radius)) {
                     g(0) = -x(0)/(r*Scalar(STAGE_TRIGGER_SCALE));
                     g(1) = -x(1)/(r*Scalar(STAGE_TRIGGER_SCALE));
                 }
@@ -973,10 +984,10 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
         add("landing_omega", landTrigger, dland,
             [=](const Vec& x) -> Scalar { return omega(x)-Scalar(std::pow(OMEGA_STC_MAX-margins.rate,2)); }, domega, W_LAND_OMEGA);
         add("landing_glideslope", landTrigger, dland,
-            [=](const Vec& x) -> Scalar { return std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) - Scalar(GS_CONE_TAN)*(x(2)+Scalar(GS_APEX_OFFSET))+Scalar(margins.geometric); },
-            [](const Vec& x) -> Vec {
+            [=](const Vec& x) -> Scalar { return std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) - Scalar(gsConeTan(margins))*(x(2)+Scalar(GS_APEX_OFFSET))+Scalar(margins.geometric); },
+            [=](const Vec& x) -> Vec {
                 Vec g=Vec::Zero(x.size()); const Scalar r=std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
-                g(0)=x(0)/r; g(1)=x(1)/r; g(2)=-Scalar(GS_CONE_TAN); return g;
+                g(0)=x(0)/r; g(1)=x(1)/r; g(2)=-Scalar(gsConeTan(margins)); return g;
             }, W_LAND_GS);
     }
     StcIntervalDynamics<Scalar> host;
@@ -1038,6 +1049,35 @@ inline bool plausibleTrajectory(const std::vector<Eigen::VectorXd>& X,
         if (x(IDX_DT) < -1e-8 || x(IDX_DT) > dt_limit) return false;
     }
     return true;
+}
+
+// ── Stabilized native initial guess (opt-in) ────────────────────────────────
+// SZMUK_NATIVE_GUESS=stabilized replaces the zero-moment hover rollout with a
+// hover rollout under a PD attitude/rate loop and velocity damping. A measured
+// root carries small body rates; with zero moments they never decay, so over a
+// 5-9 s horizon the uniform-hover guess tilts several degrees and drifts,
+// starting the solver at CTCS errors ~1e5 (SITL capture: 32/37 vs 5/37 roots
+// solved). Only the initial guess changes; the OCP is unchanged.
+inline bool useStabilizedNativeGuess(){
+    static const bool on=[]{const char* v=std::getenv("SZMUK_NATIVE_GUESS");return v&&std::string(v)=="stabilized";}();
+    return on;
+}
+inline Eigen::VectorXd stabilizedNativeControl(const Eigen::VectorXd& x,const Eigen::Vector3d& target_accel){
+    static const double kp=envOrQ("SZMUK_GUESS_KP",1.),kd=envOrQ("SZMUK_GUESS_KD",2.),
+        kv=envOrQ("SZMUK_GUESS_KV",.5),kvz=envOrQ("SZMUK_GUESS_KVZ",.5),amax=envOrQ("SZMUK_GUESS_AMAX",2.);
+    const Eigen::Vector3d v=x.segment<3>(3),w=x.segment<3>(10);
+    Eigen::Quaterniond q(x(6),x(7),x(8),x(9));q.normalize();
+    Eigen::Vector3d a(-kv*v.x(),-kv*v.y(),-kvz*v.z());
+    a.head<2>()=a.head<2>().cwiseMax(-amax).cwiseMin(amax);
+    // Relative frame: the vehicle must also match the target's acceleration.
+    const Eigen::Vector3d f=a+target_accel-GRAVITY;
+    const Eigen::Vector3d bz=q*Eigen::Vector3d::UnitZ();
+    const Eigen::Vector3d err=q.conjugate()*bz.cross(f.normalized());
+    Eigen::VectorXd u=Eigen::VectorXd::Zero(NU_SS);
+    u(0)=MASS*f.dot(bz);
+    u.segment<3>(1)=J_B*(kp*err-kd*w);
+    u(IDX_THETA)=TH0;
+    return u;
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────
@@ -1185,6 +1225,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
             // guess changed the cold OCP initialization before RH even began.
             uk(0) = HOVER_THRUST + MASS * predictor->predictAccel(sim14(13)).z();
             uk(IDX_THETA) = TH0;
+            if (useStabilizedNativeGuess()) uk = stabilizedNativeControl(sim14, predictor->predictAccel(sim14(13)));
         }
         clampWarmControl(uk);
 
