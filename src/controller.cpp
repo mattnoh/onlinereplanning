@@ -66,16 +66,21 @@ void Controller::openControlLog(const std::string& path){std::unique_lock<std::s
 #include <iostream>
 #include <atomic>
 #include <cstring>
+#include <sstream>
+#include <thread>
 extern char** environ;
 namespace {
 // Diagnostic only (COMANDO_REQUEST_DUMP_DIR): write each solve request in the
 // format read by test_measured_root_rh --diagnose-request. No effect when unset.
+// Formatting runs on the solve thread before solve_finish_time is stamped, so
+// it counts toward solve latency and the deadline check; only the file write
+// is deferred to a detached thread.
 void dumpRequest(const std::string& ocp,const OCPCreateArgs& args,const OptimalControlProblem<double>& problem,
                  const std::vector<Eigen::VectorXd>& X,const std::vector<Eigen::VectorXd>& U,bool success,int nx_ss){
     static std::atomic<int> counter{0};
     const char* dir=std::getenv("COMANDO_REQUEST_DUMP_DIR");if(!dir||!*dir)return;
-    std::ofstream out(std::string(dir)+"/request-"+std::to_string(counter++)+(success?"-ok":"-fail")+".txt");
-    if(!out)return;
+    const std::string path=std::string(dir)+"/request-"+std::to_string(counter++)+(success?"-ok":"-fail")+".txt";
+    std::ostringstream out;
     out<<std::setprecision(17)<<"ocp "<<ocp<<'\n';
     std::vector<std::string> names;
     for(char** e=environ;*e;++e){const std::string v(*e);const auto n=v.substr(0,v.find('='));
@@ -90,6 +95,7 @@ void dumpRequest(const std::string& ocp,const OCPCreateArgs& args,const OptimalC
     std::vector<Eigen::VectorXd> px,pu;const int N=problem.getHorizon();
     for(int k=0;k<=N;++k){px.push_back(problem.getInitialState(k));if(k<N)pu.push_back(problem.getInitialControl(k));}
     vectors("prepared_X",px);vectors("prepared_U",pu);vectors("returned_X",X);vectors("returned_U",U);
+    std::thread([path,text=out.str()]{std::ofstream f(path);if(f)f<<text;}).detach();
 }
 }
 
@@ -296,6 +302,10 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
             result.optimality_error <= solver_params_.tolerance &&
             result.primal.feasible(solver_params_.tolerance);
 
+        if(std::getenv("COMANDO_REQUEST_DUMP_DIR"))
+            dumpRequest(descriptor().name,args,*problem_,X_result,U_result,
+                        result.converged,static_cast<int>(problem_->getInitialState(0).size()));
+
         const auto t_finish = chrono::steady_clock::now();
         result.solve_finish_time = t_finish;
         result.solve_time_ms = chrono::duration<double, milli>(
@@ -305,10 +315,6 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
         result.solve_iters = static_cast<int>(solver_->getAllCost().size());
         result.extra_params = extra_params;
         last_solve_ms_ = result.solve_time_ms;
-        // Written after timing so the diagnostic does not change solve latency.
-        if(std::getenv("COMANDO_REQUEST_DUMP_DIR"))
-            dumpRequest(descriptor().name,args,*problem_,X_result,U_result,
-                        result.converged,static_cast<int>(problem_->getInitialState(0).size()));
 
         if (X_result.size() > 1) {
             auto desc = descriptor();

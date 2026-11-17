@@ -4839,7 +4839,12 @@
       }
     },
     "excluded_or_failed_earlier_configurations": "Earlier configurations this session (margins only, widened bounds without exemption, guess vertical damping 1.5) each had excess or timeouts in some repeats; PX4 takeoff NO_SETTLE occurred in ~6 of 33 runs (harness, not planner) and none in this 8-run set.",
-    "limits": "Single stationary staging geometry (circle motion with omega 0), zero target noise, one bearing. Moving target untested. Audit is at MAVROS odometry resolution over activation to touchdown handoff; not a continuous-time certificate. Cold-start first plan may take several attempts while hovering (exs_2: 46).",
+    "limits": [
+      "Single stationary staging geometry (circle motion with omega 0), zero target noise, one bearing. Moving target untested. Audit is at MAVROS odometry resolution over activation to touchdown handoff; not a continuous-time certificate. Cold-start first plan may take several attempts while hovering (exs_2: 46).",
+      "Timing: all 8 flights ran with COMANDO_REQUEST_DUMP_DIR set, and the dump file was written synchronously after solve_finish_time was stamped, so the measured-state deadline check excluded that write delay. Landing/excess results stand; solve-completion timing from these flights is not representative. Fixed afterwards (formatting before the timestamp, file write on a detached thread).",
+      "Startup: exs_2 rejected 46 consecutive solves while hovering before its first accepted plan. That is recovery while hovering, not reliable first-request planning.",
+      "Scope: stationary target, zero target noise, one approach geometry, sampled odometry checks. Moving-target performance and preservation of the original single-horizon benchmark are not established."
+    ],
     "evidence_archive": "logs/measured_sitl_widened_20261117.tar.gz",
     "source_sha256": {
       "src/controller.cpp": "e28a6c9f814d0bd062b70fb5147888c43c655eee67d772101f067d11e7d0cb7f",
