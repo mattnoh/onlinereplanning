@@ -172,6 +172,23 @@ physical audits cover OCP activation through touchdown handoff (or recorded
 stop/end for failures) at MAVROS odometry resolution; they are not a
 continuous-time certificate.
 
+**Stationary-target widened configuration (2026-11-17).** Sourcing
+`config/frozen_quad_ctcs_coarse.env` then
+`config/ros1/tuning_stc_measured_rh_sitl_widened.env` with
+`config/ros1/profile_stc_landing_noaug_measured_sitl_widened.yaml` gave 8/8
+consecutive identical PX4/Gazebo landings with zero physical excess against
+the configured bounds and no stale plan. The bounds are widened (glideslope
+17°, LOS 34°, landing rate 0.022 rad/s, staging radius 1.2 m); against the
+original bounds 7/8 are zero and one run exceeds the 15° glideslope by
+3.5 mm. Three opt-in changes make measured-state replanning work: a
+rate-damped native initial guess (`SZMUK_NATIVE_GUESS=stabilized`), physical
+bounds on the first interval from the fixed measured root
+(`SZMUK_CTCS_TIGHTEN_FROM_NODE=1`), and corner buffers sized to observed PX4
+lag (staging-radius margin 0.3 m, glideslope angle margin 3°). Moving targets
+are not validated. Record: `measured_sitl_widened_20261117` in
+`support/test/frozen_node_baseline.json`; evidence
+`logs/measured_sitl_widened_20261117.tar.gz`.
+
 The retained runtime changes are optional native control initialization and
 local PX4 tracking-error propagation to the future handoff. The latter
 propagates the complete measured error under position/velocity and attitude/rate

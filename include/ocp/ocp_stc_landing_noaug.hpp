@@ -1069,6 +1069,12 @@ inline Eigen::VectorXd stabilizedNativeControl(const Eigen::VectorXd& x,const Ei
     Eigen::Quaterniond q(x(6),x(7),x(8),x(9));q.normalize();
     Eigen::Vector3d a(-kv*v.x(),-kv*v.y(),-kvz*v.z());
     a.head<2>()=a.head<2>().cwiseMax(-amax).cwiseMin(amax);
+    // While descending, brake at least enough to stop above the floor, so the
+    // guess rollout never passes through the hard z>=0 row (weak damping from
+    // ~0.5 m at -0.6 m/s otherwise drives it into the floor and the barrier
+    // line search stalls on BOUNDARY_INEQ).
+    static const double floor_z=envOrQ("SZMUK_GUESS_FLOOR_Z",.05);
+    if(v.z()<0.)a.z()=std::max(a.z(),v.z()*v.z()/(2.*std::max(x(2)-floor_z,.02)));
     // Relative frame: the vehicle must also match the target's acceleration.
     const Eigen::Vector3d f=a+target_accel-GRAVITY;
     const Eigen::Vector3d bz=q*Eigen::Vector3d::UnitZ();
@@ -1117,6 +1123,14 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     // CTCS_STEP_EPS is divided by CTCS_Y_SCALE (same zero set as unscaled).
     // Hard-wired: this OCP has no other enforcement mode.
     auto cstep = makeCtcsConstraint<double>(dyn);
+    // Opt-in: intervals before node SZMUK_CTCS_TIGHTEN_FROM_NODE use the
+    // original physical implications (no tightening). The measured root is
+    // fixed, so a root inside the physical set but in the margin band would
+    // otherwise make the tightened OCP infeasible from its first interval.
+    static const int tighten_from=envOrInt("SZMUK_CTCS_TIGHTEN_FROM_NODE",0);
+    if(tighten_from<0)throw std::invalid_argument("SZMUK_CTCS_TIGHTEN_FROM_NODE must be >= 0");
+    auto cstep_physical = tighten_from>0 ?
+        makeCtcsConstraint<double>(dyn, CTCS_STEP_EPS / CTCS_Y_SCALE, IDX_THETA, 0.0, 1, false) : cstep;
     const double eps_cost = envOrQ("SZMUK_W_EPS", 1.0);
     const Eigen::Vector3d r_follow(0.0, 0.0, Z_STAGE);
     auto stage_cost = std::make_shared<CTcSTCStageCost<double>>(
@@ -1143,7 +1157,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
         }
         problem->addStageConstraint(k, czfl);
         problem->addStageConstraint(k, cspeed);
-        problem->addStageConstraint(k, cstep);
+        problem->addStageConstraint(k, k < tighten_from ? cstep_physical : cstep);
     }
     problem->setTerminalCost(tcost);
     // No CT-cSTC terminal constraint: the interval inequality above is the

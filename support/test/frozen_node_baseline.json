@@ -4730,5 +4730,122 @@
       "all_outcomes_and_profiles": "measured_sitl_repair_20261117/progress.json",
       "retained_in_active_code": false
     }
+  },
+  "measured_sitl_widened_20261117": {
+    "status": "Stationary target: 8/8 consecutive identical PX4/Gazebo flights landed with zero physical excess against the configured (widened) bounds and no stale plan. Against the original bounds 7/8 are zero; exs_1 exceeds the original 15 deg glideslope by 0.0035 m.",
+    "planner_branch": "mpc",
+    "solver_changed": false,
+    "configuration": {
+      "env": "config/ros1/tuning_stc_measured_rh_sitl_widened.env (after config/frozen_quad_ctcs_coarse.env)",
+      "profile": "config/ros1/profile_stc_landing_noaug_measured_sitl_widened.yaml",
+      "widened_bounds": {
+        "gs_cone_deg": [
+          15,
+          17
+        ],
+        "los_cone_deg": [
+          30,
+          34
+        ],
+        "omega_stc_max": [
+          0.019,
+          0.022
+        ],
+        "stage_radius": [
+          1.1,
+          1.2
+        ]
+      }
+    },
+    "mechanisms": {
+      "stabilized_native_guess": "Zero-moment hover guess never damps measured body rates; replaced by PD rate/attitude + velocity damping, braking to stop above the floor. Captured roots 32/37 vs 5/37 solved.",
+      "tighten_from_node_1": "Measured root is fixed; roots inside the physical set but in the margin band made the tightened OCP infeasible (rejection streaks -> stale plans -> excess). First interval uses physical bounds. Offline captured roots 142/152 vs 100/152.",
+      "corner_buffers": "Observed PX4 horizontal lag (~0.35 m at staging corner, 1-2 cm at landing trigger) covered by stage-radius margin 0.3 and glideslope angle margin 3 deg; affordable only with the node-1 exemption."
+    },
+    "cases": {
+      "exs_1": {
+        "result": "LANDED",
+        "accepted": 10,
+        "rejected": 1,
+        "active_any_violation": 0,
+        "touchdown_window_any_violation": 0,
+        "max_excess_widened_bounds": {},
+        "max_excess_original_bounds": {
+          "act_glideslope_m_max": 0.003497
+        }
+      },
+      "exs_2": {
+        "result": "LANDED",
+        "accepted": 12,
+        "rejected": 46,
+        "active_any_violation": 0,
+        "touchdown_window_any_violation": 0,
+        "max_excess_widened_bounds": {},
+        "max_excess_original_bounds": {}
+      },
+      "exs_3": {
+        "result": "LANDED",
+        "accepted": 13,
+        "rejected": 3,
+        "active_any_violation": 0,
+        "touchdown_window_any_violation": 0,
+        "max_excess_widened_bounds": {},
+        "max_excess_original_bounds": {}
+      },
+      "exs_4": {
+        "result": "LANDED",
+        "accepted": 10,
+        "rejected": 9,
+        "active_any_violation": 0,
+        "touchdown_window_any_violation": 0,
+        "max_excess_widened_bounds": {},
+        "max_excess_original_bounds": {}
+      },
+      "exs_5": {
+        "result": "LANDED",
+        "accepted": 9,
+        "rejected": 3,
+        "active_any_violation": 0,
+        "touchdown_window_any_violation": 0,
+        "max_excess_widened_bounds": {},
+        "max_excess_original_bounds": {}
+      },
+      "exs_6": {
+        "result": "LANDED",
+        "accepted": 10,
+        "rejected": 6,
+        "active_any_violation": 0,
+        "touchdown_window_any_violation": 0,
+        "max_excess_widened_bounds": {},
+        "max_excess_original_bounds": {}
+      },
+      "exs_7": {
+        "result": "LANDED",
+        "accepted": 10,
+        "rejected": 7,
+        "active_any_violation": 0,
+        "touchdown_window_any_violation": 0,
+        "max_excess_widened_bounds": {},
+        "max_excess_original_bounds": {}
+      },
+      "exs_8": {
+        "result": "LANDED",
+        "accepted": 10,
+        "rejected": 3,
+        "active_any_violation": 0,
+        "touchdown_window_any_violation": 0,
+        "max_excess_widened_bounds": {},
+        "max_excess_original_bounds": {}
+      }
+    },
+    "excluded_or_failed_earlier_configurations": "Earlier configurations this session (margins only, widened bounds without exemption, guess vertical damping 1.5) each had excess or timeouts in some repeats; PX4 takeoff NO_SETTLE occurred in ~6 of 33 runs (harness, not planner) and none in this 8-run set.",
+    "limits": "Single stationary staging geometry (circle motion with omega 0), zero target noise, one bearing. Moving target untested. Audit is at MAVROS odometry resolution over activation to touchdown handoff; not a continuous-time certificate. Cold-start first plan may take several attempts while hovering (exs_2: 46).",
+    "evidence_archive": "logs/measured_sitl_widened_20261117.tar.gz",
+    "source_sha256": {
+      "src/controller.cpp": "e28a6c9f814d0bd062b70fb5147888c43c655eee67d772101f067d11e7d0cb7f",
+      "include/ocp/ocp_stc_landing_noaug.hpp": "3a5600a311e6d5aadd5ca6f6583e6f024fbb56c361d007368d4602dfd4a9b877",
+      "config/ros1/tuning_stc_measured_rh_sitl_widened.env": "74089afcbff3ad6d50383e7c17fe33a190cad0143e182a64f91cdb29c039dbd5",
+      "config/ros1/profile_stc_landing_noaug_measured_sitl_widened.yaml": "feb943e69957446515aa0e3dcd912954a5400ff9190a19ee4d804130df31c001"
+    }
   }
 }
