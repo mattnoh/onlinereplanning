@@ -286,7 +286,9 @@ public:
         reset();
     }
 
+    void setRelativeHoldStart(bool v) { relative_hold_start_ = v; }
     void reset() {
+        relative_hold_start_ = false;
         replayer_.clear();
         {std::lock_guard<std::mutex> lock(plan_targets_mutex_);plan_targets_.clear();}
         diagnostics_.clear();
@@ -518,6 +520,7 @@ public:
 
         last_accepted_solve_timestamp_ = plan_origin_time;
         primed_ = true;
+        relative_hold_start_ = false;
         updateSolveTimeEma(result.solve_time_ms);
         out.solve_accepted = true;
         out.replan_delay_sec = last_replan_delay_sec_;
@@ -822,6 +825,12 @@ private:
                 auto reference=[&](Clock::time_point stamp){
                     if(handoff.first_plan){
                         auto hold=state;hold.segment<3>(3).setZero();hold.segment<3>(10).setZero();
+                        if(relative_hold_start_&&target_snapshot.valid){
+                            // Re-prime hold follows the target at a fixed offset.
+                            const double s=std::chrono::duration<double>(stamp-handoff.measurement_time).count();
+                            const auto moved=predictTargetSnapshot(target_snapshot,s);
+                            hold.head<3>()+=moved.position-target_snapshot.position;hold.segment<3>(3)=moved.velocity;
+                        }
                         const Eigen::Quaterniond q(state(6),state(7),state(8),state(9));
                         const double yaw=std::atan2(2*(q.w()*q.z()+q.x()*q.y()),1-2*(q.y()*q.y()+q.z()*q.z()));
                         hold.segment<4>(6)<<std::cos(.5*yaw),0,0,std::sin(.5*yaw);return hold;
@@ -1221,6 +1230,7 @@ private:
     }
 
     PlannerCoreConfig config_;
+    bool relative_hold_start_ = false;
     struct PlanTarget {TargetSnapshot snapshot;Clock::time_point origin;};
     mutable std::mutex plan_targets_mutex_;
     std::map<int,PlanTarget> plan_targets_;

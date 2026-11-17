@@ -143,6 +143,9 @@ struct CtcsMargins {
     // Glideslope half-angle tightening [deg]; grows with height, unlike the
     // additive geometric margin, which the cone apex caps at tan(gs)*apex.
     double gs_angle_deg=0.;
+    // Staging-height tightening [m], separate from the geometric margin that
+    // also tightens the glideslope. Defaults to `geometric`.
+    double stage_height=0.;
 };
 inline const CtcsMargins CTCS_MARGINS{
     envOrQ("SZMUK_CTCS_TRIGGER_MARGIN",0.),envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.),
@@ -150,7 +153,8 @@ inline const CtcsMargins CTCS_MARGINS{
     envOrQ("SZMUK_CTCS_PATH_TILT_MARGIN_DEG",0.),envOrQ("SZMUK_CTCS_RATE_MARGIN",0.),
     envOrQ("SZMUK_CTCS_LOS_MARGIN",envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.)),
     envOrQ("SZMUK_CTCS_STAGE_RADIUS_MARGIN",envOrQ("SZMUK_CTCS_TRIGGER_MARGIN",0.)),
-    envOrQ("SZMUK_CTCS_GS_ANGLE_MARGIN_DEG",0.)};
+    envOrQ("SZMUK_CTCS_GS_ANGLE_MARGIN_DEG",0.),
+    envOrQ("SZMUK_CTCS_STAGE_HEIGHT_MARGIN",envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.))};
 inline double gsConeTan(const CtcsMargins& m){return std::tan((GS_CONE_HALF_ANGLE_DEG-m.gs_angle_deg)*M_PI/180.0);}
 inline CtcsMargins ctcsMargins(bool tightened){return tightened?CTCS_MARGINS:CtcsMargins{};}
 
@@ -509,7 +513,7 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     const bool trig_stc_on = useTriggeredLandingStc();
 
     if (trig_stc_on) {
-        const Scalar stage_height_viol = posPart(Scalar(Z_STAGE+margins.geometric) - x(2));
+        const Scalar stage_height_viol = posPart(Scalar(Z_STAGE+margins.stage_height) - x(2));
         out.staging_value = Scalar(W_STC_STAGE) *
                             out.a_stage * out.a_stage *
                             stage_height_viol * stage_height_viol;
@@ -855,7 +859,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
     using StateFn = std::function<Scalar(const Vec&)>;
     using GradFn = std::function<Vec(const Vec&)>;
     const auto margins=ctcsMargins(tightened);
-    if(margins.trigger<0.||margins.trigger>=STAGE_RADIUS||margins.stage_radius<0.||margins.stage_radius>=STAGE_RADIUS||margins.geometric<0.||margins.speed<0.||margins.speed>=SPD_STC_MAX||
+    if(margins.trigger<0.||margins.trigger>=STAGE_RADIUS||margins.stage_radius<0.||margins.stage_radius>=STAGE_RADIUS||margins.geometric<0.||margins.stage_height<0.||margins.speed<0.||margins.speed>=SPD_STC_MAX||
         margins.tilt_deg<0.||margins.tilt_deg>=ALPHA_THETA_STC*THETA_STC_DEG||margins.path_tilt_deg<0.||margins.path_tilt_deg>=THETA_PHASE0_DEG||margins.rate<0.||margins.rate>=OMEGA_STC_MAX||
         margins.los<0.||margins.los/GS_APEX_OFFSET>=LOS_CONE_TAN||
         margins.gs_angle_deg<0.||margins.gs_angle_deg>=GS_CONE_HALF_ANGLE_DEG||
@@ -915,7 +919,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             return g;
         };
         add("staging", stageTrigger, dstage,
-            [=](const Vec& x) -> Scalar { return Scalar(Z_STAGE+margins.geometric) - x(2); },
+            [=](const Vec& x) -> Scalar { return Scalar(Z_STAGE+margins.stage_height) - x(2); },
             [](const Vec& x) -> Vec { Vec g = Vec::Zero(x.size()); g(2) = Scalar(-1); return g; }, W_STC_STAGE);
 
         StateFn losTrigger = [=](const Vec& x) -> Scalar {

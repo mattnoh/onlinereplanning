@@ -15,6 +15,9 @@ public:
     void configureSynchronous(const PlannerCoreConfig&, std::shared_ptr<const OCPDescriptor> descriptor={});
     PlannerCoreStepResult solveSynchronous(const PlannerCoreInput&);
     void reset();
+    // Reset for a mid-flight re-plan while the vehicle holds its offset from
+    // a moving target: the first-plan root uses a target-following hold.
+    void resetForRelativeHold();
     void stop();
     void setTerminalTarget(const Eigen::Vector3d&);
     PlannerCoreStepResult trySolve(const PlannerCoreInput&);

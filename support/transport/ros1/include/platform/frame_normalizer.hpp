@@ -15,7 +15,10 @@ public:
     Eigen::VectorXd state(const Eigen::VectorXd& x,const std::string& frame,const ros::Time& stamp,bool body=false) {
         if(frame.empty())throw std::runtime_error("estimator frame_id is empty");
         const double age=(ros::Time::now()-stamp).toSec();
-        if(stamp.isZero()||age>.2||age<-.001)throw std::runtime_error("missing, stale or future estimator timestamp");
+        // MAVROS stamps with PX4-synchronised time, which jitters a few ms
+        // ahead of ROS time; a 1 ms future limit rejected every frame for
+        // tens of seconds in SITL and froze the planner's measured state.
+        if(stamp.isZero()||age>.2||age<-.02)throw std::runtime_error("missing, stale or future estimator timestamp");
 
         Eigen::Quaterniond rotation=Eigen::Quaterniond::Identity();Eigen::Vector3d translation=Eigen::Vector3d::Zero();
         if(frame!=world_) {

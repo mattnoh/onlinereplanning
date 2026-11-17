@@ -315,6 +315,14 @@ private:
             } else {
                 maintain_hover_hold_ = false;
             }
+            {
+                // The profile may have been applied by the 10 Hz poll while
+                // `rosparam load` was still writing (ocp_type changes first);
+                // command_seq is bumped only after the load completes, so
+                // re-read every core parameter now.
+                std::lock_guard<std::mutex> slk(solver_mutex_);
+                rebuildMpcSolver();
+            }
             command_paused_.store(false);
             ocp_active_.store(true);
             resetForNewCommand();
@@ -813,7 +821,8 @@ private:
                 paused_hover_state_ = hover_controller::makeHoverState(
                     convertStateToAbsoluteFrame(x0_abs), state_dim_, custom_make_hover_state_);
                 maintain_hover_hold_ = true;
-                planner_core_.reset();
+                reprime_offset_ = x0_abs.head<3>() - target_snapshot.position;
+                planner_core_.resetForRelativeHold();
                 is_primed_.store(false);
                 reprime_hold_.store(true);
                 consecutive_solve_failures_ = 0;
@@ -864,6 +873,17 @@ private:
             // Keep the moving startup reference current while DDP solves.
             // Re-streaming one frozen position with a nonzero target velocity
             // creates a position/velocity inconsistency in PX4's cascade.
+            if(reprime_hold_.load() && hasState() && hasFreshTargetState()) {
+                // Hold the re-prime offset from the (moving) target.
+                const auto target = getTargetSnapshot();
+                Eigen::VectorXd hold = paused_hover_state_;
+                if (target.valid && hold.size() >= 6) {
+                    hold.head<3>() = target.position + reprime_offset_;
+                    hold.segment<3>(3) = target.velocity;
+                    publishCommandAbsolute(hold, Eigen::VectorXd::Zero(4));
+                    return;
+                }
+            }
             if(!ordinary_control_started_||reprime_hold_.load())publishPausedHoverHoldTick();
             return;
         }
@@ -1104,6 +1124,7 @@ private:
     int  stale_warning_count_ = 0;
     int  consecutive_solve_failures_ = 0;
     std::atomic<bool> reprime_hold_{false};
+    Eigen::Vector3d reprime_offset_ = Eigen::Vector3d::Zero();
     bool maintain_hover_hold_ = false;
     Eigen::VectorXd paused_hover_state_ = Eigen::VectorXd();
     std::shared_mutex session_mutex_;

@@ -41,6 +41,7 @@ PlannerCoreStepResult Controller::solveSynchronous(const PlannerCoreInput& input
     auto out=impl_->synchronous.solve(input);if(out.solve_accepted)++impl_->accepted;return out;
 }
 void Controller::reset(){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);impl_->accepted=0;if(!impl_->configured)return;if(impl_->synchronous_mode)impl_->synchronous.reset();else if(impl_->mode==ExecutionMode::DirectMpc)impl_->direct.reset();else impl_->rh.reset();}
+void Controller::resetForRelativeHold(){reset();std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);if(impl_->configured&&!impl_->synchronous_mode&&impl_->mode!=ExecutionMode::DirectMpc)impl_->rh.setRelativeHoldStart(true);}
 void Controller::stop(){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);impl_->direct.stop();impl_->synchronous.stop();impl_->rh.reset();impl_->configured=false;}
 void Controller::setTerminalTarget(const Eigen::Vector3d& p){std::unique_lock<std::shared_mutex> guard(impl_->lifecycle);impl_->config.terminal_position_abs=p;if(impl_->configured && impl_->mode==ExecutionMode::RhReplanning)impl_->rh.setTerminalTarget(p);}
 PlannerCoreStepResult Controller::trySolve(const PlannerCoreInput& in){
