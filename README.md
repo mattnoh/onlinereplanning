@@ -158,6 +158,20 @@ stationary operation is not established. The moving circle (radius 1 m, rate 0.4
 plans, 94 rejected updates, stale trajectory and timeout. It must not be
 presented as fixed. The native ALIPDDP solver remains `002850df` unchanged.
 
+A further N40 timing/tightening trial (0.5 s lead + 0.15 s guard,
+LOS margin 0.045 m, speed margin 0.08 m/s) landed with nine accepted replans,
+one rejection and zero measured physical excess. Its identical repeat landed
+with four accepted replans / 81 rejections but violated LOS by 0.016753 m,
+glideslope by 0.002084 m and body angular rate by 0.0002906 rad/s. These runs
+remain in the denominator. This trial is not promoted to a default profile.
+There is currently no repeatably validated SITL CTCS baseline. Full measured
+flight bags, physical audits, exact settings and failed single-horizon trials
+reuse the existing compressed archive under `measured_sitl_repair_20261117/`;
+the existing baseline JSON records them under the same key. All measured
+physical audits cover OCP activation through touchdown handoff (or recorded
+stop/end for failures) at MAVROS odometry resolution; they are not a
+continuous-time certificate.
+
 The retained runtime changes are optional native control initialization and
 local PX4 tracking-error propagation to the future handoff. The latter
 propagates the complete measured error under position/velocity and attitude/rate

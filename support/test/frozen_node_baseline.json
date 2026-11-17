@@ -4486,5 +4486,249 @@
       "archive_prefix": "wall_clock_tuning_20261106/",
       "trial_records_in_archive": "wall_clock_tuning_20261106/results.json"
     }
+  },
+  "measured_sitl_repair_20261117": {
+    "status": "Unresolved overall. Two configurations each produced a clean stationary flight but each failed its identical repeat; original moving circle still fails.",
+    "planner_branch": "mpc",
+    "planner_commit": "7689c519e606db5934717265bf4509d02c25626a",
+    "solver_commit": "002850dfd35f14416e59273bdff8701ecb40a34e",
+    "solver_changed": false,
+    "original_physical_bounds_unchanged": true,
+    "scope": "Actual PX4/Gazebo, ROS1 MAVROS full-state reference tracking, measured-state RH, zero added target sensor noise. No pointmass PX4 plant. Audits use original consequences with actual trigger states; optimizer tightening is not substituted for physical limits.",
+    "retained": [
+      "Optional native control initial guess, without previous states/gains or numerical solver continuation.",
+      "Optional local PX4 tracking-error propagation of the full measurement to the future handoff, with measured-error dynamics.",
+      "Separate LOS tightening setting; defaults preserve former geometric margin.",
+      "Existing audit harness accepts a recorded physical initial state."
+    ],
+    "known_limits": [
+      "Tracking predictor is a local cascade model; saturations, velocity integrator and full motor dynamics are omitted.",
+      "Native initial guess does not reliably solve all measured-root requests. Rejected updates and stale plans remain a controller failure, not successful RH operation.",
+      "Continuous-time CTCS integral certificate remains unresolved and is not inferred from physical audit outcomes.",
+      "Two clean runs on different profiles are not repeatability: identical repeats of both profiles failed physical checks.",
+      "No new turning predictor is active: its exact-circle/kinematic and finite-difference derivative tests passed, but full-horizon physical gates failed; production code was restored to commit 7635043 for those files."
+    ],
+    "findings": {
+      "circle_required_tilt_deg": 0.9344048906894017,
+      "circle_original_physical_tilt_deg": 0.95,
+      "inherited_tightened_tilt_deg": 0.75,
+      "shared_geometry_goal_max_margin_m": 0.02679491924311227,
+      "first_circle_LOS_violation_forecast_error_m": 0.12766788869467122,
+      "first_circle_LOS_violation_world_tracking_error_m": 0.10480426654476772,
+      "reconstructed_stationary_shifted_guess_primal": 5711.3189,
+      "reconstructed_stationary_native_guess_primal": 4.211761313e-12,
+      "reconstructed_root_caveat": "Recorded trajectory precision and aligned flight-bag interpolation; not a byte-identical failed-request capture."
+    },
+    "turning_experiment_patch": "rejected-turning-predictor.patch in archive",
+    "source_sha256": {
+      "src/controller.cpp": "090723a81367297f08781dc5221f3bbb01bbc70552a91e330dea2df9970c0f55",
+      "src/controller_internal.hpp": "8bf26c9e8dd668f33bd150ba8579fbe22b59e8745afafa72bd92ba818e8df400",
+      "include/planner_core/types.hpp": "63fbf6f22c788f4acad4c8351484cac7d9b4d11e6d7aba33d80ff60ba6ab6e78",
+      "include/parameters.hpp": "be340ba4a4b1f91b9500605c89183e5635f899d0fc813a4f4290d251e8742c30",
+      "include/ocp/ocp_stc_landing_noaug.hpp": "1794a2a15ea4168f65e1e792210de3b30dbef26c5e740557aad190e65c14df80",
+      "include/target/predictor.hpp": "5b6a2e1c5da7973f3da6f8c84d35df09a0b5e8530d5bc79136d0020d056afe01",
+      "support/transport/ros1/src/planner_node.cpp": "2cee13f5468aebf8492f03fa03ab2d78b2ec940184de85107f0328c904c23cad",
+      "support/test/test_measured_root_rh.cpp": "10812420ed008d993fcceb7feda1196ff059cf016374ba8fc4df487a37b17851"
+    },
+    "archive": "logs/frozen_node_baseline_20261104/quad_ctcs_budget_tuning_20261105.tar.gz",
+    "archive_prefix": "measured_sitl_repair_20261117/",
+    "full_record_in_archive": "measured_sitl_repair_20261117/progress.json",
+    "cases": {
+      "native-stationary": {
+        "result": "LANDED",
+        "physical_pass": false,
+        "accepted": 5,
+        "rejected": 56,
+        "controlled_window_seconds": 16.844423055648804,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.0,
+          "speed_m_s": 0.0,
+          "tilt_deg": 0.7130117659234319,
+          "angular_rate_rad_s": 0.12939514618531017,
+          "glideslope_m": 0.0,
+          "los_deg": 0.2588788839913292,
+          "los_cone_m": 0.010794928996336939,
+          "staging_height_m": 0.0
+        },
+        "config_hash": "54549aca891807b5",
+        "source_commit": "bf5761f5c37b863f5a6d54bce7597e7bb44e09f9"
+      },
+      "coarse-stationary": {
+        "result": "LANDED",
+        "physical_pass": false,
+        "accepted": 3,
+        "rejected": 53,
+        "controlled_window_seconds": 9.802183866500854,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.0,
+          "speed_m_s": 0.0,
+          "tilt_deg": 0.31530663972137374,
+          "angular_rate_rad_s": 0.0006887162684398838,
+          "glideslope_m": 0.02049168146261751,
+          "los_deg": 0.0,
+          "los_cone_m": 0.0,
+          "staging_height_m": 0.0
+        },
+        "config_hash": "88267d04f25bd83d",
+        "source_commit": "bf5761f5c37b863f5a6d54bce7597e7bb44e09f9"
+      },
+      "tracking-stationary": {
+        "result": "LANDED",
+        "physical_pass": false,
+        "accepted": 7,
+        "rejected": 22,
+        "controlled_window_seconds": 9.350425720214844,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.0,
+          "speed_m_s": 0.0,
+          "tilt_deg": 0.0,
+          "angular_rate_rad_s": 0.0,
+          "glideslope_m": 0.0,
+          "los_deg": 0.26829236339841955,
+          "los_cone_m": 0.011171381368318745,
+          "staging_height_m": 0.0
+        },
+        "config_hash": "650ec641f55b5905",
+        "source_commit": "c04c3626a27cbe64a364ec7d2924c13533fe40df"
+      },
+      "los-stationary": {
+        "result": "LANDED",
+        "physical_pass": true,
+        "accepted": 7,
+        "rejected": 15,
+        "controlled_window_seconds": 9.51063346862793,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.0,
+          "speed_m_s": 0.0,
+          "tilt_deg": 0.0,
+          "angular_rate_rad_s": 0.0,
+          "glideslope_m": 0.0,
+          "los_deg": 0.0,
+          "los_cone_m": 0.0,
+          "staging_height_m": 0.0
+        },
+        "config_hash": "a895c30ec118bc87",
+        "source_commit": "7635043bf5326030927df8f4021fc066ae4fc247"
+      },
+      "los-circle": {
+        "result": "TIMEOUT",
+        "physical_pass": false,
+        "accepted": 7,
+        "rejected": 94,
+        "controlled_window_seconds": 21.802188634872437,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.034742873907089245,
+          "speed_m_s": 1.010520228617788,
+          "tilt_deg": 0.6017523548746684,
+          "angular_rate_rad_s": 0.661548328481157,
+          "glideslope_m": 3.1069196397488117,
+          "los_deg": 59.34291770330846,
+          "los_cone_m": 3.0627266763603385,
+          "staging_height_m": 1.8347428739070892
+        },
+        "config_hash": "4417b205db3cc38d",
+        "source_commit": "7635043bf5326030927df8f4021fc066ae4fc247"
+      },
+      "los-stationary-repeat": {
+        "result": "TIMEOUT",
+        "physical_pass": false,
+        "accepted": 2,
+        "rejected": 44,
+        "controlled_window_seconds": 91.43145203590393,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.0359719216823578,
+          "speed_m_s": 1.1421266918863195,
+          "tilt_deg": 12.023186015168339,
+          "angular_rate_rad_s": 0.9953715398684025,
+          "glideslope_m": 0.061455145770647895,
+          "los_deg": 135.99080240344773,
+          "los_cone_m": 1.1947629100558712,
+          "staging_height_m": 0.43860840797424316
+        },
+        "config_hash": "3819b7566123156b",
+        "source_commit": "287fa7d4bb28b424ca7bc816fc4cbd0ef311ec44"
+      },
+      "n40-stationary": {
+        "result": "LANDED",
+        "physical_pass": false,
+        "accepted": 7,
+        "rejected": 14,
+        "controlled_window_seconds": 7.0327231884002686,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.0,
+          "speed_m_s": 0.0,
+          "tilt_deg": 0.0,
+          "angular_rate_rad_s": 0.0,
+          "glideslope_m": 0.0,
+          "los_deg": 0.06181513503339531,
+          "los_cone_m": 0.0025702636725206673,
+          "staging_height_m": 0.0
+        },
+        "config_hash": "a638da8286b0c884",
+        "source_commit": "7689c519e606db5934717265bf4509d02c25626a"
+      },
+      "n40-los045-stationary": {
+        "result": "LANDED",
+        "physical_pass": false,
+        "accepted": 4,
+        "rejected": 37,
+        "controlled_window_seconds": 7.25891637802124,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.0,
+          "speed_m_s": 0.032468456545241,
+          "tilt_deg": 0.0,
+          "angular_rate_rad_s": 0.0,
+          "glideslope_m": 0.0,
+          "los_deg": 0.0,
+          "los_cone_m": 0.0,
+          "staging_height_m": 0.0
+        },
+        "config_hash": "ffc9b78c9cd3ee86",
+        "source_commit": "7689c519e606db5934717265bf4509d02c25626a"
+      },
+      "n40-speed08-stationary": {
+        "result": "LANDED",
+        "physical_pass": true,
+        "accepted": 9,
+        "rejected": 1,
+        "controlled_window_seconds": 6.989878177642822,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.0,
+          "speed_m_s": 0.0,
+          "tilt_deg": 0.0,
+          "angular_rate_rad_s": 0.0,
+          "glideslope_m": 0.0,
+          "los_deg": 0.0,
+          "los_cone_m": 0.0,
+          "staging_height_m": 0.0
+        },
+        "config_hash": "b0d6bcc2a53c8a13",
+        "source_commit": "7689c519e606db5934717265bf4509d02c25626a"
+      },
+      "n40-speed08-stationary-repeat": {
+        "result": "LANDED",
+        "physical_pass": false,
+        "accepted": 4,
+        "rejected": 81,
+        "controlled_window_seconds": 9.82289433479309,
+        "original_physical_maximum_excess": {
+          "altitude_floor_m": 0.0,
+          "speed_m_s": 0.0,
+          "tilt_deg": 0.0,
+          "angular_rate_rad_s": 0.000290598068079035,
+          "glideslope_m": 0.0020843596270090775,
+          "los_deg": 0.4007741784231236,
+          "los_cone_m": 0.016753033266265538,
+          "staging_height_m": 0.0
+        },
+        "config_hash": "b0d6bcc2a53c8a13",
+        "source_commit": "7689c519e606db5934717265bf4509d02c25626a"
+      }
+    },
+    "turning_experiment": {
+      "tested_profiles": 92,
+      "all_outcomes_and_profiles": "measured_sitl_repair_20261117/progress.json",
+      "retained_in_active_code": false
+    }
   }
 }

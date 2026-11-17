@@ -1,4 +1,4 @@
-# One stationary-target SITL physical pass; repeatability and circle unresolved.
+# Diagnostic only: one physical pass, failed identical repeat; circle unresolved.
 # Source frozen_quad_ctcs_coarse.env then tuning_stc_measured_rh_sitl.env.
 # Keep SZMUK_Z_STAGE=1.8 / SZMUK_LOS_ALT_TRIG=1.8 at launch; hover above the floor.
 ocp_type: stc_landing_noaug
