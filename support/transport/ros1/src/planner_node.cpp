@@ -510,6 +510,8 @@ private:
         is_primed_.store(false);
         terminal_freeze_.store(false);
         stale_warning_count_ = 0;
+        consecutive_solve_failures_ = 0;
+        reprime_hold_.store(false);
         replay_ticks_since_solve_.store(0);
         last_accepted_solve_timestamp_ = Clock::time_point{};
         last_replan_delay_sec_ = 0.0;
@@ -798,6 +800,26 @@ private:
             core_result.rejection_reason != "terminal_freeze_active")
             logCoreDiagnostics(core_result.diagnostics);
         logSolverEvents(core_result);
+        if (!core_result.solve_accepted && core_result.rejection_reason == "solve_failed" && is_primed_.load()) {
+            int reprime_after = 0;
+            nh_.param("reprime_after_rejections", reprime_after, 0);
+            if (reprime_after > 0 && ++consecutive_solve_failures_ >= reprime_after) {
+                // The active plan no longer describes the vehicle (e.g. after a
+                // target velocity reversal), so roots predicted along it keep
+                // failing. Hold the current pose and re-plan from the live state
+                // exactly as for the first plan.
+                ROS_WARN("Re-priming after %d consecutive solve failures: holding hover and re-planning from the live state.",
+                         consecutive_solve_failures_);
+                paused_hover_state_ = hover_controller::makeHoverState(
+                    convertStateToAbsoluteFrame(x0_abs), state_dim_, custom_make_hover_state_);
+                maintain_hover_hold_ = true;
+                planner_core_.reset();
+                is_primed_.store(false);
+                reprime_hold_.store(true);
+                consecutive_solve_failures_ = 0;
+                return;
+            }
+        }
         if (!core_result.solve_accepted) {
             if (core_result.terminal_freeze_engaged) {
                 terminal_freeze_.store(true);
@@ -808,6 +830,8 @@ private:
         }
 
         stale_warning_count_ = 0;
+        consecutive_solve_failures_ = 0;
+        reprime_hold_.store(false);
         replay_ticks_since_solve_.store(0);
         last_replan_delay_sec_ = core_result.replan_delay_sec;
 
@@ -840,7 +864,7 @@ private:
             // Keep the moving startup reference current while DDP solves.
             // Re-streaming one frozen position with a nonzero target velocity
             // creates a position/velocity inconsistency in PX4's cascade.
-            if(!ordinary_control_started_)publishPausedHoverHoldTick();
+            if(!ordinary_control_started_||reprime_hold_.load())publishPausedHoverHoldTick();
             return;
         }
 
@@ -1078,6 +1102,8 @@ private:
     std::atomic<bool> command_paused_{true};
     int  last_command_seq_ = 0;
     int  stale_warning_count_ = 0;
+    int  consecutive_solve_failures_ = 0;
+    std::atomic<bool> reprime_hold_{false};
     bool maintain_hover_hold_ = false;
     Eigen::VectorXd paused_hover_state_ = Eigen::VectorXd();
     std::shared_mutex session_mutex_;

@@ -4960,6 +4960,22 @@
       "los_glideslope": "camera-axis LOS limited lateral correction at low altitude; plans climbed instead"
     },
     "residual_causes": "straight/stop_and_go targets reverse velocity instantaneously at +-2 m (generator fold); rate spikes follow target acceleration jumps; staging dips are PX4 vertical lag at the staging corner.",
-    "evidence": "scratchpad flights b3_* and b4_stationary (not archived)"
+    "evidence": "scratchpad flights b3_* and b4_stationary (not archived)",
+    "repeat_flights": {
+      "note": "Same config, one flight per row. reprime_after_rejections=5 added after r1/r2 (only fires after 5 consecutive solve failures).",
+      "without_reprime": {
+        "circle": "3/3 LANDED",
+        "figure8": "3/3",
+        "piecewise_accel": "3/3",
+        "random_accel": "3/3",
+        "straight": "2/3",
+        "stop_and_go": "1/3"
+      },
+      "with_reprime": {
+        "straight": "3/3 LANDED (no re-prime fired)",
+        "stop_and_go": "3/3 LANDED (re-prime fired once each); excess remains, worst run 363 rejections, glideslope 1.87 m, rate 0.48 rad/s"
+      },
+      "zero_excess_runs": "figure8 3/3, piecewise_accel 1/3, circle 1/3, straight 1/6, stationary 1/1; others small rate/staging excess, stop_and_go large"
+    }
   }
 }

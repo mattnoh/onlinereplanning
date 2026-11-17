@@ -10,3 +10,4 @@ use_native_initial_guess: true
 predict_tracking_error: true
 live_target_anchor: true
 terminal_freeze_live_state: true
+reprime_after_rejections: 5
