@@ -444,8 +444,6 @@ private:
                   core_cfg.use_native_initial_guess);
         nh_.param("predict_tracking_error", core_cfg.predict_tracking_error,
                   core_cfg.predict_tracking_error);
-        nh_.param("predict_target_turn", core_cfg.predict_target_turn,
-                  core_cfg.predict_target_turn);
         core_cfg.max_constraint_error    = max_constraint_error_;
         core_cfg.skip_trajectory_validation = skip_trajectory_validation_;
         core_cfg.seed_alpha_pos          = seed_alpha_pos_;
@@ -686,7 +684,6 @@ private:
         meta.target_snapshot_pos  = data.target_snapshot_pos;
         meta.target_snapshot_vel  = data.target_snapshot_vel;
         meta.target_snapshot_acc  = data.target_snapshot_acc;
-        meta.target_prediction_turn_rate=data.target_prediction_turn_rate;
         meta.target_snapshot_quat = data.target_snapshot_quat;
         meta.target_snapshot_omega= data.target_snapshot_omega;
         meta.target_snapshot_beta = data.target_snapshot_beta;

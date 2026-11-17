@@ -148,6 +148,48 @@ folder. Reproduce using the same profiles/commands above, replacing `matched`
 with `fine`; add `--plant-acceleration-x 0.01` for the disturbed test. Numerical
 barrier/slack/multiplier state is still freshly initialized on every request.
 
+Measured-state PX4/Gazebo SITL progress (2026-11-17): the stationary-target
+quad CTCS case landed with seven accepted replans and zero measured excess in
+all eight original physical categories (floor, speed, tilt, body rate,
+glideslope, LOS angle/cone and staging). Fifteen updates were rejected; this
+is a scoped executed-physical pass, not universal recursive feasibility.
+A later stationary repeat also went stale after two accepted plans; repeatable
+stationary operation is not established. The moving circle (radius 1 m, rate 0.4 rad/s) still fails: seven accepted
+plans, 94 rejected updates, stale trajectory and timeout. It must not be
+presented as fixed. The native ALIPDDP solver remains `002850df` unchanged.
+
+The retained runtime changes are optional native control initialization and
+local PX4 tracking-error propagation to the future handoff. The latter
+propagates the complete measured error under position/velocity and attitude/rate
+feedback about the committed reference, rather than applying raw DDP moments
+to a plant actually following full-state references. Live FCU position,
+velocity and attitude gains match the recorded model defaults. The local model
+omits nonlinear saturation, the velocity integrator and full motor dynamics;
+it is not an exact PX4 model. Existing core analytic checks pass.
+
+SITL uses the existing N60 profile, 0.7 s initial computation lead plus 0.2 s
+guard, and separate 0.035 m LOS tightening. The former shared geometric margin
+also tightened glideslope; increasing it beyond 0.026795 m excludes the landing
+point. LOS now has `SZMUK_CTCS_LOS_MARGIN`, defaulting to the old geometric
+margin, so all frozen profiles retain their previous equations and settings.
+The physical constraints and their triggers are unchanged. Use
+`config/ros1/profile_stc_landing_noaug_measured_sitl.yaml`, sourcing
+`config/frozen_quad_ctcs_coarse.env` followed by
+`config/ros1/tuning_stc_measured_rh_sitl.env` before starting the planner.
+Launch with staging/LOS trigger 1.8 m, hover target 2.4 m and measured settle
+window 2.02–2.6 m world altitude. These are trajectory references to PX4,
+not direct motor or body-rate control. Pointmass has no PX4 SITL plant here.
+
+The circle recording identifies both forecast and tracking errors: at its first
+LOS violation they were 0.1277 m and 0.1048 m, respectively. Its required steady
+tracking tilt is about 0.9344 degrees against a 0.95 degree physical limit;
+the inherited 0.2 degree tightening leaves a 0.75 degree optimizer limit,
+which cannot support steady tracking at that acceleration. An experimental turning forecast derived from measured velocity and acceleration
+passed kinematic and dynamics/CTCS derivative checks (maximum relative error
+1.74e-11), but no tested full-horizon profile passed the unchanged 1e-6
+physical check. That experiment was removed from active code; its patch and
+failed gate results are preserved in the existing evidence archive.
+
 ROS-free wall-clock RH checkpoint (2026-11-06): the standalone
 `test_wall_clock_rh` harness now calls the shared production asynchronous
 `Controller::configure/trySolve/sample` API while a separate 1 ms physical

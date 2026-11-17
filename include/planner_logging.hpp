@@ -1,5 +1,4 @@
 #pragma once
-#include "target/predictor.hpp"
 
 #include <Eigen/Dense>
 #include <iostream>
@@ -21,7 +20,6 @@
 namespace planner_logging {
 
 struct SolveLogMeta {
-    double target_prediction_turn_rate=0.;
     int solve_num = 0;
     double solve_time_ms = 0.0;
     int solve_iters = 0;
@@ -144,7 +142,7 @@ public:
                            << ",tgt_ax,tgt_ay,tgt_az"
                            << ",tgt_qw,tgt_qx,tgt_qy,tgt_qz"
                            << ",tgt_wx,tgt_wy,tgt_wz"
-                           << ",tgt_alfx,tgt_alfy,tgt_alfz,tgt_turn_rate\n";
+                           << ",tgt_alfx,tgt_alfy,tgt_alfz\n";
         }
 
         // ── solver_events.csv ────────────────────────────────────────────────
@@ -210,20 +208,16 @@ public:
             // Target position/velocity at this node
             Eigen::Vector3d tgt_p = meta.target_snapshot_pos;
             Eigen::Vector3d tgt_v = meta.target_snapshot_vel;
-            Eigen::Vector3d tgt_a = meta.target_snapshot_acc;
-            if(meta.target_prediction_turn_rate!=0.){
-                target_models::ConstantAccelPredictor predictor;predictor.a=meta.target_snapshot_acc;
-                predictor.turn_rate=meta.target_prediction_turn_rate;tgt_a=predictor.predictAccel(t_node);
-            }
 
             if (has_reconstructed_target) {
                 tgt_p = meta.target_world_pos_trajectory[i];
                 tgt_v = meta.target_world_vel_trajectory[i];
             } else if (meta.is_relative_plan) {
-                target_models::ConstantAccelPredictor predictor;
-                predictor.setState(meta.target_snapshot_pos,meta.target_snapshot_vel,meta.target_snapshot_acc);
-                predictor.turn_rate=meta.target_prediction_turn_rate;
-                tgt_p=predictor.predictPos(t_node);tgt_v=predictor.predictVel(t_node);
+                tgt_p = meta.target_snapshot_pos +
+                        meta.target_snapshot_vel * t_node +
+                        0.5 * meta.target_snapshot_acc * t_node * t_node;
+                tgt_v = meta.target_snapshot_vel +
+                        meta.target_snapshot_acc * t_node;
             }
 
             all_solves_log_ << std::fixed << std::setprecision(6)
@@ -257,11 +251,10 @@ public:
             all_solves_log_ << ","
                             << tgt_p.x() << "," << tgt_p.y() << "," << tgt_p.z() << ","
                             << tgt_v.x() << "," << tgt_v.y() << "," << tgt_v.z() << ","
-                            << tgt_a.x() << "," << tgt_a.y() << "," << tgt_a.z() << ","
+                            << meta.target_snapshot_acc.x() << "," << meta.target_snapshot_acc.y() << "," << meta.target_snapshot_acc.z() << ","
                             << meta.target_snapshot_quat(0) << "," << meta.target_snapshot_quat(1) << "," << meta.target_snapshot_quat(2) << "," << meta.target_snapshot_quat(3) << ","
                             << meta.target_snapshot_omega.x() << "," << meta.target_snapshot_omega.y() << "," << meta.target_snapshot_omega.z() << ","
                             << meta.target_snapshot_beta.x() << "," << meta.target_snapshot_beta.y() << "," << meta.target_snapshot_beta.z()
-                            << "," << meta.target_prediction_turn_rate
                             << "\n";
         }
         all_solves_log_.flush();
