@@ -4852,5 +4852,114 @@
       "config/ros1/tuning_stc_measured_rh_sitl_widened.env": "74089afcbff3ad6d50383e7c17fe33a190cad0143e182a64f91cdb29c039dbd5",
       "config/ros1/profile_stc_landing_noaug_measured_sitl_widened.yaml": "feb943e69957446515aa0e3dcd912954a5400ff9190a19ee4d804130df31c001"
     }
+  },
+  "measured_sitl_moving_20261118": {
+    "status": "All six campaign target motions plus stationary LANDED in PX4/Gazebo with the moving profile, no stale plan. Residual physical excess remains on 5 of 7 (below). One flight per motion; not a repeatability claim.",
+    "configuration": {
+      "env": "config/frozen_quad_ctcs_coarse.env + config/ros1/tuning_stc_measured_rh_sitl_widened.env + config/ros1/tuning_stc_measured_rh_sitl_moving.env",
+      "profile": "config/ros1/profile_stc_landing_noaug_measured_sitl_moving.yaml",
+      "launch": "SZMUK_Z_STAGE=1.8, SZMUK_LOS_ALT_TRIG=1.5",
+      "widened_bounds_vs_original": {
+        "tilt_land_deg": [
+          0.95,
+          3.5
+        ],
+        "omega_land": [
+          0.019,
+          0.06
+        ],
+        "omega_phase0": [
+          0.35,
+          0.65
+        ],
+        "gs_cone_deg": [
+          15,
+          26
+        ],
+        "gs_apex_offset_m": [
+          0.1,
+          0.25
+        ],
+        "los_cone_deg": [
+          30,
+          40
+        ],
+        "los_alt_trig_m": [
+          1.8,
+          1.5
+        ],
+        "stage_radius_m": [
+          1.1,
+          1.2
+        ]
+      }
+    },
+    "cases": {
+      "circle": {
+        "result": "LANDED",
+        "accepted": 10,
+        "rejected": 0,
+        "excess": {
+          "staging_height_m": 0.0213
+        }
+      },
+      "figure8": {
+        "result": "LANDED",
+        "accepted": 7,
+        "rejected": 1,
+        "excess": {}
+      },
+      "straight": {
+        "result": "LANDED",
+        "accepted": 9,
+        "rejected": 1,
+        "excess": {
+          "angular_rate_rad_s": 0.029
+        }
+      },
+      "stop_and_go": {
+        "result": "LANDED",
+        "accepted": 9,
+        "rejected": 13,
+        "excess": {
+          "angular_rate_rad_s": 0.0439,
+          "staging_height_m": 0.0079
+        }
+      },
+      "piecewise_accel": {
+        "result": "LANDED",
+        "accepted": 25,
+        "rejected": 0,
+        "excess": {
+          "angular_rate_rad_s": 0.0046
+        }
+      },
+      "random_accel": {
+        "result": "LANDED",
+        "accepted": 14,
+        "rejected": 2,
+        "excess": {
+          "glideslope_m": 0.047,
+          "speed_m_s": 0.11,
+          "angular_rate_rad_s": 0.063,
+          "los_deg": 1.46
+        }
+      },
+      "stationary": {
+        "result": "LANDED",
+        "accepted": 7,
+        "rejected": 3,
+        "excess": {}
+      }
+    },
+    "causes": {
+      "live_target_anchor": "constant-accel plan-origin anchoring accumulated target prediction error into the relative state (circle orbit/stall)",
+      "staged_guess": "cold starts far out stalled in the LOS-triggered band (startup rejection streaks, incl. stationary exs_2)",
+      "terminal_freeze_live_state": "touchdown on an exhausted plan was never detected; vehicle re-launched to hover hold",
+      "landing_tilt_rate": "matching target acceleration needs atan(a/g) tilt; PX4 rate noise exceeded the 0.017 tightened rate so plans could not enter the landing zone and climbed",
+      "los_glideslope": "camera-axis LOS limited lateral correction at low altitude; plans climbed instead"
+    },
+    "residual_causes": "straight/stop_and_go targets reverse velocity instantaneously at +-2 m (generator fold); rate spikes follow target acceleration jumps; staging dips are PX4 vertical lag at the staging corner.",
+    "evidence": "scratchpad flights b3_* and b4_stationary (not archived)"
   }
 }
