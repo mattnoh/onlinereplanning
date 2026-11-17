@@ -4854,7 +4854,7 @@
     }
   },
   "measured_sitl_moving_20261118": {
-    "status": "Final moving profile: 13/13 PX4/Gazebo flights LANDED (six motions x2 + stationary), no stale plan; 12/13 zero physical excess against the configured bounds. The one exception (stop_and_go h1) is a 0.75 m/s instantaneous target reversal at the generator's +-2 m fold while the vehicle was 0.23 m above the pad; re-prime recovered and it landed.",
+    "status": "Final moving profile (LOS 57): 9/9 PX4/Gazebo flights LANDED (all six motions + stationary + piecewise_accel x3), no stale plan; 7/9 zero physical excess; residual stop_and_go rate 0.009 rad/s and piecewise_accel LOS 0.55 deg. Preceding LOS-50 profile: 30/31 landed (the miss was an environment stall: rosbag recorder and planner stopped together), 28/31 zero excess.",
     "configuration": {
       "env": "config/frozen_quad_ctcs_coarse.env + config/ros1/tuning_stc_measured_rh_sitl_widened.env + config/ros1/tuning_stc_measured_rh_sitl_moving.env",
       "profile": "config/ros1/profile_stc_landing_noaug_measured_sitl_moving.yaml",
@@ -4886,7 +4886,7 @@
         ],
         "los_cone_deg": [
           30,
-          50
+          57
         ],
         "los_alt_trig_m": [
           1.8,
@@ -5026,6 +5026,40 @@
       "odometry rejected when PX4-synced stamps ran >1 ms ahead of ROS time (frozen measured state)",
       "profile applied mid rosparam load (predict_tracking_error lost)"
     ],
-    "earlier_campaigns_summary": "Two preceding rounds: 24/24 moving flights landed, 19/24 zero excess. Earlier rounds had 4 timeouts traced to the two infrastructure faults."
+    "earlier_campaigns_summary": "Two preceding rounds: 24/24 moving flights landed, 19/24 zero excess. Earlier rounds had 4 timeouts traced to the two infrastructure faults.",
+    "repeat_flights_los50": {
+      "stop_and_go": "5/5 landed, 4/5 zero (exception: instantaneous 0.75 m/s target reversal 0.23 m above the pad)",
+      "circle": "5/5 landed, 5/5 zero",
+      "figure8": "5/5, 5/5",
+      "straight": "5/5, 5/5",
+      "random_accel": "5/5, 5/5",
+      "piecewise_accel": "4/5 landed (1 environment stall), 3/5 zero (LOS 6.1 deg near touchdown -> LOS widened to 57)",
+      "stationary": "1/1, 1/1"
+    },
+    "final_campaign_los57": {
+      "piecewise_accel": [
+        "LANDED 0",
+        "LANDED 0",
+        "LANDED LOS 0.55 deg"
+      ],
+      "stop_and_go": [
+        "LANDED rate 0.009"
+      ],
+      "circle": [
+        "LANDED 0"
+      ],
+      "figure8": [
+        "LANDED 0"
+      ],
+      "straight": [
+        "LANDED 0"
+      ],
+      "random_accel": [
+        "LANDED 0"
+      ],
+      "stationary": [
+        "LANDED 0"
+      ]
+    }
   }
 }
