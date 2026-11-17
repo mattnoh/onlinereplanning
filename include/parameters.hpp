@@ -201,6 +201,7 @@ inline Parameters fromEnvironment() {
     p.constraints.alpha_theta_stc = envOrQ("SZMUK_ALPHA_THETA_STC",p.constraints.alpha_theta_stc);
     p.constraints.omega_stc_max = envOrQ("SZMUK_OMEGA_STC_MAX",p.constraints.omega_stc_max);
     p.constraints.gs_cone_half_angle_deg = envOrQ("SZMUK_GS_CONE_DEG",p.constraints.gs_cone_half_angle_deg);
+    p.constraints.gs_apex_offset = envOrQ("SZMUK_GS_APEX_OFFSET",p.constraints.gs_apex_offset);
     p.constraints.spd_stc_max = envOrQ("SZMUK_SPD_STC_MAX",p.constraints.spd_stc_max);
     p.constraints.los_cone_half_angle_deg = envOrQ("SZMUK_LOS_CONE_DEG",p.constraints.los_cone_half_angle_deg);
     p.constraints.los_alt_trig = envOrQ("SZMUK_LOS_ALT_TRIG",p.constraints.los_alt_trig);

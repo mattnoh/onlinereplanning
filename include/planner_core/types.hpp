@@ -405,6 +405,17 @@ struct PlannerCoreConfig {
     // PX4 full-state tracking: propagate measured error with local closed-loop
     // dynamics instead of treating the reference controls as plant inputs.
     bool predict_tracking_error = false;
+    // Target-relative plans: anchor executed setpoints (and the tracking
+    // references used to predict the measured root) to the LIVE target
+    // estimate instead of the target extrapolated with constant acceleration
+    // from each plan's origin. The plan is a relative trajectory, so this keeps
+    // target-prediction error from accumulating into the relative state.
+    bool live_target_anchor = false;
+    // Also engage the terminal freeze from the LIVE measured relative state,
+    // before any handoff scheduling or root prediction. Otherwise touchdown is
+    // only detected on a predicted root, which is unavailable once the active
+    // plan is exhausted (e.g. after landing on a stale plan).
+    bool terminal_freeze_live_state = false;
     // Seeding the replan from the MEASURED state.
     //
     //   x0 = plan(t_activation) + clamp(alpha * (live(now) - plan(now)))

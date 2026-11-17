@@ -264,7 +264,8 @@ public:
         Matrix<Scalar> out = Matrix<Scalar>::Zero(NX_SS, NX_SS);
         out.topLeftCorner(NX, NX) = this->Amat_impl(
             x.head(NX).template cast<double>(), u.head(NU).template cast<double>()).template cast<Scalar>();
-        // ConstantAccelPredictor has zero acceleration derivative in time.
+        // d(v_rel_dot)/dt = -d(a_target)/dt (zero for a constant prediction).
+        out.block(3, IDX_DT, 3, 1) = (-pred_->predictJerk(static_cast<double>(x(IDX_DT)))).template cast<Scalar>();
         return out;
     }
 
@@ -346,6 +347,13 @@ public:
         Matrix<Scalar> Fx = Matrix<Scalar>::Zero(NX_SS, NX_SS);
         Fx.block(0, 0, this->NX_PHYS, this->NX_PHYS) = j.dxdx.template cast<Scalar>();
         Fx(IDX_DT, IDX_DT) = Scalar(1.0);
+        if (pred_->tau > 0.) {
+            // Sensitivity of the step to its start time through the predicted
+            // target acceleration: dv = -(a(t+T)-a(t)), dp ~ T/2 of that.
+            const Eigen::Vector3d da = pred_->predictAccel(tabs + Th) - pred_->predictAccel(tabs);
+            Fx.block(3, IDX_DT, 3, 1) = (-da).template cast<Scalar>();
+            Fx.block(0, IDX_DT, 3, 1) = (-0.5 * Th * da).template cast<Scalar>();
+        }
         const_cast<Quad6DOFVarTimeRelativePred*>(this)->setTargetAccel(amid);
         return Fx;
     }
@@ -1051,6 +1059,9 @@ inline bool plausibleTrajectory(const std::vector<Eigen::VectorXd>& X,
     return true;
 }
 
+// Opt-in damped target-acceleration prediction (see target/predictor.hpp).
+inline double targetAccelTau(){static const double t=envOrQ("SZMUK_TARGET_ACCEL_TAU",0.);return t;}
+
 // ── Stabilized native initial guess (opt-in) ────────────────────────────────
 // SZMUK_NATIVE_GUESS=stabilized replaces the zero-moment hover rollout with a
 // hover rollout under a PD attitude/rate loop and velocity damping. A measured
@@ -1058,16 +1069,37 @@ inline bool plausibleTrajectory(const std::vector<Eigen::VectorXd>& X,
 // 5-9 s horizon the uniform-hover guess tilts several degrees and drifts,
 // starting the solver at CTCS errors ~1e5 (SITL capture: 32/37 vs 5/37 roots
 // solved). Only the initial guess changes; the OCP is unchanged.
-inline bool useStabilizedNativeGuess(){
-    static const bool on=[]{const char* v=std::getenv("SZMUK_NATIVE_GUESS");return v&&std::string(v)=="stabilized";}();
-    return on;
+// SZMUK_NATIVE_GUESS=staged adds position feedback that respects the staging
+// geometry: fly toward the target at a height above the LOS trigger and descend
+// only along a reference height that stays inside the glideslope. Without it a
+// cold start far from the target hovers at the root and the solver descends
+// into the LOS-triggered band outside the cone, then stalls there.
+inline const std::string& nativeGuessMode(){
+    static const std::string m=[]{const char* v=std::getenv("SZMUK_NATIVE_GUESS");return std::string(v?v:"");}();
+    return m;
 }
+inline bool useStabilizedNativeGuess(){return nativeGuessMode()=="stabilized"||nativeGuessMode()=="staged";}
+inline bool useStagedNativeGuess(){return nativeGuessMode()=="staged";}
 inline Eigen::VectorXd stabilizedNativeControl(const Eigen::VectorXd& x,const Eigen::Vector3d& target_accel){
     static const double kp=envOrQ("SZMUK_GUESS_KP",1.),kd=envOrQ("SZMUK_GUESS_KD",2.),
         kv=envOrQ("SZMUK_GUESS_KV",.5),kvz=envOrQ("SZMUK_GUESS_KVZ",.5),amax=envOrQ("SZMUK_GUESS_AMAX",2.);
     const Eigen::Vector3d v=x.segment<3>(3),w=x.segment<3>(10);
     Eigen::Quaterniond q(x(6),x(7),x(8),x(9));q.normalize();
     Eigen::Vector3d a(-kv*v.x(),-kv*v.y(),-kvz*v.z());
+    if(useStagedNativeGuess()){
+        static const double kpos=envOrQ("SZMUK_GUESS_KPOS",.3),kvs=envOrQ("SZMUK_GUESS_KVS",.9),
+            vmax=envOrQ("SZMUK_GUESS_VMAX",1.),hold=envOrQ("SZMUK_GUESS_HOLD_DZ",.15),
+            slope=envOrQ("SZMUK_GUESS_GS_FRACTION",.6);
+        const double rxy=x.head<2>().norm();
+        // Reference height: inside a fraction of the glideslope cone, capped
+        // above the LOS trigger / staging height while still far out.
+        const double cap=std::max(Z_STAGE,LOS_ALT_TRIG)+hold;
+        const double zref=std::min(cap,rxy/(slope*std::tan(GS_CONE_HALF_ANGLE_DEG*M_PI/180.))-GS_APEX_OFFSET);
+        Eigen::Vector3d vref(-kpos*x(0),-kpos*x(1),kpos*(std::max(zref,0.)-x(2)));
+        if(vref.head<2>().norm()>vmax)vref.head<2>()*=vmax/vref.head<2>().norm();
+        vref.z()=std::clamp(vref.z(),-.5,.5);
+        a=kvs*(vref-v);
+    }
     a.head<2>()=a.head<2>().cwiseMax(-amax).cwiseMin(amax);
     // While descending, brake at least enough to stop above the floor, so the
     // guess rollout never passes through the hard z>=0 row (weak damping from
@@ -1325,12 +1357,13 @@ inline OCPDescriptor descriptor() {
         ex.predictor->setState(tgt_snapshot.position,
                                tgt_snapshot.velocity,
                                tgt_snapshot.acceleration);
+        ex.predictor->tau = targetAccelTau();
         return std::any(ex);
     };
 
     d.sanitize_warm_control = [](Eigen::VectorXd& u) { clampWarmControl(u); };
     d.make_model=[](const Eigen::Vector3d& accel) {
-        auto pred=std::make_shared<ConstantAccelPredictor>();pred->a=accel;
+        auto pred=std::make_shared<ConstantAccelPredictor>();pred->a=accel;pred->tau=targetAccelTau();
         auto dyn=std::make_shared<Quad6DOFVarTimeRelativePred<double>>(pred);
         dyn->setMass(MASS);dyn->setGravity(GRAVITY);dyn->setJb(J_B);
         OCPDescriptor::Model model;model.nx=NX_SS;model.nu=NU_SS;model.horizon=HORIZON;model.dt=TH0;
@@ -1359,6 +1392,7 @@ inline OCPDescriptor descriptor() {
             pred = std::make_shared<ConstantAccelPredictor>();
             pred->setState(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
                            a.target_accel);
+            pred->tau = targetAccelTau();
         }
         return create(a.current_state, a.prev_U, a.prev_X, a.prev_K, pred, a.horizon);
     };

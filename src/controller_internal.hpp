@@ -330,6 +330,18 @@ public:
         }
 
         Eigen::VectorXd x0 = prepareOcpState(desc_, input.current_state, input.target_snapshot);
+        if (config_.terminal_freeze_live_state && config_.enable_terminal_freeze && primed_ &&
+            !terminal_freeze_ && desc_.coordinates == OCPDescriptor::Coordinates::TargetRelative &&
+            x0.size() >= 6 && x0.head(3).norm() < config_.terminal_freeze_enter_pos &&
+            x0.segment(3, 3).norm() < config_.terminal_freeze_enter_vel) {
+            terminal_freeze_ = true;
+            out.terminal_freeze_engaged = true;
+            reject(out, "terminal_freeze_engaged", "Terminal freeze engaged (live state)");
+            addDiagnostic(out, DiagnosticSeverity::Info, "terminal_freeze_engaged",
+                          "Terminal freeze engaged from live relative state",
+                          {{"pos_err", x0.head(3).norm()}, {"vel_err", x0.segment(3, 3).norm()}});
+            return out;
+        }
         HandoffSchedule handoff;
         if (!prepareHandoffSchedule(input, out, handoff)) {
             return out;
@@ -540,7 +552,7 @@ public:
         }
         out.has_replay_sample = true;
         out.solve_num = replay.active_solve_num;
-        const auto command_target=targetForPlan(replay.active_solve_num,now,target_snapshot);
+        const auto command_target=config_.live_target_anchor?target_snapshot:targetForPlan(replay.active_solve_num,now,target_snapshot);
         out.command = makePlannerCommand(config_.platform, desc_, replay.x_cmd, replay.u_cmd,
                                          command_target);
         out.stale = replay.elapsed > replay.horizon_end + 0.2;
@@ -817,9 +829,23 @@ private:
                     const double elapsed=std::max(0.,std::chrono::duration<double>(stamp-handoff.active_origin).count());
                     TrajectoryReplayer::ReplaySample sample;
                     if(!replayer_.sampleActiveAtElapsed(elapsed,config_.ocp_dt,&sample))throw std::runtime_error("missing tracking reference");
-                    return reconstructWorldState(desc_,sample.x_cmd,targetAtPlanElapsed(sample.active_solve_num,elapsed,target_snapshot));
+                    const auto anchor=config_.live_target_anchor
+                        ?predictTargetSnapshot(target_snapshot,std::chrono::duration<double>(stamp-handoff.measurement_time).count())
+                        :targetAtPlanElapsed(sample.active_solve_num,elapsed,target_snapshot);
+                    return reconstructWorldState(desc_,sample.x_cmd,anchor);
                 };
-                state=predictTrackingState(state,reference(handoff.measurement_time),reference(handoff.activation_time),delay);
+                const auto ref_now=reference(handoff.measurement_time),ref_after=reference(handoff.activation_time);
+                if(std::getenv("COMANDO_DEBUG_ROOT")){
+                    const auto tgt_now=predictTargetSnapshot(target_snapshot,0.),tgt_act=predictTargetSnapshot(target_snapshot,delay);
+                    std::cerr<<std::fixed<<std::setprecision(4)<<"[root_debug] first="<<handoff.first_plan
+                        <<" el_now="<<std::chrono::duration<double>(handoff.measurement_time-handoff.active_origin).count()
+                        <<" el_act="<<std::chrono::duration<double>(handoff.activation_time-handoff.active_origin).count()
+                        <<" delay="<<delay<<" meas="<<state.head(6).transpose()<<" ref_now="<<ref_now.head(6).transpose()
+                        <<" ref_after="<<ref_after.head(6).transpose()<<" tgt_now="<<tgt_now.position.transpose()<<" "<<tgt_now.velocity.transpose()
+                        <<" tgt_act="<<tgt_act.position.transpose()<<"\n";
+                }
+                state=predictTrackingState(state,ref_now,ref_after,delay);
+                if(std::getenv("COMANDO_DEBUG_ROOT"))std::cerr<<"[root_debug] result="<<state.head(6).transpose()<<"\n";
                 x0_source="measured_tracking_rollout";
                 return prepareOcpState(desc_,state,predictTargetSnapshot(target_snapshot,delay));
             }

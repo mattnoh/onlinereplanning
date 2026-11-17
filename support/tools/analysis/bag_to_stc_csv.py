@@ -61,9 +61,9 @@ _ENV_CONSTANTS = {
     "omega_land_stc_max":  ("SZMUK_OMEGA_STC_MAX", 0.019),
     "tilt_phase0_deg":     ("SZMUK_TILT_PHASE0_DEG", 11.0),
     "gs_cone_deg":         ("SZMUK_GS_CONE_DEG", 15.0),
+    "gs_apex_offset":      ("SZMUK_GS_APEX_OFFSET", 0.1),
 }
 _FIXED_CONSTANTS = {
-    "gs_apex_offset": 0.1,     # GS_APEX_OFFSET
     "fmin": 0.12,              # FMIN
     "fmax": 0.52,              # FMAX
     "fmin_land": 0.21,         # T_MIN_AFT
