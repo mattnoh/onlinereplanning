@@ -54,6 +54,63 @@ int main() {
                   << " gradient_error=" << gradient_error << '\n';
         if(value_error>1e-12 || gradient_error>2e-5)
             throw std::runtime_error("CTCS value/Jacobian parity failed");
+        // Turning-target model: exact circle and kinematic derivatives.
+        {
+            ConstantAccelPredictor circle;circle.p<<1,0,.2;circle.v<<0,.4,0;circle.a<<-.16,0,0;
+            circle.turn_rate=ConstantAccelPredictor::inferTurnRate(circle.v,circle.a);
+            if(std::abs(circle.turn_rate-.4)>1e-12)throw std::runtime_error("measured curvature estimate");
+            for(double t:{0.,1e-6,.2,2.,7.}){
+                const Eigen::Vector3d expected(std::cos(.4*t),std::sin(.4*t),.2);
+                if((circle.predictPos(t)-expected).norm()>1e-11)throw std::runtime_error("turning forecast misses exact circle");
+                const double h=1e-5;
+                if(((circle.predictPos(t+h)-circle.predictPos(t-h))/(2*h)-circle.predictVel(t)).norm()>1e-9)throw std::runtime_error("turning position/velocity inconsistency");
+            }
+            pred->turn_rate=.4;double dynamics_error=0.,turn_gradient_error=0.;
+            for(int sample=0;sample<40;++sample){
+                Eigen::VectorXd x=Eigen::VectorXd::Zero(NX_SS),u=Eigen::VectorXd::Zero(NU_SS);
+                x<<.2,.1,.7,.1,-.1,.02,1.,.01,-.02,.005,.03,-.02,.01,1.+unit(gen);
+                x.segment<4>(6).normalize();u<<HOVER_THRUST,.002,-.003,.001,.08+.02*unit(gen);
+                const auto fx=dyn->fx(x,u),fu=dyn->fu(x,u),cx=row->cx(x,u),cu=row->cu(x,u);
+                for(int j=0;j<NX_SS+NU_SS;++j){
+                    const double h=1e-5*(1.+std::abs(j<NX_SS?x(j):u(j-NX_SS)));
+                    auto x1=x,x2=x,x3=x,x4=x,u1=u,u2=u,u3=u,u4=u;
+                    if(j<NX_SS){x1(j)+=h;x2(j)-=h;x3(j)+=2*h;x4(j)-=2*h;}else{const int k=j-NX_SS;u1(k)+=h;u2(k)-=h;u3(k)+=2*h;u4(k)-=2*h;}
+                    const Eigen::VectorXd fd=(-dyn->f(x3,u3)+8*dyn->f(x1,u1)-8*dyn->f(x2,u2)+dyn->f(x4,u4))/(12*h);
+                    const Eigen::VectorXd analytic=j<NX_SS?Eigen::VectorXd(fx.col(j)):Eigen::VectorXd(fu.col(j-NX_SS));
+                    dynamics_error=std::max(dynamics_error,(fd-analytic).norm()/(1.+fd.norm()));
+                    const double integral_fd=(-dyn->intervalIntegral(x3,u3)+8*dyn->intervalIntegral(x1,u1)-8*dyn->intervalIntegral(x2,u2)+dyn->intervalIntegral(x4,u4))/(12*h);
+                    const double derivative=j<NX_SS?cx(0,j):cu(0,j-NX_SS);
+                    turn_gradient_error=std::max(turn_gradient_error,std::abs(integral_fd-derivative)/(1.+std::abs(integral_fd)));
+                }
+            }
+            std::cout<<"Turning-target derivatives: dynamics="<<dynamics_error<<" CTCS="<<turn_gradient_error<<'\n';
+            if(dynamics_error>2e-6||turn_gradient_error>2e-5)throw std::runtime_error("turning target analytic derivative check");
+            // Full single-horizon native solve before any closed-loop trial.
+            // No previous controls, gains or numerical continuation.
+            auto forecast=std::make_shared<ConstantAccelPredictor>(circle);
+            Eigen::VectorXd root=Eigen::VectorXd::Zero(NX_SS);root(0)=2.;root(1)=1.5;root(2)=Z_STAGE+.15;root(6)=1.;
+            auto problem=create(root,{},{},{},forecast);
+            auto parameters=getSolverParams();parameters.verbose=false;
+            ALIPDDP<double> solver(*problem);solver.init(parameters);solver.solve();
+            const auto states=solver.getResX(),controls=solver.getResU();
+            double primal=0.,physical_excess=0.;
+            auto physical_row=makeCtcsConstraint<double>(dyn,CTCS_STEP_EPS/CTCS_Y_SCALE,IDX_THETA,0.,1,false);
+            auto audit_dyn=std::dynamic_pointer_cast<Quad6DOFVarTimeRelativePred<double>>(problem->getDynamics(0));
+            for(int k=0;k<problem->getHorizon();++k){
+                for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})for(const auto& constraint:problem->getStageConstraints(k,type)){
+                    const auto r=constraint->c(states[k],controls[k]);
+                    const double excess=type==ConstraintType::NO?r.maxCoeff():type==ConstraintType::SOC?r(0)+r.tail(r.size()-1).norm():r.cwiseAbs().maxCoeff();
+                    primal=std::max(primal,excess);
+                }
+                auto state=states[k];double remaining=controls[k](IDX_THETA);
+                while(remaining>1e-12){const double dt=std::min(.001,remaining);auto u=controls[k];u(IDX_THETA)=dt;state=audit_dyn->f(state,u);remaining-=dt;
+                    for(int j=0;j<physical_row->numImplications();++j)if(physical_row->triggered(j,state))physical_excess=std::max(physical_excess,physical_row->implication(j).consequence(state,u));
+                }
+            }
+            std::cout<<"Turning-target full horizon: primal="<<primal<<" physical="<<physical_excess<<" terminal_position="<<states.back().head<3>().norm()<<" terminal_velocity="<<states.back().segment<3>(3).norm()<<'\n';
+            if(primal>parameters.tolerance||physical_excess>1e-6||states.back().head<3>().norm()>.2||states.back().segment<3>(3).norm()>.3)throw std::runtime_error("turning-target full-horizon feasibility");
+            pred->turn_rate=0.;
+        }
         // Physical auditing uses the original implication, never the tightened
         // trigger or the historical grader's excluded switching band.
         auto physical=makeCtcsConstraint<double>(dyn,CTCS_STEP_EPS/CTCS_Y_SCALE,IDX_THETA,0.,1,false);

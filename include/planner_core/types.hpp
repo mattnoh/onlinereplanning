@@ -29,6 +29,7 @@ struct TargetSnapshot {
     Eigen::Vector4d orientation = Eigen::Vector4d(1,0,0,0);
     double odom_stamp_sec = 0.0;
     double accel_stamp_sec = 0.0;
+    double prediction_turn_rate = 0.0;
 };
 
 struct PlannerConfig {
@@ -229,6 +230,7 @@ struct SolverResult {
     std::vector<Eigen::Vector3d> target_world_pos_trajectory;
     std::vector<Eigen::Vector3d> target_world_vel_trajectory;
     std::string target_motion_source = "snapshot";
+    double target_prediction_turn_rate = 0.;
     std::any extra;
 };
 
@@ -304,6 +306,7 @@ struct OCPDescriptor {
         Eigen::VectorXd hover;
     };
     std::function<Model(const Eigen::Vector3d&)> make_model;
+    std::function<Model(const TargetSnapshot&)> make_model_for_target;
 
     std::function<bool(const Eigen::VectorXd&)> feasible_start;
     std::function<Param()> getSolverParams;
@@ -405,6 +408,7 @@ struct PlannerCoreConfig {
     // PX4 full-state tracking: propagate measured error with local closed-loop
     // dynamics instead of treating the reference controls as plant inputs.
     bool predict_tracking_error = false;
+    bool predict_target_turn = false;
     // Seeding the replan from the MEASURED state.
     //
     //   x0 = plan(t_activation) + clamp(alpha * (live(now) - plan(now)))
@@ -456,6 +460,7 @@ struct PlannerCoreInput {
 };
 
 struct PlannerSolveLogData {
+    double target_prediction_turn_rate = 0.;
     int solve_num = 0;
     double solve_time_ms = 0.0;
     int solve_iters = 0;

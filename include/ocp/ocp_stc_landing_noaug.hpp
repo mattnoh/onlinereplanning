@@ -206,8 +206,8 @@ inline double computeTrigAlt(const Eigen::VectorXd& x) {
 }
 
 // ── Constant-accel target predictor ───────────────────────────────────────────
-// Reset from the TargetSnapshot at every solve (see prepare_extra), then held
-// as a constant-acceleration model across the horizon.
+// Reset from the TargetSnapshot at every solve. Constant acceleration remains
+// the default; a measured turn rate enables rotating-acceleration prediction.
 using ConstantAccelPredictor = target_models::ConstantAccelPredictor;
 
 struct StcLandingNoAugExtra {
@@ -254,7 +254,7 @@ public:
         Matrix<Scalar> out = Matrix<Scalar>::Zero(NX_SS, NX_SS);
         out.topLeftCorner(NX, NX) = this->Amat_impl(
             x.head(NX).template cast<double>(), u.head(NU).template cast<double>()).template cast<Scalar>();
-        // ConstantAccelPredictor has zero acceleration derivative in time.
+        out.template block<3,1>(3,IDX_DT)=-pred_->predictJerk(static_cast<double>(x(IDX_DT))).template cast<Scalar>();
         return out;
     }
 
@@ -336,6 +336,11 @@ public:
         Matrix<Scalar> Fx = Matrix<Scalar>::Zero(NX_SS, NX_SS);
         Fx.block(0, 0, this->NX_PHYS, this->NX_PHYS) = j.dxdx.template cast<Scalar>();
         Fx(IDX_DT, IDX_DT) = Scalar(1.0);
+        if(pred_->turn_rate!=0.){
+            const auto j1=pred_->predictJerk(tabs),jm=pred_->predictJerk(tabs+.5*Th),j4=pred_->predictJerk(tabs+Th);
+            Fx.template block<3,1>(0,IDX_DT)=(-Th*Th/6.*(j1+2.*jm)).template cast<Scalar>();
+            Fx.template block<3,1>(3,IDX_DT)=(-Th/6.*(j1+4.*jm+j4)).template cast<Scalar>();
+        }
         const_cast<Quad6DOFVarTimeRelativePred*>(this)->setTargetAccel(amid);
         return Fx;
     }
@@ -352,6 +357,12 @@ public:
         Fu.block(0, 0, this->NX_PHYS, this->NU_PHYS) = j.dxdu.template cast<Scalar>();
         Fu.block(0, IDX_THETA, this->NX_PHYS, 1) = j.dxdT.template cast<Scalar>();
         Fu(IDX_DT, IDX_THETA) = Scalar(1.0);
+        if(pred_->turn_rate!=0.){
+            const auto a1=pred_->predictAccel(tabs),a4=pred_->predictAccel(tabs+Th);
+            const auto jm=pred_->predictJerk(tabs+.5*Th),j4=pred_->predictJerk(tabs+Th);
+            Fu.template block<3,1>(0,IDX_THETA)+=(Th/3.*(amid-a1)-Th*Th/6.*jm).template cast<Scalar>();
+            Fu.template block<3,1>(3,IDX_THETA)+=((2.*amid-a1-a4)/6.-Th/6.*(2.*jm+j4)).template cast<Scalar>();
+        }
         const_cast<Quad6DOFVarTimeRelativePred*>(this)->setTargetAccel(amid);
         return Fu;
     }
@@ -1270,12 +1281,12 @@ inline OCPDescriptor descriptor() {
         ex.predictor->setState(tgt_snapshot.position,
                                tgt_snapshot.velocity,
                                tgt_snapshot.acceleration);
+        ex.predictor->turn_rate=tgt_snapshot.prediction_turn_rate;
         return std::any(ex);
     };
 
     d.sanitize_warm_control = [](Eigen::VectorXd& u) { clampWarmControl(u); };
-    d.make_model=[](const Eigen::Vector3d& accel) {
-        auto pred=std::make_shared<ConstantAccelPredictor>();pred->a=accel;
+    const auto build_model=[](std::shared_ptr<ConstantAccelPredictor> pred) {
         auto dyn=std::make_shared<Quad6DOFVarTimeRelativePred<double>>(pred);
         dyn->setMass(MASS);dyn->setGravity(GRAVITY);dyn->setJb(J_B);
         OCPDescriptor::Model model;model.nx=NX_SS;model.nu=NU_SS;model.horizon=HORIZON;model.dt=TH0;
@@ -1292,6 +1303,8 @@ inline OCPDescriptor descriptor() {
             return result;
         };return model;
     };
+    d.make_model=[build_model](const Eigen::Vector3d& accel){auto pred=std::make_shared<ConstantAccelPredictor>();pred->a=accel;return build_model(pred);};
+    d.make_model_for_target=[build_model](const TargetSnapshot& target){auto pred=std::make_shared<ConstantAccelPredictor>();pred->setState(target.position,target.velocity,target.acceleration);pred->turn_rate=target.prediction_turn_rate;return build_model(pred);};
     d.getSolverParams = getSolverParams;
     d.create = [](const OCPCreateArgs& a) {
         StcLandingNoAugExtra ex;

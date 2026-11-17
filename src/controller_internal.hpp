@@ -9,6 +9,7 @@
 #include "planner_core/controller.hpp"
 #include "planner_core/types.hpp"
 #include "trajectory_replayer.hpp"
+#include "target/predictor.hpp"
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <algorithm>
@@ -267,6 +268,8 @@ public:
     void configure(const PlannerCoreConfig& config,std::shared_ptr<const OCPDescriptor> descriptor={}) {
         config_ = config;
         desc_ = descriptor?*descriptor:OCPRegistry::getDescriptor(config_.ocp_type);
+        if(config_.predict_target_turn&&!desc_.make_model_for_target)
+            throw std::invalid_argument("turn prediction requires a matching OCP target model");
         if(config_.predict_tracking_error&&(!config_.measured_state_delay_compensation||
            config_.platform!=Platform::Mavros||desc_.command_mode!=OCPDescriptor::CommandMode::CmdFullState||desc_.state_dim<13))
             throw std::invalid_argument("tracking prediction requires measured-state MAVROS full-state RH");
@@ -481,12 +484,14 @@ public:
         result.target_snapshot_pos=plan_target.position;
         result.target_snapshot_vel=plan_target.velocity;
         result.target_snapshot_acc=plan_target.acceleration;
+        result.target_prediction_turn_rate=plan_target.prediction_turn_rate;
         out.solve_finish_late_by_sec =
             std::chrono::duration<double>(result.solve_finish_time - plan_origin_time).count();
 
         TrajectoryReplayer::Propagate propagate;
         if(desc_.make_model) {
-            auto model=desc_.make_model(plan_target.acceleration);
+            auto model=config_.predict_target_turn&&desc_.make_model_for_target?
+                desc_.make_model_for_target(plan_target):desc_.make_model(plan_target.acceleration);
             propagate=[model](const Eigen::VectorXd& state,const Eigen::VectorXd& control,double duration) {
                 return model.flow(state,control,duration,false).x;
             };
@@ -717,6 +722,7 @@ private:
         result.target_snapshot_omega = target_snapshot.angular_velocity;
         result.target_snapshot_beta = target_snapshot.angular_acceleration;
         result.target_motion_source = "snapshot";
+        result.target_prediction_turn_rate=target_snapshot.prediction_turn_rate;
         return result;
     }
 
@@ -964,14 +970,26 @@ private:
     }
 
 
-    static TargetSnapshot predictTargetSnapshot(const TargetSnapshot& target, double dt) {
+    TargetSnapshot predictTargetSnapshot(const TargetSnapshot& target, double dt) const {
         TargetSnapshot predicted = target;
+        if(config_.predict_target_turn&&target.valid){
+            target_models::ConstantAccelPredictor predictor;
+            predictor.setState(target.position,target.velocity,target.acceleration);
+            predictor.turn_rate=target.prediction_turn_rate!=0.?target.prediction_turn_rate:
+                target_models::ConstantAccelPredictor::inferTurnRate(target.velocity,target.acceleration);
+            predicted.prediction_turn_rate=predictor.turn_rate;
+            predicted.position=predictor.predictPos(std::max(0.,dt));
+            predicted.velocity=predictor.predictVel(std::max(0.,dt));
+            predicted.acceleration=predictor.predictAccel(std::max(0.,dt));
+        }
         if (!target.valid || dt <= 0.0) {
             return predicted;
         }
-        predicted.position = target.position + target.velocity * dt +
-            0.5 * target.acceleration * dt * dt;
-        predicted.velocity = target.velocity + target.acceleration * dt;
+        if(!config_.predict_target_turn){
+            predicted.position = target.position + target.velocity * dt +
+                0.5 * target.acceleration * dt * dt;
+            predicted.velocity = target.velocity + target.acceleration * dt;
+        }
         predicted.angular_velocity = target.angular_velocity + target.angular_acceleration * dt;
         predicted.orientation = integrateQuaternion(target.orientation,
                                                     target.angular_velocity,
@@ -1146,8 +1164,10 @@ private:
         for(int i=0;i<static_cast<int>(states.size());++i) {
             const double time=stateNodeTime(states[i],i);
             TargetSnapshot target;target.valid=true;
-            target.position=result.target_snapshot_pos+result.target_snapshot_vel*time+0.5*result.target_snapshot_acc*time*time;
-            target.velocity=result.target_snapshot_vel+result.target_snapshot_acc*time;
+            target_models::ConstantAccelPredictor predictor;
+            predictor.setState(result.target_snapshot_pos,result.target_snapshot_vel,result.target_snapshot_acc);
+            predictor.turn_rate=result.target_prediction_turn_rate;
+            target.position=predictor.predictPos(time);target.velocity=predictor.predictVel(time);
             states[i]=reconstructWorldState(desc_,states[i],target);
         }
         return states;
@@ -1164,6 +1184,7 @@ private:
         meta.target_snapshot_pos = result.target_snapshot_pos;
         meta.target_snapshot_vel = result.target_snapshot_vel;
         meta.target_snapshot_acc = result.target_snapshot_acc;
+        meta.target_prediction_turn_rate=result.target_prediction_turn_rate;
         meta.target_snapshot_quat = result.target_snapshot_quat;
         meta.target_snapshot_omega = result.target_snapshot_omega;
         meta.target_snapshot_beta = result.target_snapshot_beta;
