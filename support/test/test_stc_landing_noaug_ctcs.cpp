@@ -4,7 +4,7 @@
 #include <random>
 #include <stdexcept>
 
-int main() {
+int main(int argc,char** argv) {
     using namespace StcLandingNoAugOCP;
     try {
         auto pred = std::make_shared<ConstantAccelPredictor>();
@@ -85,6 +85,11 @@ int main() {
             }
             std::cout<<"Turning-target derivatives: dynamics="<<dynamics_error<<" CTCS="<<turn_gradient_error<<'\n';
             if(dynamics_error>2e-6||turn_gradient_error>2e-5)throw std::runtime_error("turning target analytic derivative check");
+            // Explicit full-horizon gate for forecast experiments. Default
+            // parity tests do not promote an unvalidated forecast profile.
+            if(argc==2&&std::string(argv[1])=="--turning-horizon"){
+            const double turn=envOrQ("SZMUK_TEST_TURN_RATE",.4);
+            circle.v<<0,turn,0;circle.a<<-turn*turn,0,0;circle.turn_rate=turn;
             // Full single-horizon native solve before any closed-loop trial.
             // No previous controls, gains or numerical continuation.
             auto forecast=std::make_shared<ConstantAccelPredictor>(circle);
@@ -93,7 +98,7 @@ int main() {
             auto parameters=getSolverParams();parameters.verbose=false;
             ALIPDDP<double> solver(*problem);solver.init(parameters);solver.solve();
             const auto states=solver.getResX(),controls=solver.getResU();
-            double primal=0.,physical_excess=0.;
+            double primal=0.,physical_excess=0.;std::map<std::string,double> implication_excess;
             auto physical_row=makeCtcsConstraint<double>(dyn,CTCS_STEP_EPS/CTCS_Y_SCALE,IDX_THETA,0.,1,false);
             auto audit_dyn=std::dynamic_pointer_cast<Quad6DOFVarTimeRelativePred<double>>(problem->getDynamics(0));
             for(int k=0;k<problem->getHorizon();++k){
@@ -104,11 +109,16 @@ int main() {
                 }
                 auto state=states[k];double remaining=controls[k](IDX_THETA);
                 while(remaining>1e-12){const double dt=std::min(.001,remaining);auto u=controls[k];u(IDX_THETA)=dt;state=audit_dyn->f(state,u);remaining-=dt;
-                    for(int j=0;j<physical_row->numImplications();++j)if(physical_row->triggered(j,state))physical_excess=std::max(physical_excess,physical_row->implication(j).consequence(state,u));
+                    for(int j=0;j<physical_row->numImplications();++j)if(physical_row->triggered(j,state)){
+                        const auto& implication=physical_row->implication(j);const double excess=implication.consequence(state,u);
+                        physical_excess=std::max(physical_excess,excess);implication_excess[implication.name]=std::max(implication_excess[implication.name],excess);
+                    }
                 }
             }
             std::cout<<"Turning-target full horizon: primal="<<primal<<" physical="<<physical_excess<<" terminal_position="<<states.back().head<3>().norm()<<" terminal_velocity="<<states.back().segment<3>(3).norm()<<'\n';
+            for(const auto& [name,excess]:implication_excess)std::cout<<"Turning-target implication "<<name<<" excess="<<excess<<'\n';
             if(primal>parameters.tolerance||physical_excess>1e-6||states.back().head<3>().norm()>.2||states.back().segment<3>(3).norm()>.3)throw std::runtime_error("turning-target full-horizon feasibility");
+            }
             pred->turn_rate=0.;
         }
         // Physical auditing uses the original implication, never the tightened
