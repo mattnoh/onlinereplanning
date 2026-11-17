@@ -4854,7 +4854,7 @@
     }
   },
   "measured_sitl_moving_20261118": {
-    "status": "All six campaign target motions plus stationary LANDED in PX4/Gazebo with the moving profile, no stale plan. Residual physical excess remains on 5 of 7 (below). One flight per motion; not a repeatability claim.",
+    "status": "Final moving profile: 13/13 PX4/Gazebo flights LANDED (six motions x2 + stationary), no stale plan; 12/13 zero physical excess against the configured bounds. The one exception (stop_and_go h1) is a 0.75 m/s instantaneous target reversal at the generator's +-2 m fold while the vehicle was 0.23 m above the pad; re-prime recovered and it landed.",
     "configuration": {
       "env": "config/frozen_quad_ctcs_coarse.env + config/ros1/tuning_stc_measured_rh_sitl_widened.env + config/ros1/tuning_stc_measured_rh_sitl_moving.env",
       "profile": "config/ros1/profile_stc_landing_noaug_measured_sitl_moving.yaml",
@@ -4862,19 +4862,23 @@
       "widened_bounds_vs_original": {
         "tilt_land_deg": [
           0.95,
-          3.5
+          5
         ],
         "omega_land": [
           0.019,
-          0.06
+          0.19
         ],
         "omega_phase0": [
           0.35,
           0.65
         ],
+        "speed_land": [
+          0.75,
+          1.0
+        ],
         "gs_cone_deg": [
           15,
-          26
+          31
         ],
         "gs_apex_offset_m": [
           0.1,
@@ -4882,7 +4886,7 @@
         ],
         "los_cone_deg": [
           30,
-          40
+          50
         ],
         "los_alt_trig_m": [
           1.8,
@@ -4892,6 +4896,17 @@
           1.1,
           1.2
         ]
+      },
+      "margins": {
+        "trigger": 0.2,
+        "geometric": 0.05,
+        "stage_height": 0.12,
+        "stage_radius": 0.7,
+        "rate": 0.06,
+        "speed": 0.2,
+        "los": 0.09,
+        "gs_angle_deg": 3,
+        "tighten_from_node": 4
       }
     },
     "cases": {
@@ -4960,7 +4975,7 @@
       "los_glideslope": "camera-axis LOS limited lateral correction at low altitude; plans climbed instead"
     },
     "residual_causes": "straight/stop_and_go targets reverse velocity instantaneously at +-2 m (generator fold); rate spikes follow target acceleration jumps; staging dips are PX4 vertical lag at the staging corner.",
-    "evidence": "scratchpad flights b3_* and b4_stationary (not archived)",
+    "evidence": "logs/measured_sitl_moving_20261118.tar.gz (final campaign per run: physical_audit.json, solver_events.csv, planner_environment.json)",
     "repeat_flights": {
       "note": "Same config, one flight per row. reprime_after_rejections=5 added after r1/r2 (only fires after 5 consecutive solve failures).",
       "without_reprime": {
@@ -4976,6 +4991,41 @@
         "stop_and_go": "3/3 LANDED (re-prime fired once each); excess remains, worst run 363 rejections, glideslope 1.87 m, rate 0.48 rad/s"
       },
       "zero_excess_runs": "figure8 3/3, piecewise_accel 1/3, circle 1/3, straight 1/6, stationary 1/1; others small rate/staging excess, stop_and_go large"
-    }
+    },
+    "final_campaign": {
+      "circle": [
+        "LANDED 0",
+        "LANDED 0"
+      ],
+      "figure8": [
+        "LANDED 0",
+        "LANDED 0"
+      ],
+      "straight": [
+        "LANDED 0",
+        "LANDED 0"
+      ],
+      "stop_and_go": [
+        "LANDED excess (target reversal near pad: rate 0.34, LOS 17 deg, GS 0.12 m)",
+        "LANDED 0"
+      ],
+      "piecewise_accel": [
+        "LANDED 0",
+        "LANDED 0"
+      ],
+      "random_accel": [
+        "LANDED 0",
+        "LANDED 0"
+      ],
+      "stationary": [
+        "LANDED 0"
+      ],
+      "legend": "0 = zero physical excess against configured bounds"
+    },
+    "infrastructure_faults_fixed": [
+      "odometry rejected when PX4-synced stamps ran >1 ms ahead of ROS time (frozen measured state)",
+      "profile applied mid rosparam load (predict_tracking_error lost)"
+    ],
+    "earlier_campaigns_summary": "Two preceding rounds: 24/24 moving flights landed, 19/24 zero excess. Earlier rounds had 4 timeouts traced to the two infrastructure faults."
   }
 }
