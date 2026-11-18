@@ -13,7 +13,7 @@ int main() {
         dyn->setMass(MASS); dyn->setGravity(GRAVITY); dyn->setJb(J_B);
         auto row = makeCtcsConstraint<double>(dyn);
         if (row->getForm() != StcForm::Density || row->getDimC() != 1 ||
-            row->numImplications() != (useTriggeredLandingStc() ? 8 : 2))
+            row->numImplications() != 8)
             throw std::runtime_error("wrong CTCS form or implication count");
         std::mt19937 gen(20261013);
         std::uniform_real_distribution<double> unit(-1.0, 1.0);
@@ -60,7 +60,7 @@ int main() {
         const auto check=[&](bool ok,const char* message){if(!ok)throw std::runtime_error(message);};
         const auto index=[&](const char* name){for(int j=0;j<row->numImplications();++j)if(row->implication(j).name==name)return j;throw std::runtime_error("missing original implication");};
         Eigen::VectorXd x=Eigen::VectorXd::Zero(NX_SS),u=Eigen::VectorXd::Zero(NU_SS);x(6)=1.;u(0)=HOVER_THRUST;u(IDX_THETA)=TH0;
-        if(useTriggeredLandingStc()&&stageTriggerMode()=="radius"&&CTCS_MARGINS.trigger>0.){
+        if(CTCS_MARGINS.trigger>0.){
             const int stage=index("staging"),los=index("los"),land=index("landing_speed");
             x(0)=STAGE_RADIUS-.5*CTCS_MARGINS.trigger;x(2)=Z_STAGE+.05;
             check(row->triggered(stage,x)&&!physical->triggered(stage,x),"staging preactivation has the wrong polarity");

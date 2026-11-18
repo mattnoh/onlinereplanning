@@ -568,7 +568,7 @@ int main(int argc,char** argv){try{
             for(int j=0;j<NOBS;++j)audit_problem.mask[j]=(audit_problem.s_diag.cwiseProduct(relative.head<2>()-audit_problem.centers[j])).norm()<=sensing_radius;
             const auto row=rowAt(0);
             if(quad){
-                requireRh(StcLandingNoAugOCP::useTriggeredLandingStc()&&row&&row->numImplications()==8,"original quad STC implications are disabled or missing");
+                requireRh(row&&row->numImplications()==8,"original quad STC implications are disabled or missing");
                 requireRh(std::abs(row->getEpsilon()*StcLandingNoAugOCP::CTCS_Y_SCALE-physical_budget)<1e-15,"quad CTCS physical budget changed");
             }
             if(row){
@@ -578,7 +578,7 @@ int main(int argc,char** argv){try{
             }
             observeTriggers(relative,us.front(),cycle,time,0.);
             if(quad&&(reference_initial||staging_initial)&&cycle==0)
-                requireRh(StcLandingNoAugOCP::stageTriggerMode()=="radius"&&initial_trigger["staging"],"reference case must start with radius-based staging active");
+                requireRh(initial_trigger["staging"],"reference case must start with radius-based staging active");
         }
         if(quad)requireRh(xs.front()(13)==0.,"quad per-solve time state was not reset");
         requireRh(result.path.states.size()==xs.size(),"public interface omitted full state trajectory");

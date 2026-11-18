@@ -99,7 +99,6 @@ inline const auto& K_CAP = defaults.cost.k_cap;
 inline const auto& CAP_DESC_RADIUS = defaults.cost.cap_desc_radius;
 inline const auto& K_DESC = defaults.cost.k_desc;
 inline const auto& GS_APEX_OFFSET = defaults.constraints.gs_apex_offset;
-inline const auto& VZ_LAND_MAX = defaults.constraints.vz_land_max;
 inline const auto& THETA_PHASE0_DEG = defaults.constraints.theta_phase0_deg;
 inline const auto& OMEGA_PHASE0_MAX = defaults.constraints.omega_phase0_max;
 inline const auto& SPD_PHASE0_MAX = defaults.constraints.spd_phase0_max;
@@ -113,13 +112,10 @@ inline const auto& LOS_ALT_TRIG = defaults.constraints.los_alt_trig;
 inline const auto& LOS_TRIGGER_SCALE = defaults.constraints.los_trigger_scale;
 inline const auto& LOS_TRIGGER_FLOOR = defaults.constraints.los_trigger_floor;
 inline const auto& ALT_TRIG = defaults.constraints.alt_trig;
-inline const auto& CAP_LAND_RADIUS = defaults.constraints.cap_land_radius;
 inline const auto& Z_STAGE = defaults.constraints.z_stage;
 inline const auto& STAGE_RADIUS = defaults.constraints.stage_radius;
 inline const auto& STAGE_TRIGGER_SCALE = defaults.constraints.stage_trigger_scale;
 inline const auto& STAGE_TRIGGER_FLOOR = defaults.constraints.stage_trigger_floor;
-inline const auto& STAGE_SETTLE_TILT_DEG = defaults.constraints.stage_settle_tilt_deg;
-inline const auto& STAGE_SETTLE_OMEGA_MAX = defaults.constraints.stage_settle_omega_max;
 inline const auto& CTCS_Y_SCALE = defaults.constraints.ctcs_y_scale;
 inline const auto& CTCS_STEP_EPS = defaults.constraints.ctcs_step_eps;
 inline const double J_SCALE = 1.0/IXX;
@@ -129,10 +125,7 @@ inline const Eigen::Vector3d GRAVITY{0,0,-9.81};
 inline const double HOVER_THRUST = MASS*9.81;
 inline const double GS_CONE_TAN = std::tan(GS_CONE_HALF_ANGLE_DEG*M_PI/180.0);
 inline const double LOS_CONE_TAN = std::tan(LOS_CONE_HALF_ANGLE_DEG*M_PI/180.0);
-inline bool useTriggeredLandingStc(){return defaults.constraints.triggered_stc;}
-inline bool useRhCaptureLandingTrigger(){return defaults.constraints.capture_landing_trigger;}
 inline bool useRhFeedbackWarmStart(){return defaults.horizon.feedback_warm_start;}
-inline std::string stageTriggerMode(){return defaults.constraints.stage_trigger;}
 
 struct CtcsMargins {
     double trigger=0., geometric=0., speed=0., tilt_deg=0., path_tilt_deg=0., rate=0., los=0.;
@@ -214,24 +207,11 @@ inline Scalar posPart(const Scalar& v) {
     return (v > Scalar(0)) ? v : Scalar(0);
 }
 
+// Landing trigger activation: floor + depth below the trigger altitude.
 template<typename Scalar>
-inline Scalar landingAltitudeTrigger(const Scalar& z, const Scalar& rxy2,double altitude=ALT_TRIG,double floor=0.) {
+inline Scalar landingAltitudeTrigger(const Scalar& z,double altitude=ALT_TRIG,double floor=0.) {
     const Scalar depth = Scalar(altitude) - z;
-    const Scalar trig_alt = depth > Scalar(0) ? Scalar(floor) + depth : Scalar(0);
-    if (!useRhCaptureLandingTrigger()) return trig_alt;  // benchmark default
-    const Scalar cap2 = Scalar(CAP_LAND_RADIUS * CAP_LAND_RADIUS);
-    const Scalar trig_cap = posPart(cap2 - rxy2) / cap2;
-    return (trig_alt / Scalar(altitude)) * trig_cap;
-}
-
-inline double computeSigmaLand(const Eigen::VectorXd& x) {
-    const double rxy2 = x(0)*x(0) + x(1)*x(1);
-    return sigmaLandVal<double>(rxy2);
-}
-
-inline double computeTrigAlt(const Eigen::VectorXd& x) {
-    const double rxy2 = x(0)*x(0) + x(1)*x(1);
-    return landingAltitudeTrigger<double>(x(2), rxy2);
+    return depth > Scalar(0) ? Scalar(floor) + depth : Scalar(0);
 }
 
 // ── Constant-accel target predictor ───────────────────────────────────────────
@@ -442,7 +422,7 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     const auto floors=triggerFloors(tightened);
 
     const Scalar rxy2     = x(0)*x(0) + x(1)*x(1);
-    out.a_altitude_state  = landingAltitudeTrigger<Scalar>(x(2), rxy2,ALT_TRIG+margins.trigger,floors.landing);
+    out.a_altitude_state  = landingAltitudeTrigger<Scalar>(x(2),ALT_TRIG+margins.trigger,floors.landing);
 
     const Scalar v2     = x.template segment<3>(3).squaredNorm();
     const Scalar qperp2 = x(7)*x(7) + x(8)*x(8);
@@ -450,21 +430,10 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     const Scalar rxy    = std::sqrt(rxy2 + Scalar(1e-12));
     const Scalar stage_radius_margin =
         (rxy - Scalar(STAGE_RADIUS-margins.stage_radius)) / Scalar(STAGE_TRIGGER_SCALE);
-    const Scalar stage_radius_trig =
+    out.a_stage =
         (stage_radius_margin > Scalar(0))
             ? Scalar(floors.stage) + stage_radius_margin
             : Scalar(0);
-    const Scalar stage_settle_tilt_lim =
-        Scalar(std::pow(std::sin(0.5 * STAGE_SETTLE_TILT_DEG * M_PI / 180.0), 2));
-    const Scalar stage_settle_tilt = posPart(qperp2 - stage_settle_tilt_lim);
-    const Scalar stage_settle_omega =
-        posPart(om2 - Scalar(STAGE_SETTLE_OMEGA_MAX * STAGE_SETTLE_OMEGA_MAX));
-    const std::string stage_mode = stageTriggerMode();
-    if (stage_mode == "settle") {
-        out.a_stage = stage_settle_tilt + stage_settle_omega;
-    } else {
-        out.a_stage = stage_radius_trig;
-    }
 
     const Scalar loose_tilt_lim =
         Scalar(std::pow(std::sin(0.5 * (THETA_PHASE0_DEG-margins.path_tilt_deg) * M_PI / 180.0), 2));
@@ -518,21 +487,15 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
 
     out.path_value = path_sum;
 
-    const bool trig_stc_on = useTriggeredLandingStc();
-
-    if (trig_stc_on) {
-        const Scalar stage_height_viol = posPart(Scalar(Z_STAGE+margins.stage_height) - x(2));
-        out.staging_value = Scalar(W_STC_STAGE) *
-                            out.a_stage * out.a_stage *
-                            stage_height_viol * stage_height_viol;
-
-        out.los_value = Scalar(W_STC_LOS) *
-                        out.a_los * out.a_los *
-                        out.los * out.los;
-
-        out.landing_value =
-            out.a_altitude_state * out.a_altitude_state * landing_sum;
-    }
+    const Scalar stage_height_viol = posPart(Scalar(Z_STAGE+margins.stage_height) - x(2));
+    out.staging_value = Scalar(W_STC_STAGE) *
+                        out.a_stage * out.a_stage *
+                        stage_height_viol * stage_height_viol;
+    out.los_value = Scalar(W_STC_LOS) *
+                    out.a_los * out.a_los *
+                    out.los * out.los;
+    out.landing_value =
+        out.a_altitude_state * out.a_altitude_state * landing_sum;
 
     out.stc_value =
         out.staging_value      +
@@ -911,27 +874,18 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
     add("loose_omega", always, zero,
         [=](const Vec& x) -> Scalar { return omega(x) - Scalar(std::pow(OMEGA_PHASE0_MAX-margins.rate,2)); }, domega, 1.0);
 
-    if (useTriggeredLandingStc()) {
-        const bool settle = stageTriggerMode() == "settle";
-        const Scalar settleTilt = tiltLimit(STAGE_SETTLE_TILT_DEG);
+    {
         StateFn stageTrigger = [=](const Vec& x) -> Scalar {
-            if (settle) return -(posPart(tilt(x) - settleTilt) +
-                posPart(omega(x) - Scalar(STAGE_SETTLE_OMEGA_MAX*STAGE_SETTLE_OMEGA_MAX)));
             const Scalar margin = (std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) -
                                    Scalar(STAGE_RADIUS-margins.stage_radius)) / Scalar(STAGE_TRIGGER_SCALE);
             return margin > Scalar(0) ? -(Scalar(floors.stage) + margin) : Scalar(0);
         };
         GradFn dstage = [=](const Vec& x) -> Vec {
             Vec g = Vec::Zero(x.size());
-            if (settle) {
-                if (tilt(x) > settleTilt) g -= dtilt(x);
-                if (omega(x) > Scalar(STAGE_SETTLE_OMEGA_MAX*STAGE_SETTLE_OMEGA_MAX)) g -= domega(x);
-            } else {
-                const Scalar r = std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
-                if (r > Scalar(STAGE_RADIUS-margins.stage_radius)) {
-                    g(0) = -x(0)/(r*Scalar(STAGE_TRIGGER_SCALE));
-                    g(1) = -x(1)/(r*Scalar(STAGE_TRIGGER_SCALE));
-                }
+            const Scalar r = std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
+            if (r > Scalar(STAGE_RADIUS-margins.stage_radius)) {
+                g(0) = -x(0)/(r*Scalar(STAGE_TRIGGER_SCALE));
+                g(1) = -x(1)/(r*Scalar(STAGE_TRIGGER_SCALE));
             }
             return g;
         };
@@ -985,26 +939,12 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
         };
         add("los", losTrigger, dlosTrigger, los, dlos, W_STC_LOS);
 
-        const bool capture = useRhCaptureLandingTrigger();
         StateFn landTrigger = [=](const Vec& x) -> Scalar {
             const Scalar depth = Scalar(ALT_TRIG+margins.trigger) - x(2);
-            if (!capture) return depth > Scalar(0) ? -(Scalar(floors.landing) + depth) : -depth;
-            return -landingAltitudeTrigger<Scalar>(x(2), x(0)*x(0)+x(1)*x(1),ALT_TRIG+margins.trigger,floors.landing);
+            return depth > Scalar(0) ? -(Scalar(floors.landing) + depth) : -depth;
         };
         GradFn dland = [=](const Vec& x) -> Vec {
-            Vec g = Vec::Zero(x.size());
-            if (!capture) { g(2) = Scalar(1); return g; }
-            const Scalar cap2 = Scalar(CAP_LAND_RADIUS*CAP_LAND_RADIUS);
-            const Scalar depth = Scalar(ALT_TRIG+margins.trigger)-x(2);
-            const Scalar altitude = depth > Scalar(0) ? Scalar(floors.landing) + depth : Scalar(0);
-            const Scalar lateral = posPart(cap2-x(0)*x(0)-x(1)*x(1));
-            const Scalar denominator = Scalar(ALT_TRIG+margins.trigger)*cap2;
-            if (altitude > Scalar(0)) g(2) = lateral/denominator;
-            if (lateral > Scalar(0)) {
-                g(0) = Scalar(2)*x(0)*altitude/denominator;
-                g(1) = Scalar(2)*x(1)*altitude/denominator;
-            }
-            return g;
+            Vec g = Vec::Zero(x.size()); g(2) = Scalar(1); return g;
         };
         add("landing_speed", landTrigger, dland,
             [=](const Vec& x) -> Scalar { return x.template segment<3>(3).squaredNorm()-Scalar(std::pow(SPD_STC_MAX-margins.speed,2)); },
