@@ -552,6 +552,13 @@ Scalar evalCtcsIntegrand(const Vector<Scalar>& x,
     return evalCtcsIntegrandTerms(x, u, tightened).value;
 }
 
+// RK4 substeps of the physical rows' interval integral.
+inline int ctcsPhysicalSubsteps(){
+    static const int n=envOrInt("SZMUK_CTCS_PHYSICAL_SUBSTEPS",8);
+    if(n<1)throw std::invalid_argument("SZMUK_CTCS_PHYSICAL_SUBSTEPS must be >= 1");
+    return n;
+}
+
 // Intervals before this node use the physical rows (tightened=false).
 inline int ctcsTightenFromNode(){
     static const int node=envOrInt("SZMUK_CTCS_TIGHTEN_FROM_NODE",4);
@@ -1163,10 +1170,13 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     // physical boundary sharp, see triggerFloors). The measured root is fixed,
     // so a root inside the physical set but in the margin band would otherwise
     // make the tightened OCP infeasible from its first interval. Without
-    // tightening margins both rows are identical.
+    // tightening margins both rows are identical. Physical rows have no margin
+    // to absorb a violation between quadrature points (a trigger crossed
+    // between the RK4 stage points is invisible to a one-step integral), so
+    // they integrate with ctcsPhysicalSubsteps() RK4 substeps.
     const int tighten_from=ctcsTightenFromNode();
     auto cstep_physical = tighten_from>0 ?
-        makeCtcsConstraint<double>(dyn, CTCS_STEP_EPS / CTCS_Y_SCALE, IDX_THETA, 0.0, 1, false) : cstep;
+        makeCtcsConstraint<double>(dyn, CTCS_STEP_EPS / CTCS_Y_SCALE, IDX_THETA, 0.0, ctcsPhysicalSubsteps(), false) : cstep;
     const double eps_cost = envOrQ("SZMUK_W_EPS", 1.0);
     const Eigen::Vector3d r_follow(0.0, 0.0, Z_STAGE);
     auto stage_cost = std::make_shared<CTcSTCStageCost<double>>(
