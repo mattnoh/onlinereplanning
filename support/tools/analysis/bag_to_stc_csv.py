@@ -90,6 +90,12 @@ def resolve_constants() -> dict:
                               * _env_or("SZMUK_TILT_STC_DEG", 0.95))
     c["capture_landing_trigger"] = float(os.environ.get("SZMUK_RH_CAPTURE_LANDING_TRIGGER", "0") != "0")
     c["triggered_landing"] = float(os.environ.get("SZMUK_QUAD_TRIG_STC", "1") != "0")
+    # stc_landing_noaug keeps its numbers in the OCP preset named by STC_PRESET.
+    if os.environ.get("STC_PRESET"):
+        import json, shutil, subprocess
+        tool = shutil.which("stc_preset_bounds") or os.path.join(
+            os.environ.get("COMANDO_BUILD_DIR", "/home/lab/mavros_ws/build/comando_planner"), "stc_preset_bounds")
+        c.update(json.loads(subprocess.check_output([tool], text=True)))
     c["gs_cone_tan"] = math.tan(math.radians(c["gs_cone_deg"]))
     c["los_cone_tan"] = math.tan(math.radians(c["los_cone_deg"]))
     return c
