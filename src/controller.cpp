@@ -65,40 +65,6 @@ void Controller::openControlLog(const std::string& path){std::unique_lock<std::s
 
 #include <algorithm>
 #include <iostream>
-#include <atomic>
-#include <cstring>
-#include <sstream>
-#include <thread>
-extern char** environ;
-namespace {
-// Diagnostic only (COMANDO_REQUEST_DUMP_DIR): write each solve request in the
-// format read by test_measured_root_rh --diagnose-request. No effect when unset.
-// Formatting runs on the solve thread before solve_finish_time is stamped, so
-// it counts toward solve latency and the deadline check; only the file write
-// is deferred to a detached thread.
-void dumpRequest(const std::string& ocp,const OCPCreateArgs& args,const OptimalControlProblem<double>& problem,
-                 const std::vector<Eigen::VectorXd>& X,const std::vector<Eigen::VectorXd>& U,bool success,int nx_ss){
-    static std::atomic<int> counter{0};
-    const char* dir=std::getenv("COMANDO_REQUEST_DUMP_DIR");if(!dir||!*dir)return;
-    const std::string path=std::string(dir)+"/request-"+std::to_string(counter++)+(success?"-ok":"-fail")+".txt";
-    std::ostringstream out;
-    out<<std::setprecision(17)<<"ocp "<<ocp<<'\n';
-    std::vector<std::string> names;
-    for(char** e=environ;*e;++e){const std::string v(*e);const auto n=v.substr(0,v.find('='));
-        if(n.rfind("SZMUK_",0)==0||n.rfind("MPC_",0)==0||n=="OMP_NUM_THREADS"||n=="OPENBLAS_NUM_THREADS")names.push_back(v);}
-    std::sort(names.begin(),names.end());
-    for(const auto& v:names){const auto eq=v.find('=');out<<"environment "<<std::quoted(v.substr(0,eq))<<' '<<std::quoted(v.substr(eq+1))<<'\n';}
-    out<<"environment_end\nepoch "<<args.t_abs<<"\nhorizon "<<problem.getHorizon()<<"\nroot";
-    Eigen::VectorXd root=Eigen::VectorXd::Zero(std::max<int>(nx_ss,args.current_state.size()));root.head(args.current_state.size())=args.current_state;
-    for(int j=0;j<root.size();++j)out<<' '<<root(j);
-    out<<"\ntarget_acceleration "<<args.target_accel.transpose()<<'\n';
-    auto vectors=[&](const char* label,const std::vector<Eigen::VectorXd>& v){out<<label<<' '<<v.size()<<'\n';for(const auto& x:v)out<<x.size()<<' '<<x.transpose()<<'\n';};
-    std::vector<Eigen::VectorXd> px,pu;const int N=problem.getHorizon();
-    for(int k=0;k<=N;++k){px.push_back(problem.getInitialState(k));if(k<N)pu.push_back(problem.getInitialControl(k));}
-    vectors("prepared_X",px);vectors("prepared_U",pu);vectors("returned_X",X);vectors("returned_U",U);
-    std::thread([path,text=out.str()]{std::ofstream f(path);if(f)f<<text;}).detach();
-}
-}
 
 using namespace std;
 
@@ -302,10 +268,6 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
             std::isfinite(result.optimality_error) &&
             result.optimality_error <= solver_params_.tolerance &&
             result.primal.feasible(solver_params_.tolerance);
-
-        if(std::getenv("COMANDO_REQUEST_DUMP_DIR"))
-            dumpRequest(descriptor().name,args,*problem_,X_result,U_result,
-                        result.converged,static_cast<int>(problem_->getInitialState(0).size()));
 
         const auto t_finish = chrono::steady_clock::now();
         result.solve_finish_time = t_finish;

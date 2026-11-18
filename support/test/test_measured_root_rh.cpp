@@ -303,6 +303,8 @@ int main(int argc,char** argv){try{
         else throw std::invalid_argument("unknown option "+option);
     }
     const bool quad=std::string(argv[1])=="quad",fine=std::string(argv[2])=="fine";
+    // A single pointmass horizon is never re-sensed: it sees every obstacle.
+    const double sensing_radius=single_horizon?std::numeric_limits<double>::infinity():6.;
     requireRh(quad||std::string(argv[1])=="pointmass","unknown model");
     requireRh(!reference_initial||quad,"reference initial condition is quad-only");
     requireRh(!remaining_horizon||quad,"remaining landing horizon is quad-only");
@@ -316,7 +318,7 @@ int main(int argc,char** argv){try{
     const std::filesystem::path out(argv[4]);
     requireRh(bound>0&&bound<=400&&std::filesystem::create_directories(out),"invalid cycle bound/output");
     auto descriptor=quad?std::make_shared<OCPDescriptor>(OCPRegistry::getDescriptor(ctcs?"stc_landing_noaug":"stc_landing_noaug_node")):
-        pointmassReferenceDescriptor(100,false,!ctcs);
+        pointmassReferenceDescriptor(100,false,!ctcs,sensing_radius);
     if(fixed_dt>0.)descriptor=FixedQuadTime::descriptor(*descriptor,fixed_dt);
     configureTestParameters(*descriptor);
     // The OCP may own the native guess for measured roots (stc_landing_noaug).
@@ -560,7 +562,7 @@ int main(int argc,char** argv){try{
             guess_dynamics_error=std::max(guess_dynamics_error,auditPrimal(*captured_problem,prepared_x,prepared_u,params).dynamics);
         }
         if(ctcs){
-            for(int j=0;j<NOBS;++j)audit_problem.mask[j]=(audit_problem.s_diag.cwiseProduct(relative.head<2>()-audit_problem.centers[j])).norm()<=6.;
+            for(int j=0;j<NOBS;++j)audit_problem.mask[j]=(audit_problem.s_diag.cwiseProduct(relative.head<2>()-audit_problem.centers[j])).norm()<=sensing_radius;
             const auto row=rowAt(0);
             if(quad){
                 requireRh(StcLandingNoAugOCP::useTriggeredLandingStc()&&row&&row->numImplications()==8,"original quad STC implications are disabled or missing");
@@ -672,7 +674,8 @@ int main(int argc,char** argv){try{
            <<",\"planned_dense_excess\":"<<predicted_dense_error<<",\"distance\":"<<plant.head(quad?3:2).norm()<<"}\n";log.flush();
         std::cout<<"MEASURED_RH model="<<(quad?"quad":"pointmass")<<" cycle="<<cycle<<" t="<<time<<" ctcs="<<ctcs<<" native="<<audit.constraints<<" budget_native="<<native_budget_ratio<<" budget_planned="<<planned_budget_ratio<<" budget_executed="<<executed_budget_ratio<<" executed="<<executed_error<<" planned_dense="<<predicted_dense_error<<std::endl;
     }
-    const bool progress=quad?reached:(plant(0)>0.&&(plant.head<2>()-reference(time)).norm()<1.);
+    // The 30 s course ends past x=0; one 8 s horizon only has to track.
+    const bool progress=quad?reached:((single_horizon||plant(0)>0.)&&(plant.head<2>()-reference(time)).norm()<1.);
     const bool native_pass=accepted>0&&(quad?reached:accepted==bound)&&progress&&root_error<=1e-12&&native_error<=params.tolerance;
     // NODE acceptance covers shooting nodes. Dense checks remain diagnostics.
     const bool node_pass=native_pass;

@@ -553,18 +553,12 @@ Scalar evalCtcsIntegrand(const Vector<Scalar>& x,
 }
 
 // RK4 substeps of the physical rows' interval integral.
-inline int ctcsPhysicalSubsteps(){
-    static const int n=envOrInt("SZMUK_CTCS_PHYSICAL_SUBSTEPS",8);
-    if(n<1)throw std::invalid_argument("SZMUK_CTCS_PHYSICAL_SUBSTEPS must be >= 1");
-    return n;
-}
+constexpr int CTCS_PHYSICAL_SUBSTEPS=8;
+inline int ctcsPhysicalSubsteps(){return CTCS_PHYSICAL_SUBSTEPS;}
 
 // Intervals before this node use the physical rows (tightened=false).
-inline int ctcsTightenFromNode(){
-    static const int node=envOrInt("SZMUK_CTCS_TIGHTEN_FROM_NODE",4);
-    if(node<0)throw std::invalid_argument("SZMUK_CTCS_TIGHTEN_FROM_NODE must be >= 0");
-    return node;
-}
+constexpr int CTCS_TIGHTEN_FROM_NODE=4;
+inline int ctcsTightenFromNode(){return CTCS_TIGHTEN_FROM_NODE;}
 
 // ── Stage cost ────────────────────────────────────────────────────────────────
 template<typename Scalar>
@@ -1165,7 +1159,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     // CTCS_STEP_EPS is divided by CTCS_Y_SCALE (same zero set as unscaled).
     // Hard-wired: this OCP has no other enforcement mode.
     auto cstep = makeCtcsConstraint<double>(dyn);
-    // Intervals before node SZMUK_CTCS_TIGHTEN_FROM_NODE use the physical
+    // Intervals before node CTCS_TIGHTEN_FROM_NODE use the physical
     // implications (no consequence tightening; trigger floors keep the
     // physical boundary sharp, see triggerFloors). The measured root is fixed,
     // so a root inside the physical set but in the margin band would otherwise

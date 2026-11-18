@@ -183,7 +183,7 @@ handoff, against the live target. These used to be opt-in and are now defaults:
 
 - `measured_state_delay_compensation: true` also anchors the target and the
   terminal freeze on the live target state.
-- Intervals before `SZMUK_CTCS_TIGHTEN_FROM_NODE` (default 4) use the physical
+- Intervals before node 4 (`CTCS_TIGHTEN_FROM_NODE`) use the physical
   CTCS rows, so a fixed measured root inside the physical set but in the margin
   band is still feasible. Physical rows keep the tightened rows' trigger floors
   (`triggerFloors`), so they stay active at trigger boundaries.
@@ -193,7 +193,7 @@ handoff, against the live target. These used to be opt-in and are now defaults:
 Approach tilt, approach rate, approach speed and landing rate are sized from
 what the planned trajectories used (a 1 ms dense audit of every accepted
 horizon), not from PX4 tracking error. The remaining bounds are active in the
-plans and keep the values moving targets need; see the env header. Physical rows integrate with `SZMUK_CTCS_PHYSICAL_SUBSTEPS` (default 8)
+plans and keep the values moving targets need; see the env header. Physical rows integrate with 8 (`CTCS_PHYSICAL_SUBSTEPS`)
 RK4 substeps, so a trigger crossed between quadrature points is still seen. In
 the verification campaign (record `measured_sitl_20261118`) all 7 target
 motions landed (circle, figure-eight, straight, stop-and-go, piecewise

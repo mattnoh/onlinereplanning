@@ -57,14 +57,17 @@ std::shared_ptr<OptimalControlProblem<double>> referenceProblem(const OCPCreateA
 }
 
 namespace {
-std::shared_ptr<OCPDescriptor> pointmassReferenceDescriptor(int substeps=100,bool shared_cache=false,bool node_constraints=false){
+// sensing_radius: obstacles whose scaled distance from the root is within it
+// enter the horizon's frozen mask (6, the reference's sensing range). A single
+// horizon is never re-sensed, so it must see every obstacle (infinity).
+std::shared_ptr<OCPDescriptor> pointmassReferenceDescriptor(int substeps=100,bool shared_cache=false,bool node_constraints=false,double sensing_radius=6.){
     auto descriptor=std::make_shared<OCPDescriptor>();descriptor->name=node_constraints?"existing_pointmass_node":"existing_pointmass_ctcs";
     descriptor->state_dim=NX;descriptor->control_dim=NU;descriptor->dt=.5;
     descriptor->coordinates=OCPDescriptor::Coordinates::World;
     descriptor->getSolverParams=[](){Param p;p.verbose=false;p.max_iter=300;p.tolerance=1e-6;p.reg1_min=1e-6;p.reg2_min=1.;p.use_ddp_terms=false;p.use_feasibility_ms=true;return p;};
-    descriptor->create=[substeps,shared_cache,node_constraints](const OCPCreateArgs& args){
+    descriptor->create=[substeps,shared_cache,node_constraints,sensing_radius](const OCPCreateArgs& args){
         auto data=std::make_shared<Problem>();data->substeps=substeps;data->epoch=args.t_abs;
-        for(int i=0;i<NOBS;++i)data->mask[i]=(data->s_diag.cwiseProduct(args.current_state.head<2>()-data->centers[i])).norm()<=6.;
+        for(int i=0;i<NOBS;++i)data->mask[i]=(data->s_diag.cwiseProduct(args.current_state.head<2>()-data->centers[i])).norm()<=sensing_radius;
         auto bound=args;bound.extra=data;return referenceProblemWithCache(bound,shared_cache,node_constraints);
     };
     descriptor->make_model=[substeps](const Eigen::Vector3d&){
