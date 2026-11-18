@@ -97,7 +97,6 @@ int main(int argc,char** argv){try{
  };
  planner_core::PlannerCoreConfig cfg;cfg.ocp_type=desc->name;cfg.ocp_dt=desc->dt;cfg.n_replay=4;cfg.enable_terminal_freeze=false;
  cfg.max_first_solve_age_sec=1.;cfg.measured_state_delay_compensation=compensated;
- cfg.use_native_initial_guess=comando_parameters::envOrInt("WALL_RH_NATIVE_GUESS",0)!=0;
  if(compensated){cfg.initial_solve_lead_sec=comando_parameters::envOrQ("WALL_RH_INITIAL_LEAD",1.2);cfg.solve_lead_guard_sec=comando_parameters::envOrQ("WALL_RH_GUARD",.3);}
  planner_core::Controller controller;controller.configure(cfg,desc);
  const auto origin=Clock::now();std::atomic<bool> stop{false},busy{false};

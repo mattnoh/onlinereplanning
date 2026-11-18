@@ -1303,6 +1303,9 @@ inline OCPDescriptor descriptor() {
     d.default_n_replay = NEX;
     d.default_mass_kg = MASS;
     d.warm_start = OCPDescriptor::WarmStart::Feedback;
+    // A shifted plan from a different measured root leaves the CTCS solve
+    // uncertified; the staged nativeGuessControl seed converges.
+    d.native_guess_for_measured_root = true;
     d.command_mode = OCPDescriptor::CommandMode::CmdFullState;
     d.world_acceleration=[](const Eigen::VectorXd& x,const Eigen::VectorXd& u) {
         if(x.size()<13||u.size()<1||!x.allFinite()||!u.allFinite())throw std::invalid_argument("invalid DDP acceleration input");
@@ -1439,6 +1442,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> ordinaryNodeProblem(
 
 inline OCPDescriptor ordinaryNodeDescriptor(){
     auto d=descriptor();d.name="stc_landing_noaug_node";
+    d.native_guess_for_measured_root=false;  // recorded node baseline uses the shift
     const auto original=d.create;
     d.create=[original](const OCPCreateArgs& args){return ordinaryNodeProblem(*original(args));};
     return d;

@@ -257,6 +257,11 @@ struct OCPDescriptor {
     int default_n_replay = 4;
     double default_mass_kg = 0.027;
     WarmStart warm_start = WarmStart::Shift;
+    // Start every measured-root solve (synchronous, or asynchronous with
+    // measured_state_delay_compensation) from the OCP's own initial guess
+    // instead of the shifted previous plan. Same effect as
+    // PlannerCoreConfig::use_native_initial_guess, owned by the OCP.
+    bool native_guess_for_measured_root = false;
     CommandMode command_mode = CommandMode::CmdFullState;
     Coordinates coordinates = Coordinates::World;
     std::function<Eigen::Vector3d(const Eigen::VectorXd&,const Eigen::VectorXd&)> world_acceleration;

@@ -707,7 +707,8 @@ private:
         cfg.terminal_state = config_.terminal_state;
         cfg.n_shift = config_.n_replay;
         cfg.descriptor = std::make_shared<OCPDescriptor>(desc_);
-        cfg.use_native_initial_guess = config_.use_native_initial_guess;
+        cfg.use_native_initial_guess = config_.use_native_initial_guess ||
+            (desc_.native_guess_for_measured_root && config_.measured_state_delay_compensation);
         mpc_ = std::make_unique<OcpSolver>(cfg);
     }
 

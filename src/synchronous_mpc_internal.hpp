@@ -65,6 +65,8 @@ public:
             throw std::invalid_argument("invalid synchronous MPC execution interval count");
         OcpSolver::Config cfg;cfg.ocp_type=config.ocp_type;cfg.descriptor=descriptor_;
         cfg.n_shift=intervals_;
+        // Every synchronous root is measured.
+        cfg.use_native_initial_guess=config.use_native_initial_guess||descriptor_->native_guess_for_measured_root;
         if(config.terminal_state.size())cfg.terminal_state=config.terminal_state;
         // The reference solves each horizon with its original work allowance.
         solver_=std::make_unique<OcpSolver>(cfg);

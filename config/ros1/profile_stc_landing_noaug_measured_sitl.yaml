@@ -8,5 +8,4 @@ measured_state_delay_compensation: true
 initial_solve_lead_sec: 0.5
 solve_lead_guard_sec: 0.15
 land_action: force_disarm
-use_native_initial_guess: true
 predict_tracking_error: true

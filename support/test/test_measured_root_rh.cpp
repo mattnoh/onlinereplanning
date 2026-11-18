@@ -319,6 +319,8 @@ int main(int argc,char** argv){try{
         pointmassReferenceDescriptor(100,false,!ctcs);
     if(fixed_dt>0.)descriptor=FixedQuadTime::descriptor(*descriptor,fixed_dt);
     configureTestParameters(*descriptor);
+    // The OCP may own the native guess for measured roots (stc_landing_noaug).
+    native_guess=native_guess||descriptor->native_guess_for_measured_root;
     const auto params=descriptor->getSolverParams();
     std::shared_ptr<OptimalControlProblem<double>> captured_problem;
     std::shared_ptr<StcStageConstraint<double>> physical_stc;
@@ -442,6 +444,23 @@ int main(int argc,char** argv){try{
             if(physical_stc->triggered(j,x))excess=std::max(excess,physical_stc->implication(j).consequence(x,u));
         return excess;
     };
+    // Where the largest planned physical STC excess occurs (diagnostic).
+    std::string planned_peak_name;int planned_peak_cycle=-1,planned_peak_k=-1;double planned_peak_z=0.;
+    int current_cycle=0;
+    const auto notePlanned=[&](const Vec& x,const Vec& u,int k){
+        if(!(quad&&physical_stc))return;
+        for(int j=0;j<physical_stc->numImplications();++j)if(physical_stc->triggered(j,x)){
+            double c=physical_stc->implication(j).consequence(x,u);
+            // The row's LOS lateral distance is sqrt(lateral^2+1e-12) (a
+            // derivative regulariser, 1e-6 m at the apex); grade the exact one.
+            if(physical_stc->implication(j).name=="los"){
+                const Eigen::Vector3d axis(2*(x(7)*x(9)+x(6)*x(8)),2*(x(8)*x(9)-x(6)*x(7)),x(6)*x(6)-x(7)*x(7)-x(8)*x(8)+x(9)*x(9));
+                const double axial=x.head<3>().dot(axis),lateral2=std::max(0.,x.head<3>().squaredNorm()-axial*axial);
+                c-=std::sqrt(lateral2+1e-12)-std::sqrt(lateral2);
+            }
+            if(c>planned_stc_excess){planned_stc_excess=c;planned_peak_name=physical_stc->implication(j).name;planned_peak_cycle=current_cycle;planned_peak_k=k;planned_peak_z=x(2);}
+        }
+    };
     const double physical_budget=quad?StcLandingNoAugOCP::CTCS_STEP_EPS:audit_problem.eps;
 
     std::ofstream log(out/"cycles.jsonl");log<<std::setprecision(17);
@@ -464,7 +483,7 @@ int main(int argc,char** argv){try{
     const auto saveVectors=[](std::ostream& stream,const char* label,const auto& vectors){
         stream<<label<<' '<<vectors.size()<<'\n';for(const auto& v:vectors)stream<<v.size()<<' '<<v.transpose()<<'\n';
     };
-    for(int cycle=0;cycle<bound&&!reached;++cycle){
+    for(int cycle=0;cycle<bound&&!reached;++cycle){current_cycle=cycle;
         input.current_state=plant;input.absolute_time_sec=time;input.now=std::chrono::steady_clock::now();input.target_snapshot=targetAt(time);
         const auto measured=plant;
         captured_problem.reset();
@@ -578,7 +597,7 @@ int main(int argc,char** argv){try{
             requireRh(h>0.&&std::isfinite(h),"invalid optimized stage duration");durations.push_back(h);horizon+=h;
             const int n=std::max(1,int(std::ceil(h/.001)));const double step=h/n;auto state=xs[k];double integral=0.;
             const auto row=ctcs?rowAt(static_cast<int>(k)):nullptr;
-            if(ctcs)planned_stc_excess=std::max(planned_stc_excess,physicalStcExcess(xs[k],us[k]));
+            if(ctcs)notePlanned(xs[k],us[k],int(k));
             const double native_ratio=row?row->intervalIntegral(xs[k],us[k])/row->getEpsilon():0.;
             if(row){
                 native_budget_ratio=std::max(native_budget_ratio,native_ratio);
@@ -591,7 +610,7 @@ int main(int argc,char** argv){try{
                 const auto next=model.flow(state,us[k],step,false).x;
                 if(ctcs){
                     const auto mid=model.flow(state,us[k],.5*step,false).x;
-                    planned_stc_excess=std::max({planned_stc_excess,physicalStcExcess(mid,us[k]),physicalStcExcess(next,us[k])});
+                    notePlanned(mid,us[k],int(k));notePlanned(next,us[k],int(k));
                     predicted_dense_error=std::max(predicted_dense_error,physical(mid,us[k]));
                     integral+=step*(densityRatio(state,us[k],int(k))+4.*densityRatio(mid,us[k],int(k))+densityRatio(next,us[k],int(k)))/6.;
                 }
@@ -603,7 +622,7 @@ int main(int argc,char** argv){try{
                 budgets<<cycle<<",planned,"<<k<<','<<h<<','<<physical_budget<<','<<(row?row->getEpsilon():0.)<<','<<native_ratio<<','<<integral<<'\n';
             }
         }
-        if(ctcs)planned_stc_excess=std::max(planned_stc_excess,physicalStcExcess(xs.back(),us.back()));
+        if(ctcs)notePlanned(xs.back(),us.back(),int(us.size())-1);
         double prefix=0.;
         for(int k=0;k<std::min(K,int(us.size()));++k){
             const auto interval_start=plant;const int n=std::max(1,int(std::ceil(durations[k]/.001)));const double h=durations[k]/n;
@@ -667,7 +686,7 @@ int main(int argc,char** argv){try{
     std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"model\":"<<jstr(quad?"quad":"pointmass")<<",\"plant_execution\":"<<jstr(fine?"refined_1ms":"matched_discrete")<<",\"plant_acceleration_x\":"<<plant_acceleration_x<<",\"reference_initial\":"<<reference_initial<<",\"staging_initial\":"<<staging_initial<<",\"initial_ctcs_ratio\":"<<initial_budget_ratio<<",\"accepted\":"<<accepted<<",\"reached\":"<<reached<<",\"simulation_time\":"<<time
         <<",\"ctcs\":"<<ctcs<<",\"ctcs_loop_pass\":"<<ctcs_pass<<",\"staging_transition_pass\":"<<staging_transition_pass<<",\"native_ctcs_ratio\":"<<native_budget_ratio<<",\"planned_ctcs_ratio\":"<<planned_budget_ratio<<",\"executed_ctcs_ratio\":"<<executed_budget_ratio
         <<",\"loop_pass\":"<<loop_pass<<",\"physical_stc_pass\":"<<physical_stc_pass<<",\"physical_stc_excess\":"<<physical_stc_excess<<",\"standalone_comparisons\":"<<standalone_comparisons<<",\"shift_error\":"<<shift_error<<",\"initial_guess_dynamics_error\":"<<guess_dynamics_error
-        <<",\"planned_physical_stc_excess\":"<<planned_stc_excess<<",\"remaining_horizon\":"<<remaining_horizon<<",\"stationary_target\":"<<stationary_target
+        <<",\"planned_physical_stc_excess\":"<<planned_stc_excess<<",\"planned_peak_implication\":"<<jstr(planned_peak_name)<<",\"planned_peak_cycle\":"<<planned_peak_cycle<<",\"planned_peak_interval\":"<<planned_peak_k<<",\"planned_peak_z\":"<<planned_peak_z<<",\"remaining_horizon\":"<<remaining_horizon<<",\"stationary_target\":"<<stationary_target
         <<",\"fixed_dt\":"<<fixed_dt<<",\"single_horizon\":"<<single_horizon<<",\"replay_intervals\":"<<K
         <<",\"physical_interval_budget\":"<<physical_budget<<",\"density_parity_error\":"<<density_parity_error<<",\"planned_dense_state_defect\":"<<dense_state_defect
         <<",\"native_solve_pass\":"<<native_pass<<",\"node_loop_pass\":"<<node_pass<<",\"planned_continuous_pass\":"<<(predicted_dense_error<=1e-6)<<",\"planned_dense_excess\":"<<predicted_dense_error
