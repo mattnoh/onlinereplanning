@@ -193,13 +193,18 @@ handoff, against the live target. These used to be opt-in and are now defaults:
 Approach tilt, approach rate, approach speed and landing rate are sized from
 what the planned trajectories used (a 1 ms dense audit of every accepted
 horizon), not from PX4 tracking error. The remaining bounds are active in the
-plans and keep the values moving targets need; see the env header. In the
-final campaign all 7 target motions landed (circle, figure-eight, straight,
-stop-and-go, piecewise acceleration, random acceleration, stationary).
-Planner-side excess on accepted plans was at most 0.0099 m/s speed,
-0.0012 rad/s rate and 0.2 mm position. The plant had no excess except on
-stop-and-go, whose instant target reversal near the pad drove the measured rate
-to 0.297 rad/s and the glideslope error to 2.4 cm. The earlier widened and
+plans and keep the values moving targets need; see the env header. Physical rows integrate with `SZMUK_CTCS_PHYSICAL_SUBSTEPS` (default 8)
+RK4 substeps, so a trigger crossed between quadrature points is still seen. In
+the verification campaign (record `measured_sitl_20261118`) all 7 target
+motions landed (circle, figure-eight, straight, stop-and-go, piecewise
+acceleration, random acceleration, stationary). The part of every accepted plan
+that was flown had no excess against the physical bounds, and the whole plans
+stayed within 0.3 mm near the pad. Plant excess remained only in the PX4
+tracking: body rate 0.34 rad/s on stop-and-go and 0.31 rad/s on straight, and
+1.2 cm glideslope on stop-and-go. Frozen-time
+(`test_measured_root_rh ... --native-initial-guess`) and wall-clock
+(`WALL_RH_NATIVE_GUESS=1 WALL_RH_MAX_CONSECUTIVE_REJECTIONS=5`) loops with
+this env land with zero executed physical excess. The earlier widened and
 moving profiles were removed; their records remain in
 `support/test/frozen_node_baseline.json`.
 

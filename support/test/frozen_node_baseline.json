@@ -5061,5 +5061,136 @@
         "LANDED 0"
       ]
     }
+  },
+  "measured_sitl_20261118": {
+    "status": "7/7 PX4/Gazebo target motions landed; flown part of every accepted plan has zero physical excess; whole plans <= 0.3 mm (floor/LOS cone near the pad).",
+    "planner_commit": "f6496bf",
+    "configuration": {
+      "env": "config/frozen_quad_ctcs_coarse.env + config/ros1/tuning_stc_measured_rh_sitl.env",
+      "profile": "config/ros1/profile_stc_landing_noaug_measured_sitl.yaml",
+      "launch": "stc_z_stage 1.8, stc_los_alt_trig 1.5, hover 2.4 m, settle 2.02-2.6 m",
+      "defaults_now_in_code": [
+        "measured_state_delay_compensation drives live target anchor and live-state terminal freeze",
+        "SZMUK_CTCS_TIGHTEN_FROM_NODE=4",
+        "physical rows keep trigger floors (triggerFloors)",
+        "SZMUK_CTCS_PHYSICAL_SUBSTEPS=8",
+        "staged native guess nativeGuessControl",
+        "reprime_after_rejections=5"
+      ]
+    },
+    "sitl_campaign_k3": {
+      "figure8": {
+        "landed": true,
+        "accepted": 8,
+        "rejected": 2,
+        "plan_flown_excess": {},
+        "plan_all_excess": {},
+        "plant_excess": {}
+      },
+      "stop_and_go": {
+        "landed": true,
+        "accepted": 15,
+        "rejected": 10,
+        "plan_flown_excess": {},
+        "plan_all_excess": {
+          "los_cone_m": 0.0001
+        },
+        "plant_excess": {
+          "angular_rate_rad_s_max": 0.341829,
+          "glideslope_m_max": 0.011548
+        }
+      },
+      "circle": {
+        "landed": true,
+        "accepted": 9,
+        "rejected": 4,
+        "plan_flown_excess": {},
+        "plan_all_excess": {},
+        "plant_excess": {}
+      },
+      "straight": {
+        "landed": true,
+        "accepted": 10,
+        "rejected": 3,
+        "plan_flown_excess": {},
+        "plan_all_excess": {
+          "los_cone_m": 0.0001
+        },
+        "plant_excess": {
+          "angular_rate_rad_s_max": 0.311324
+        }
+      },
+      "piecewise_accel": {
+        "landed": true,
+        "accepted": 12,
+        "rejected": 0,
+        "plan_flown_excess": {},
+        "plan_all_excess": {
+          "floor_m": 0.0002,
+          "los_cone_m": 0.0003
+        },
+        "plant_excess": {}
+      },
+      "random_accel": {
+        "landed": true,
+        "accepted": 13,
+        "rejected": 1,
+        "plan_flown_excess": {},
+        "plan_all_excess": {
+          "los_cone_m": 0.0001
+        },
+        "plant_excess": {}
+      },
+      "stationary": {
+        "landed": true,
+        "accepted": 9,
+        "rejected": 1,
+        "plan_flown_excess": {},
+        "plan_all_excess": {
+          "floor_m": 0.0002,
+          "los_cone_m": 0.0003
+        },
+        "plant_excess": {}
+      }
+    },
+    "planner_audit_method": "Dense 1 ms integration of every accepted horizon (all_solves.csv split on node 0) against the physical bounds; LOS angle ignored within 5 cm of the pad (los_cone_m kept). Plant audit: mc_physical_scoring on the flight bag at odometry rate with its reporting tolerances.",
+    "before_substeps": "Campaign k1 (substeps 1): stop_and_go plan speed 1.0725 m/s at interval 2 crossing the 0.8 m landing trigger between RK4 stage points; W_LAND_SPEED x100 did not change it.",
+    "frozen_test_measured_root_rh": {
+      "pointmass_mpc_node_and_ctcs": "identical to frozen_checkpoint_20261105 values",
+      "pointmass_single_horizon": "runs (new: single horizon uses the model horizon); fails progress/all-obstacle checks because the reference OCP only masks obstacles within 6 m of the root; executed equals planned",
+      "quad_node_mpc_and_sh": "reached, zero excess",
+      "quad_ctcs_sh_coarse_and_sitl_env": "reached, zero excess",
+      "quad_ctcs_mpc_coarse_native_guess": {
+        "reached": 1,
+        "accepted": 24,
+        "executed_physical_excess": 0,
+        "planned_physical_stc_excess": 1.1538560895376556e-06
+      },
+      "quad_ctcs_mpc_sitl_env_native_guess": {
+        "reached": 1,
+        "accepted": 19,
+        "executed_physical_excess": 0,
+        "planned_physical_stc_excess": 0.00012409414095151277,
+        "note": "squared-unit implication residual"
+      },
+      "quad_ctcs_mpc_coarse_shift_guess": "one measured-root solve rejected at native 1.07e-6 (tolerance 1e-6); at 37ced53 it failed at 0.0078",
+      "at_37ced53": "all three quad CTCS fine-plant MPC cases rejected a solve (native 0.0078-1.19)"
+    },
+    "wall_clock_test_wall_clock_rh": {
+      "quad_node": "reached, zero excess",
+      "pointmass_node_and_ctcs": "16/16 accepted, zero excess",
+      "quad_ctcs_sitl_env": "WALL_RH_NATIVE_GUESS=1 WALL_RH_MAX_CONSECUTIVE_REJECTIONS=5: two runs reached, 1 rejection each, zero executed physical STC excess",
+      "quad_ctcs_wall_clock_env": "lands with native guess but planner-made LOS trigger-onset excess 1.56 at t=2.03 s (SZMUK_LOS_TRIGGER_FLOOR=0 in that env); identical at 37ced53"
+    },
+    "known_unit_failures_preexisting": [
+      "test_controller: ordinary constrained solve failed residual gate (landing_rh/landing_mpc)",
+      "test_stc_landing_noaug: RH solve must succeed (at 37ced53 it failed earlier, at the staging cold solve)"
+    ],
+    "removed_files": [
+      "config/ros1/tuning_stc_measured_rh_sitl_widened.env",
+      "config/ros1/tuning_stc_measured_rh_sitl_moving.env",
+      "config/ros1/profile_stc_landing_noaug_measured_sitl_widened.yaml",
+      "config/ros1/profile_stc_landing_noaug_measured_sitl_moving.yaml"
+    ]
   }
 }
