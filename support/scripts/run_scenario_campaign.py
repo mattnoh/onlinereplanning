@@ -644,7 +644,7 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--reuse", action="store_true")
     ap.add_argument("--start", choices=("original","cone"),default="original",help="cone: target-following preparation and measured initial-feasibility gate")
-    ap.add_argument("--profile", default=os.path.join(PKG,"config/ros1/profile_stc_landing_noaug_sitl.yaml"))
+    ap.add_argument("--profile", default=os.path.join(PKG,"config/ros1/profile_stc_landing_noaug_measured_sitl.yaml"))
     ap.add_argument("--hover-thrust", type=float, default=0.3)
     ap.add_argument("--hover-height", type=float, default=2.05,
                     help="world-frame staging hover target; historical default is unchanged")

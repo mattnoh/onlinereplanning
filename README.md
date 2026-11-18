@@ -505,7 +505,7 @@ rosrun comando_planner apply_profile.sh /comando_planner \
   /home/lab/mavros_ws/src/CoManDO_planner/config/ros1/profile_hover_sitl.yaml
 ```
 
-After hover/staging, apply `profile_stc_landing_noaug_sitl.yaml` for CTCS RH. For direct MPC, use `roslaunch comando_planner direct_mpc_sitl.launch` from startup, then stage and apply `profile_stc_landing_mpc_sitl.yaml`. This launcher aligns the adapter/model thrust calibration. The profile script increments `command_seq` to activate a command. Mathematical environment settings load at process startup; restart to change them.
+After hover/staging, apply `profile_stc_landing_noaug_measured_sitl.yaml` (with `STC_PRESET=sitl`) for CTCS RH. For direct MPC, use `roslaunch comando_planner direct_mpc_sitl.launch` from startup, then stage and apply `profile_stc_landing_mpc_sitl.yaml`. This launcher aligns the adapter/model thrust calibration. The profile script increments `command_seq` to activate a command. Mathematical environment settings load at process startup; restart to change them.
 
 Saved MC1 RH settings include `SZMUK_RH_N=40`, `SZMUK_MAX_ITER=120`, `SZMUK_THH=0.16`, `SZMUK_W_LAND_GS=20000`, replay prefix 1, a 1.55 m staging floor and 1.2 m LOS trigger. Terminal freeze velocity threshold is 0.30 m/s and the staging hover command is 2.05 m.
 

@@ -53,7 +53,7 @@ All paths below are relative to `/home/lab/mavros_ws/src/CoManDO_planner/`:
 | `include/ocp/ocp_landing_mpc.hpp` | Ordinary landing MPC context |
 | `support/transport/ros1/src/target_publisher.cpp` | Target motion, randomization and planner-facing target estimates/noise |
 
-**Critical runner pitfall:** `run_scenario_campaign.py` defaults to `profile_stc_landing_noaug_sitl.yaml`, a historical RH configuration. Pass the intended MPC profile explicitly. Inspect the runner's startup environment and overrides; sourcing the new preset must not be undone by historical defaults.
+**Critical runner pitfall:** `run_scenario_campaign.py` defaults to the stc_landing_noaug measured-state profile. Pass the intended MPC profile explicitly with `--profile`.
 
 Startup environment parameters are read when the planner starts. Applying a ROS profile afterward does not reload them. Launch staging/LOS arguments can override environment values.
 
