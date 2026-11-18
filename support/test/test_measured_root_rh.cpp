@@ -308,10 +308,10 @@ int main(int argc,char** argv){try{
     requireRh(!remaining_horizon||quad,"remaining landing horizon is quad-only");
     requireRh(!staging_initial||(quad&&!reference_initial),"staging initial condition is quad-only and excludes reference initial");
     requireRh(fine||std::string(argv[2])=="matched","unknown plant");
-    requireRh((fixed_dt==0.&&!single_horizon)||quad,"fixed dt / single horizon are quad-only");
+    requireRh(fixed_dt==0.||quad,"fixed dt is quad-only");
     requireRh(fixed_dt==0.||!remaining_horizon,"fixed-dt comparison uses a fixed node count");
     requireRh(plant_acceleration_x==0.||fine,"plant disturbance requires fine independent integration");
-    const int bound=std::stoi(argv[3]),K=single_horizon?StcLandingNoAugOCP::HORIZON:replay_intervals;
+    const int bound=std::stoi(argv[3]);
     requireRh(!single_horizon||bound==1,"single horizon requires one solve");
     const std::filesystem::path out(argv[4]);
     requireRh(bound>0&&bound<=400&&std::filesystem::create_directories(out),"invalid cycle bound/output");
@@ -356,6 +356,8 @@ int main(int argc,char** argv){try{
         target.position=.5*acceleration*t*t;target.velocity=acceleration*t;target.acceleration=acceleration;return target;};
     auto model=descriptor->make_model(acceleration);
     const auto world_model=descriptor->make_model(Eigen::Vector3d::Zero());
+    // Single horizon: one solve, every interval executed.
+    const int K=single_horizon?(quad?StcLandingNoAugOCP::HORIZON:model.horizon):replay_intervals;
     // Exogenous plant acceleration is absent from the solver's prediction.
     // Applied only to the independently integrated physical state, never its
     // measured root or the constraints. Zero preserves the historical path.
@@ -426,8 +428,9 @@ int main(int argc,char** argv){try{
             }else inactive_time[im.name]+=duration;
         }
     };
-    const auto densityRatio=[&](const Vec& x,const Vec& u){
-        if(quad)return StcLandingNoAugOCP::evalCtcsIntegrand<double>(x,u)/StcLandingNoAugOCP::CTCS_STEP_EPS;
+    // Interval k uses the physical row before ctcsTightenFromNode(), as the OCP does.
+    const auto densityRatio=[&](const Vec& x,const Vec& u,int k){
+        if(quad)return StcLandingNoAugOCP::evalCtcsIntegrand<double>(x,u,k>=StcLandingNoAugOCP::ctcsTightenFromNode())/StcLandingNoAugOCP::CTCS_STEP_EPS;
         double density=0.;for(int j=0;j<NOBS;++j)if(audit_problem.mask[j]){
             const double excess=std::max(0.,obstacleG(audit_problem,x.head<2>(),j)+audit_problem.delta);
             density+=excess*excess;
@@ -579,7 +582,7 @@ int main(int argc,char** argv){try{
             const double native_ratio=row?row->intervalIntegral(xs[k],us[k])/row->getEpsilon():0.;
             if(row){
                 native_budget_ratio=std::max(native_budget_ratio,native_ratio);
-                const double reference=densityRatio(xs[k],us[k]);
+                const double reference=densityRatio(xs[k],us[k],int(k));
                 const double error=std::abs(row->density(xs[k],us[k])/row->getEpsilon()-reference)/(1.+std::abs(reference));
                 density_parity_error=std::max(density_parity_error,error);
                 requireRh(error<=1e-11,"independent CTCS density disagrees with original row");
@@ -590,7 +593,7 @@ int main(int argc,char** argv){try{
                     const auto mid=model.flow(state,us[k],.5*step,false).x;
                     planned_stc_excess=std::max({planned_stc_excess,physicalStcExcess(mid,us[k]),physicalStcExcess(next,us[k])});
                     predicted_dense_error=std::max(predicted_dense_error,physical(mid,us[k]));
-                    integral+=step*(densityRatio(state,us[k])+4.*densityRatio(mid,us[k])+densityRatio(next,us[k]))/6.;
+                    integral+=step*(densityRatio(state,us[k],int(k))+4.*densityRatio(mid,us[k],int(k))+densityRatio(next,us[k],int(k)))/6.;
                 }
                 state=next;predicted_dense_error=std::max(predicted_dense_error,physical(state,us[k]));
             }
@@ -616,7 +619,7 @@ int main(int argc,char** argv){try{
                     const auto a=planner_core::prepareOcpState(*descriptor,plant,targetAt(time+prefix+q*h));
                     const auto b=planner_core::prepareOcpState(*descriptor,mid,targetAt(time+prefix+(q+.5)*h));
                     const auto c=planner_core::prepareOcpState(*descriptor,next,targetAt(time+prefix+(q+1)*h));
-                    integral+=h*(densityRatio(a,us[k])+4.*densityRatio(b,us[k])+densityRatio(c,us[k]))/6.;
+                    integral+=h*(densityRatio(a,us[k],int(k))+4.*densityRatio(b,us[k],int(k))+densityRatio(c,us[k],int(k)))/6.;
                     executed_error=std::max(executed_error,physical(b,us[k]));
                     observeTriggers(b,us[k],cycle,time+prefix+(q+.5)*h,h);
                 }

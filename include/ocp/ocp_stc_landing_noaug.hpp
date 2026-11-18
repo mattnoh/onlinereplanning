@@ -245,7 +245,7 @@ struct StcLandingNoAugExtra {
 
 template<typename Scalar>
 Scalar evalCtcsIntegrand(const Vector<Scalar>& x,
-                         const Vector<Scalar>& u);
+                         const Vector<Scalar>& u,bool tightened=true);
 
 // ── Relative dynamics with constant-accel target prediction (NO y-row) ───────
 template<typename Scalar>
@@ -548,8 +548,15 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
 
 template<typename Scalar>
 Scalar evalCtcsIntegrand(const Vector<Scalar>& x,
-                         const Vector<Scalar>& u) {
-    return evalCtcsIntegrandTerms(x, u).value;
+                         const Vector<Scalar>& u,bool tightened) {
+    return evalCtcsIntegrandTerms(x, u, tightened).value;
+}
+
+// Intervals before this node use the physical rows (tightened=false).
+inline int ctcsTightenFromNode(){
+    static const int node=envOrInt("SZMUK_CTCS_TIGHTEN_FROM_NODE",4);
+    if(node<0)throw std::invalid_argument("SZMUK_CTCS_TIGHTEN_FROM_NODE must be >= 0");
+    return node;
 }
 
 // ── Stage cost ────────────────────────────────────────────────────────────────
@@ -1157,8 +1164,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     // so a root inside the physical set but in the margin band would otherwise
     // make the tightened OCP infeasible from its first interval. Without
     // tightening margins both rows are identical.
-    static const int tighten_from=envOrInt("SZMUK_CTCS_TIGHTEN_FROM_NODE",4);
-    if(tighten_from<0)throw std::invalid_argument("SZMUK_CTCS_TIGHTEN_FROM_NODE must be >= 0");
+    const int tighten_from=ctcsTightenFromNode();
     auto cstep_physical = tighten_from>0 ?
         makeCtcsConstraint<double>(dyn, CTCS_STEP_EPS / CTCS_Y_SCALE, IDX_THETA, 0.0, 1, false) : cstep;
     const double eps_cost = envOrQ("SZMUK_W_EPS", 1.0);
