@@ -100,13 +100,25 @@ public:
             out.rejection_reason="initial_state_infeasible";return out;
         }
         const auto snapshot=solver_->snapshotWarmStart();
-        if(accepted_&&descriptor_->coordinates==OCPDescriptor::Coordinates::TargetRelative){
-            auto warm=descriptor_->variable_dt?shiftVariablePrefix(input.target_snapshot):
-                shiftMpcSeed(*accepted_,model_,target_,input.target_snapshot,prefix_duration_);
-            solver_->restoreWarmStart(warm);solver_->setNextWarmStartShift(0);
+        const auto attempt=[&]{
+            if(accepted_&&descriptor_->coordinates==OCPDescriptor::Coordinates::TargetRelative){
+                auto warm=descriptor_->variable_dt?shiftVariablePrefix(input.target_snapshot):
+                    shiftMpcSeed(*accepted_,model_,target_,input.target_snapshot,prefix_duration_);
+                solver_->restoreWarmStart(warm);solver_->setNextWarmStartShift(0);
+            }
+            if(config_.preserve_remaining_trajectory)solver_->setNextHorizon(model.horizon);
+            return solver_->solve(root,input.target_snapshot.acceleration,{},input.absolute_time_sec);
+        };
+        auto raw=attempt();
+        // Native guess first; if that solve is not certified and a previous
+        // plan exists, solve once more from the shifted plan. Frozen time
+        // makes the second attempt free.
+        if(!raw.success&&accepted_&&solver_->usesNativeInitialGuess()){
+            solver_->restoreWarmStart(snapshot);
+            solver_->setUseNativeInitialGuess(false);
+            raw=attempt();
+            solver_->setUseNativeInitialGuess(true);
         }
-        if(config_.preserve_remaining_trajectory)solver_->setNextHorizon(model.horizon);
-        const auto raw=solver_->solve(root,input.target_snapshot.acceleration,{},input.absolute_time_sec);
         out.solve_attempted=true;out.solve_num=count_;out.x0_source="measured";
         auto& result=out.solve_result;
         result.success=raw.success;result.state_trajectory=raw.state_trajectory;

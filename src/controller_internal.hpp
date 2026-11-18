@@ -148,6 +148,8 @@ public:
     void restoreWarmStart(const WarmStartSnapshot& snapshot);
     void keepLatestAsUnexecutedWarmStart();
     void setNextWarmStartShift(int shift) { next_warm_start_shift_ = std::max(0, shift); }
+    bool usesNativeInitialGuess() const { return config_.use_native_initial_guess; }
+    void setUseNativeInitialGuess(bool native) { config_.use_native_initial_guess = native; }
     void setNextHorizon(int horizon) { next_horizon_ = horizon; }
 
 private:
