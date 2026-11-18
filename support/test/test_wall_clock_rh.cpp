@@ -97,10 +97,14 @@ int main(int argc,char** argv){try{
  };
  planner_core::PlannerCoreConfig cfg;cfg.ocp_type=desc->name;cfg.ocp_dt=desc->dt;cfg.n_replay=4;cfg.enable_terminal_freeze=false;
  cfg.max_first_solve_age_sec=1.;cfg.measured_state_delay_compensation=compensated;
+ cfg.use_native_initial_guess=comando_parameters::envOrInt("WALL_RH_NATIVE_GUESS",0)!=0;
  if(compensated){cfg.initial_solve_lead_sec=comando_parameters::envOrQ("WALL_RH_INITIAL_LEAD",1.2);cfg.solve_lead_guard_sec=comando_parameters::envOrQ("WALL_RH_GUARD",.3);}
  planner_core::Controller controller;controller.configure(cfg,desc);
  const auto origin=Clock::now();std::atomic<bool> stop{false},busy{false};
- std::atomic<int> accepted{0},attempted{0};
+ std::atomic<int> accepted{0},attempted{0},rejected{0};
+ // Like the planner node: a rejected solve keeps the previous plan running.
+ // 0 (default) aborts on the first rejection, as recorded runs did.
+ const int max_consecutive_rejections=comando_parameters::envOrInt("WALL_RH_MAX_CONSECUTIVE_REJECTIONS",0);int consecutive_rejections=0;
  double max_request_age=0.,max_state_change_during_solve=0.,max_native=0.;std::string failure;
  std::ofstream solves(out/"solves.jsonl"),plans(out/"plans.jsonl"),trace(out/"plant.csv");plans<<std::setprecision(17);solves<<std::setprecision(17);trace<<std::setprecision(17)<<"t,solving";for(int j=0;j<plant.size();++j)trace<<",x"<<j;trace<<'\n';trace<<0<<','<<0;for(int j=0;j<plant.size();++j)trace<<','<<plant(j);trace<<'\n';
  std::thread worker([&]{try{
@@ -144,13 +148,13 @@ int main(int argc,char** argv){try{
       solves<<activation+(desc->variable_dt?x(desc->state_dim):k*cfg.ocp_dt);
      }solves<<']';
     }solves<<"}\n";solves.flush();
-    if(result.solve_accepted)++accepted;
-    else {failure=result.rejection_reason;stop=true;}
+    if(result.solve_accepted){++accepted;consecutive_rejections=0;}
+    else {++rejected;if(++consecutive_rejections>max_consecutive_rejections){failure=result.rejection_reason;stop=true;}}
    }
    std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
  }catch(const std::exception& e){failure=e.what();busy=false;stop=true;}});
- int samples_while_solving=0,stale_samples=0;bool reached=false;double max_hard=0.,max_obstacle=0.,max_physical_stc=0.,tracking_squared=0.,max_tracking_error=0.;
+ int samples_while_solving=0,stale_samples=0;bool reached=false;std::string peak_physical_term;double peak_physical_time=0.;double max_hard=0.,max_obstacle=0.,max_physical_stc=0.,tracking_squared=0.,max_tracking_error=0.;
  try{
   while(!stop.load()&&((sim<seconds&&!reached)||busy.load())){
    const double wall=std::chrono::duration<double>(Clock::now()-origin).count();
@@ -169,10 +173,11 @@ int main(int argc,char** argv){try{
     const auto rel=planner_core::prepareOcpState(*desc,plant,targetAt(sim));
     if(quad){max_hard=std::max({max_hard,-rel(2),rel.segment<3>(3).norm()-StcLandingNoAugOCP::SPD_PHASE0_MAX});
      if(ctcs){const auto terms=StcLandingNoAugOCP::evalCtcsIntegrandTerms<double>(rel,u,false);
-      max_physical_stc=std::max({max_physical_stc,terms.loose_tilt,terms.loose_omega});
-      if(terms.a_stage>0)max_physical_stc=std::max(max_physical_stc,StcLandingNoAugOCP::Z_STAGE-rel(2));
-      if(terms.a_los>0)max_physical_stc=std::max(max_physical_stc,terms.los);
-      if(terms.a_altitude_state>0)max_physical_stc=std::max({max_physical_stc,terms.speed,terms.tilt,terms.omega,terms.glideslope});
+      const auto note=[&](const char* name,double value){if(value>max_physical_stc){max_physical_stc=value;peak_physical_term=name;peak_physical_time=sim;}};
+      note("loose_tilt",terms.loose_tilt);note("loose_omega",terms.loose_omega);
+      if(terms.a_stage>0)note("staging",StcLandingNoAugOCP::Z_STAGE-rel(2));
+      if(terms.a_los>0)note("los",terms.los);
+      if(terms.a_altitude_state>0){note("landing_speed",terms.speed);note("landing_tilt",terms.tilt);note("landing_omega",terms.omega);note("glideslope",terms.glideslope);}
      }
      if(accepted.load()>0)reached=rel.head<3>().norm()<=.1&&rel.segment<3>(3).norm()<=.3;
     }else{const double tracking_error=(rel.head<2>()-reference(sim)).norm();tracking_squared+=.001*tracking_error*tracking_error;max_tracking_error=std::max(max_tracking_error,tracking_error);Problem p;for(int i=0;i<NOBS;++i)max_obstacle=std::max(max_obstacle,obstacleG(p,rel.head<2>(),i));}
@@ -184,6 +189,6 @@ int main(int argc,char** argv){try{
  const double wall=std::chrono::duration<double>(Clock::now()-origin).count();
  // Success here is runtime completion, NOT a CTCS or obstacle certificate.
  const bool complete=failure.empty()&&(quad?reached:sim>=seconds-.001)&&accepted.load()>1&&(compensated||max_root_error<=1e-12)&&samples_while_solving>0;
- std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"model\":"<<std::quoted(argv[1])<<",\"ctcs\":"<<ctcs<<",\"runtime_complete\":"<<complete<<",\"reached\":"<<reached<<",\"simulation_time\":"<<sim<<",\"wall_seconds\":"<<wall<<",\"attempted\":"<<attempted.load()<<",\"accepted\":"<<accepted.load()<<",\"delay_compensated\":"<<compensated<<",\"measurement_to_root_change\":"<<max_root_error<<",\"measured_root_error\":"<<(compensated?std::string("null"):std::to_string(max_root_error))<<",\"max_request_age_seconds\":"<<max_request_age<<",\"plant_change_during_solve\":"<<max_state_change_during_solve<<",\"plant_steps_while_solving\":"<<samples_while_solving<<",\"stale_samples\":"<<stale_samples<<",\"native_violation\":"<<max_native<<",\"native_CTCS_budget_ratio\":"<<native_budget_ratio<<",\"physical_STC_excess\":"<<max_physical_stc<<",\"hard_constraint_excess\":"<<max_hard<<",\"obstacle_excess_diagnostic\":"<<max_obstacle<<",\"tracking_position_rmse\":"<<std::sqrt(tracking_squared/std::max(sim,.001))<<",\"max_tracking_error\":"<<max_tracking_error<<",\"failure\":"<<std::quoted(failure)<<",\"continuous_CTCS_certified\":false}\n";
+ std::ofstream summary(out/"summary.json");summary<<std::setprecision(17)<<"{\"model\":"<<std::quoted(argv[1])<<",\"ctcs\":"<<ctcs<<",\"runtime_complete\":"<<complete<<",\"reached\":"<<reached<<",\"simulation_time\":"<<sim<<",\"wall_seconds\":"<<wall<<",\"attempted\":"<<attempted.load()<<",\"accepted\":"<<accepted.load()<<",\"delay_compensated\":"<<compensated<<",\"measurement_to_root_change\":"<<max_root_error<<",\"measured_root_error\":"<<(compensated?std::string("null"):std::to_string(max_root_error))<<",\"max_request_age_seconds\":"<<max_request_age<<",\"plant_change_during_solve\":"<<max_state_change_during_solve<<",\"plant_steps_while_solving\":"<<samples_while_solving<<",\"stale_samples\":"<<stale_samples<<",\"native_violation\":"<<max_native<<",\"native_CTCS_budget_ratio\":"<<native_budget_ratio<<",\"physical_STC_excess\":"<<max_physical_stc<<",\"hard_constraint_excess\":"<<max_hard<<",\"obstacle_excess_diagnostic\":"<<max_obstacle<<",\"tracking_position_rmse\":"<<std::sqrt(tracking_squared/std::max(sim,.001))<<",\"max_tracking_error\":"<<max_tracking_error<<",\"rejected\":"<<rejected<<",\"physical_STC_peak_term\":"<<std::quoted(peak_physical_term)<<",\"physical_STC_peak_time\":"<<peak_physical_time<<",\"failure\":"<<std::quoted(failure)<<",\"continuous_CTCS_certified\":false}\n";
  std::cout<<"WALL_CLOCK accepted="<<accepted<<" attempted="<<attempted<<" measurement_to_root_change="<<max_root_error<<" moving_during_solve="<<max_state_change_during_solve<<" reached="<<reached<<" failure="<<failure<<'\n';return complete?0:2;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
