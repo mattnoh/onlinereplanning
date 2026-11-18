@@ -1,6 +1,5 @@
 // ocp_hover.hpp
 #pragma once
-#include "parameters.hpp"
 
 #include <Eigen/Dense>
 #include <memory>
@@ -11,25 +10,20 @@
 
 namespace HoverOCP {
 
-inline const auto parameters = comando_parameters::hoverDefaults();
-inline const int HORIZON=parameters.horizon.horizon;
-inline const double DT=parameters.horizon.th0;
-inline const double MASS=parameters.vehicle.mass;
-inline const int DEFAULT_N_REPLAY=parameters.horizon.nex;
-inline const double DEFAULT_MASS_KG=MASS;
-inline const double J_SCALE=1.0/parameters.vehicle.ixx;
-inline const Eigen::Matrix3d INERTIA=(Eigen::Matrix3d()<<parameters.vehicle.ixx*J_SCALE,0,0,0,parameters.vehicle.iyy*J_SCALE,0,0,0,parameters.vehicle.izz*J_SCALE).finished();
-inline const double FMAX=parameters.vehicle.fmax, FMIN=parameters.vehicle.fmin;
-inline const double W_POS_STAGE=parameters.cost.w_stage_target_xy;
-inline const double W_VEL_STAGE=parameters.cost.w_stage_target_vel;
-inline const double W_ATT_STAGE=parameters.cost.stage_attitude;
-inline const double W_ANGRATE_STAGE=parameters.cost.stage_angular_rate;
-inline const double W_THRUST=parameters.cost.r_ctrl_thr, W_MOMENT=parameters.cost.r_ctrl_mom;
-inline const double TERM_POS_WEIGHT=parameters.cost.term_w_pos_xy;
-inline const double TERM_VEL_WEIGHT=parameters.cost.term_w_vel_xy;
-inline const double TERM_ATT_WEIGHT=parameters.cost.term_w_tilt;
-inline const double TERM_ANGRATE_WEIGHT=parameters.cost.term_w_om;
-inline Param getSolverParams(){return parameters.solver;}
+inline constexpr int HORIZON=100, DEFAULT_N_REPLAY=4;
+inline constexpr double DT=0.05;
+inline constexpr double MASS=0.0282, DEFAULT_MASS_KG=MASS;
+inline constexpr double IXX=1.66e-5, IYY=1.66e-5, IZZ=2.92e-5;
+inline const double J_SCALE=1.0/IXX;
+inline const Eigen::Matrix3d INERTIA=(Eigen::Matrix3d()<<IXX*J_SCALE,0,0,0,IYY*J_SCALE,0,0,0,IZZ*J_SCALE).finished();
+inline constexpr double FMAX=0.42, FMIN=0.08;
+inline constexpr double W_POS_STAGE=15, W_VEL_STAGE=20, W_ATT_STAGE=2.0, W_ANGRATE_STAGE=5.0;
+inline constexpr double W_THRUST=0.1, W_MOMENT=0.1;
+inline constexpr double TERM_POS_WEIGHT=600, TERM_VEL_WEIGHT=100, TERM_ATT_WEIGHT=200, TERM_ANGRATE_WEIGHT=100;
+inline Param getSolverParams(){
+    Param p;p.reg1_min=1e-6;p.reg2_min=1;p.mu_mul=0.1;p.rho=20;p.rho_mul=9;p.tolerance=1e-3;p.max_iter=200;
+    p.is_quaternion_in_state=false;return p;
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Stage cost – penalises tracking error and control effort

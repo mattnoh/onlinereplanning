@@ -12,56 +12,74 @@
 #include <any>
 
 namespace LandingMpcOCP::Formulation {
-using comando_parameters::defaults;
-using comando_parameters::envOrQ;
-using comando_parameters::envOrInt;
 constexpr int NX=13, NU=4, NX_SS=14, NU_SS=5, IDX_DT=13, IDX_THETA=4;
-inline const auto& MASS = defaults.vehicle.mass;
-inline const auto& IXX = defaults.vehicle.ixx;
-inline const auto& IYY = defaults.vehicle.iyy;
-inline const auto& IZZ = defaults.vehicle.izz;
-inline const auto& ACTUATOR_FMIN = defaults.vehicle.actuator_fmin;
-inline const auto& ACTUATOR_FMAX = defaults.vehicle.actuator_fmax;
-inline const auto& FMIN = defaults.vehicle.fmin;
-inline const auto& FMAX = defaults.vehicle.fmax;
-inline const auto& L_ARM = defaults.vehicle.l_arm;
-inline const auto& HORIZON = defaults.horizon.horizon;
-inline const auto& NEX = defaults.horizon.nex;
-inline const auto& TH0 = defaults.horizon.th0;
-inline const auto& THL = defaults.horizon.thl;
-inline const auto& THH = defaults.horizon.thh;
-inline const auto& TERM_W_POS_XY = defaults.cost.term_w_pos_xy;
-inline const auto& TERM_W_POS_Z = defaults.cost.term_w_pos_z;
-inline const auto& TERM_W_VEL_XY = defaults.cost.term_w_vel_xy;
-inline const auto& TERM_W_VEL_Z = defaults.cost.term_w_vel_z;
-inline const auto& TERM_W_TILT = defaults.cost.term_w_tilt;
-inline const auto& TERM_W_OM = defaults.cost.term_w_om;
-inline const auto& TERM_VZ_REF = defaults.cost.term_vz_ref;
-inline const auto& STAGE_W_TIME = defaults.cost.stage_w_time;
-inline const auto& R_THETA = defaults.cost.r_theta;
-inline const auto& THETA_REF = defaults.cost.theta_ref;
-inline const auto& R_CTRL_THR = defaults.cost.r_ctrl_thr;
-inline const auto& R_CTRL_MOM = defaults.cost.r_ctrl_mom;
-inline const auto& W_STAGE_TARGET_XY = defaults.cost.w_stage_target_xy;
-inline const auto& W_STAGE_TARGET_Z = defaults.cost.w_stage_target_z;
-inline const auto& W_STAGE_TARGET_VEL = defaults.cost.w_stage_target_vel;
-inline const auto& GS_APEX_OFFSET = defaults.constraints.gs_apex_offset;
-inline const auto& VZ_LAND_MAX = defaults.constraints.vz_land_max;
-inline const auto& TILT_MAX_DEG = defaults.constraints.theta_stc_deg;
-inline const auto& TILT_SCALE = defaults.constraints.alpha_theta_stc;
-inline const auto& OMEGA_MAX = defaults.constraints.omega_stc_max;
-inline const auto& GS_CONE_HALF_ANGLE_DEG = defaults.constraints.gs_cone_half_angle_deg;
-inline const auto& SPEED_MAX = defaults.constraints.spd_stc_max;
-inline const auto& LOS_CONE_HALF_ANGLE_DEG = defaults.constraints.los_cone_half_angle_deg;
-inline const double J_SCALE = 1.0/IXX;
-inline const double TAU_MAX = L_ARM*(ACTUATOR_FMAX/4.0-ACTUATOR_FMIN/4.0)*J_SCALE;
-inline const Eigen::Matrix3d J_B = (Eigen::Matrix3d()<<IXX*J_SCALE,0,0,0,IYY*J_SCALE,0,0,0,IZZ*J_SCALE).finished();
+// Every number this OCP uses.
+struct Params {
+    double mass=0.027;
+    double ixx=1.66e-5;
+    double iyy=1.66e-5;
+    double izz=2.92e-5;
+    double actuator_fmin=0.08;
+    double actuator_fmax=0.60;
+    double fmin=0.12;
+    double fmax=0.52;
+    double l_arm=0.046;
+    int horizon=30;
+    int nex=7;
+    double th0=0.07;
+    double thl=0.05;
+    double thh=0.12;
+    double term_w_pos_xy=2500.0;
+    double term_w_pos_z=2500.0;
+    double term_w_vel_xy=900.0;
+    double term_w_vel_z=900.0;
+    double term_w_tilt=200.0;
+    double term_w_om=50.0;
+    double term_vz_ref=0.0;
+    double stage_w_time=0.04;
+    double r_theta=10.0;
+    double theta_ref=0.10;
+    double r_ctrl_thr=2.0;
+    double r_ctrl_mom=0.6;
+    double w_stage_target_xy=0.0;
+    double w_stage_target_z=0.0;
+    double w_stage_target_vel=0.0;
+    double gs_apex_offset=0.1;
+    double vz_land_max=0.5;
+    double tilt_max_deg=0.95;
+    double tilt_scale=1.0;
+    double omega_max=0.019;
+    double gs_cone_half_angle_deg=15.0;
+    double speed_max=0.75;
+    double los_cone_half_angle_deg=30.0;
+    double w_eps=1.0;            // stage velocity/rate regulariser
+    bool feedback_warm_start=true;
+    double max_feedback_du=0.05;  // largest accepted feedback warm-start correction
+    double ctcs_step_eps=1.6e-3;  // folded-limits budget (landing_mpc_ctcs)
+    double slew_thrust_weight=0.1, slew_rate_weight=2.0;  // direct-MPC command slew cost
+    int mpc_max_iter=60;
+    Param solver=[]{Param p;p.reg1_min=1e-3;p.reg2_min=0.1;p.mu_mul=0.1;p.rho=5;p.rhoT=5;p.rho_mul=10;p.tolerance=1e-6;
+        p.max_iter=180;p.verbose=false;p.is_quaternion_in_state=false;p.use_ddp_terms=false;return p;}();
+};
+// Validated configurations:
+//   default   code values (unit tests)
+//   campaign  run_scenario_campaign.py SITL cells (RH_N=40, MAX_ITER=120, THH=0.16 and MPC_MAX_ITER=120)
+inline Params preset(const std::string& name){
+    Params p;
+    if(name.empty()||name=="default")return p;
+    if(name=="campaign"){p.horizon=40;p.thh=0.16;p.solver.max_iter=120;p.mpc_max_iter=120;return p;}
+    throw std::invalid_argument("unknown landing_mpc preset: "+name);
+}
+// LANDING_MPC_PRESET selects the configuration for this process.
+inline const Params P=[]{const char* n=std::getenv("LANDING_MPC_PRESET");return preset(n?n:"");}();
+inline const double J_SCALE = 1.0/P.ixx;
+inline const double TAU_MAX = P.l_arm*(P.actuator_fmax/4.0-P.actuator_fmin/4.0)*J_SCALE;
+inline const Eigen::Matrix3d J_B = (Eigen::Matrix3d()<<P.ixx*J_SCALE,0,0,0,P.iyy*J_SCALE,0,0,0,P.izz*J_SCALE).finished();
 inline const Eigen::Vector3d GRAVITY{0,0,-9.81};
-inline const double HOVER_THRUST = MASS*9.81;
-inline const double GS_CONE_TAN = std::tan(GS_CONE_HALF_ANGLE_DEG*M_PI/180.0);
-inline const double LOS_CONE_TAN = std::tan(LOS_CONE_HALF_ANGLE_DEG*M_PI/180.0);
+inline const double HOVER_THRUST = P.mass*9.81;
+inline const double GS_CONE_TAN = std::tan(P.gs_cone_half_angle_deg*M_PI/180.0);
+inline const double LOS_CONE_TAN = std::tan(P.los_cone_half_angle_deg*M_PI/180.0);
 using ConstantAccelPredictor=target_models::ConstantAccelPredictor;
-inline bool useRhFeedbackWarmStart(){return defaults.horizon.feedback_warm_start;}
 template<typename Scalar>
 class Quad6DOFVarTimeRelativePred : public Quad6DOFVarTimeRelative<Scalar> {
     std::shared_ptr<ConstantAccelPredictor> pred_;
@@ -202,26 +220,26 @@ public:
     LandingStageCost(double eps,double xy,double z,double velocity,const Eigen::Vector3d&)
         :eps_(eps),wp_xy_(xy),wp_z_(z),wv_(velocity){}
     Scalar q(const Vector<Scalar>& x,const Vector<Scalar>& u) const override {
-        const Scalar thrust=u(0)-Scalar(HOVER_THRUST),time=u(IDX_THETA)-Scalar(THETA_REF);
-        return Scalar(STAGE_W_TIME)*u(IDX_THETA)+Scalar(R_THETA)*time*time
+        const Scalar thrust=u(0)-Scalar(HOVER_THRUST),time=u(IDX_THETA)-Scalar(P.theta_ref);
+        return Scalar(P.stage_w_time)*u(IDX_THETA)+Scalar(P.r_theta)*time*time
             +Scalar(wp_xy_)*x.template head<2>().squaredNorm()+Scalar(wp_z_)*x(2)*x(2)
             +Scalar(eps_+wv_)*x.template segment<3>(3).squaredNorm()+Scalar(eps_)*x.template segment<3>(10).squaredNorm()
-            +Scalar(R_CTRL_THR)*thrust*thrust+Scalar(R_CTRL_MOM)*u.template segment<3>(1).squaredNorm();
+            +Scalar(P.r_ctrl_thr)*thrust*thrust+Scalar(P.r_ctrl_mom)*u.template segment<3>(1).squaredNorm();
     }
     Vector<Scalar> qx(const Vector<Scalar>& x,const Vector<Scalar>&) const override {
         auto g=Vector<Scalar>::Zero(x.size()).eval();g.template head<2>()=Scalar(2*wp_xy_)*x.template head<2>();g(2)=Scalar(2*wp_z_)*x(2);
         g.template segment<3>(3)=Scalar(2*(eps_+wv_))*x.template segment<3>(3);g.template segment<3>(10)=Scalar(2*eps_)*x.template segment<3>(10);return g;
     }
     Vector<Scalar> qu(const Vector<Scalar>&,const Vector<Scalar>& u) const override {
-        auto g=Vector<Scalar>::Zero(u.size()).eval();g(0)=Scalar(2*R_CTRL_THR)*(u(0)-Scalar(HOVER_THRUST));g.template segment<3>(1)=Scalar(2*R_CTRL_MOM)*u.template segment<3>(1);
-        g(IDX_THETA)=Scalar(STAGE_W_TIME)+Scalar(2*R_THETA)*(u(IDX_THETA)-Scalar(THETA_REF));return g;
+        auto g=Vector<Scalar>::Zero(u.size()).eval();g(0)=Scalar(2*P.r_ctrl_thr)*(u(0)-Scalar(HOVER_THRUST));g.template segment<3>(1)=Scalar(2*P.r_ctrl_mom)*u.template segment<3>(1);
+        g(IDX_THETA)=Scalar(P.stage_w_time)+Scalar(2*P.r_theta)*(u(IDX_THETA)-Scalar(P.theta_ref));return g;
     }
     Matrix<Scalar> qxx(const Vector<Scalar>& x,const Vector<Scalar>&) const override {
         auto h=Matrix<Scalar>::Zero(x.size(),x.size()).eval();h(0,0)=h(1,1)=Scalar(2*wp_xy_);h(2,2)=Scalar(2*wp_z_);
         h.diagonal().template segment<3>(3).setConstant(Scalar(2*(eps_+wv_)));h.diagonal().template segment<3>(10).setConstant(Scalar(2*eps_));return h;
     }
     Matrix<Scalar> quu(const Vector<Scalar>&,const Vector<Scalar>& u) const override {
-        auto h=Matrix<Scalar>::Zero(u.size(),u.size()).eval();h(0,0)=Scalar(2*R_CTRL_THR);h.diagonal().template segment<3>(1).setConstant(Scalar(2*R_CTRL_MOM));h(IDX_THETA,IDX_THETA)=Scalar(2*R_THETA);return h;
+        auto h=Matrix<Scalar>::Zero(u.size(),u.size()).eval();h(0,0)=Scalar(2*P.r_ctrl_thr);h.diagonal().template segment<3>(1).setConstant(Scalar(2*P.r_ctrl_mom));h(IDX_THETA,IDX_THETA)=Scalar(2*P.r_theta);return h;
     }
     Matrix<Scalar> qxu(const Vector<Scalar>& x,const Vector<Scalar>& u) const override {return Matrix<Scalar>::Zero(x.size(),u.size());}
 };
@@ -229,23 +247,23 @@ public:
 // Physical inequalities are active at every node, including the terminal node.
 class LandingLimits : public StageConstraintBase<double> {
     int nx_,nu_;
-    const double tilt2_=std::pow(std::sin(.5*TILT_SCALE*TILT_MAX_DEG*M_PI/180),2);
+    const double tilt2_=std::pow(std::sin(.5*P.tilt_scale*P.tilt_max_deg*M_PI/180),2);
 public:
     LandingLimits(int nx=NX_SS,int nu=NU_SS):nx_(nx),nu_(nu){constraint_type=ConstraintType::NO;dim_c=6;}
     Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&) const override {
         const Eigen::Vector4d q=x.segment<4>(6);const double n=q.squaredNorm();
         const Eigen::Vector3d axis=Eigen::Quaterniond(q(0),q(1),q(2),q(3)).normalized()*Eigen::Vector3d::UnitZ();
-        Eigen::VectorXd c(6);c<<-x(2),x.segment<3>(3).squaredNorm()/(SPEED_MAX*SPEED_MAX)-1,
-            x.segment<3>(10).squaredNorm()/(OMEGA_MAX*OMEGA_MAX)-1,
+        Eigen::VectorXd c(6);c<<-x(2),x.segment<3>(3).squaredNorm()/(P.speed_max*P.speed_max)-1,
+            x.segment<3>(10).squaredNorm()/(P.omega_max*P.omega_max)-1,
             (q(1)*q(1)+q(2)*q(2))/(tilt2_*n)-1,
-            x.head<2>().norm()-GS_CONE_TAN*(x(2)+GS_APEX_OFFSET),
-            std::cos(LOS_CONE_HALF_ANGLE_DEG*M_PI/180)*x.head<3>().norm()-x.head<3>().dot(axis);
+            x.head<2>().norm()-GS_CONE_TAN*(x(2)+P.gs_apex_offset),
+            std::cos(P.los_cone_half_angle_deg*M_PI/180)*x.head<3>().norm()-x.head<3>().dot(axis);
         return c;
     }
     Eigen::MatrixXd cx(const Eigen::VectorXd& x,const Eigen::VectorXd&) const override {
         Eigen::MatrixXd g=Eigen::MatrixXd::Zero(6,nx_);g(0,2)=-1;
-        g.block<1,3>(1,3)=2*x.segment<3>(3).transpose()/(SPEED_MAX*SPEED_MAX);
-        g.block<1,3>(2,10)=2*x.segment<3>(10).transpose()/(OMEGA_MAX*OMEGA_MAX);
+        g.block<1,3>(1,3)=2*x.segment<3>(3).transpose()/(P.speed_max*P.speed_max);
+        g.block<1,3>(2,10)=2*x.segment<3>(10).transpose()/(P.omega_max*P.omega_max);
         const Eigen::Vector4d q=x.segment<4>(6);const double n=q.squaredNorm(),perp=q(1)*q(1)+q(2)*q(2);
         g.block<1,4>(3,6)=-2*perp*q.transpose()/(tilt2_*n*n);g(3,7)+=2*q(1)/(tilt2_*n);g(3,8)+=2*q(2)/(tilt2_*n);
         const double lateral=x.head<2>().norm();if(lateral>1e-12)g.block<1,2>(4,0)=x.head<2>().transpose()/lateral;g(4,2)=-GS_CONE_TAN;
@@ -253,7 +271,7 @@ public:
         Eigen::Vector3d axis(2*(a*d+w*b),2*(b*d-w*a),w*w-a*a-b*b+d*d);
         Eigen::Matrix<double,3,4> db;db<<2*b,2*d,2*w,2*a,-2*a,-2*w,2*d,2*b,2*w,-2*a,-2*b,2*d;
         const double length=x.head<3>().norm();g.block<1,3>(5,0)=-axis.transpose()/n;
-        if(length>1e-12)g.block<1,3>(5,0)+=std::cos(LOS_CONE_HALF_ANGLE_DEG*M_PI/180)*x.head<3>().transpose()/length;
+        if(length>1e-12)g.block<1,3>(5,0)+=std::cos(P.los_cone_half_angle_deg*M_PI/180)*x.head<3>().transpose()/length;
         g.block<1,4>(5,6)=-x.head<3>().transpose()*db/n+2*x.head<3>().dot(axis)*q.transpose()/(n*n);return g;
     }
     Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {return Eigen::MatrixXd::Zero(6,nu_);}
@@ -279,12 +297,12 @@ class GlideslopeRow : public StageConstraintBase<double> {
     int nx_,nu_;
 public:
     GlideslopeRow(int nx,int nu):nx_(nx),nu_(nu){constraint_type=ConstraintType::SOC;dim_c=3;}
-    Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{Eigen::VectorXd c(3);c<<-x(2)-GS_APEX_OFFSET,-x(0)/GS_CONE_TAN,-x(1)/GS_CONE_TAN;return c;}
+    Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{Eigen::VectorXd c(3);c<<-x(2)-P.gs_apex_offset,-x(0)/GS_CONE_TAN,-x(1)/GS_CONE_TAN;return c;}
     Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{auto g=Eigen::MatrixXd::Zero(3,nx_).eval();g(0,2)=-1;g(1,0)=g(2,1)=-1/GS_CONE_TAN;return g;}
     Eigen::MatrixXd cu(const Eigen::VectorXd&,const Eigen::VectorXd&)const override{return Eigen::MatrixXd::Zero(3,nu_);}
 };
 class TiltRow : public StageConstraintBase<double> {
-    int nx_,nu_;double sine_=std::sin(.5*TILT_SCALE*TILT_MAX_DEG*M_PI/180);
+    int nx_,nu_;double sine_=std::sin(.5*P.tilt_scale*P.tilt_max_deg*M_PI/180);
 public:
     TiltRow(int nx,int nu):nx_(nx),nu_(nu){constraint_type=ConstraintType::SOC;dim_c=3;}
     Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd&)const override{Eigen::VectorXd c(3);c<<-1,-x(7)/(sine_*x.segment<4>(6).norm()),-x(8)/(sine_*x.segment<4>(6).norm());return c;}
@@ -313,7 +331,7 @@ public:
     Eigen::MatrixXd cTx(const Eigen::VectorXd& x)const override{return row_->cx(x,Eigen::VectorXd::Zero(nu_));}
 };
 inline std::vector<std::shared_ptr<StageConstraintBase<double>>> landingRows(int nx,int nu) {
-    return {std::make_shared<FloorRow>(nx,nu),std::make_shared<SphereRow>(nx,nu,3,SPEED_MAX),std::make_shared<SphereRow>(nx,nu,10,OMEGA_MAX),std::make_shared<GlideslopeRow>(nx,nu),std::make_shared<TiltRow>(nx,nu),std::make_shared<LosRow>(nx,nu)};
+    return {std::make_shared<FloorRow>(nx,nu),std::make_shared<SphereRow>(nx,nu,3,P.speed_max),std::make_shared<SphereRow>(nx,nu,10,P.omega_max),std::make_shared<GlideslopeRow>(nx,nu),std::make_shared<TiltRow>(nx,nu),std::make_shared<LosRow>(nx,nu)};
 }
 template<typename Scalar>
 class RelTermCost : public TerminalCostBase<Scalar> {
@@ -385,29 +403,29 @@ public:
     }
 };
 
-inline Param getSolverParams() { return defaults.solver; }
+inline Param getSolverParams() { return P.solver; }
 
 }
 namespace LandingMpcOCP {
 namespace Ref = Formulation;
-inline const int NX = Ref::defaults.mpc.native_px4 ? 34 : 18; // physical, native plant, command memory
+inline const int NX = comando_parameters::defaults.mpc.native_px4 ? 34 : 18; // physical, native plant, command memory
 constexpr int NU = 4;
 inline const int MEMORY = NX-4;
 constexpr int ROTOR=14, INTEGRAL=18, GYRO=21, GYRO_RATE=24, DERIVATIVE=27;
-constexpr double DT = comando_parameters::MpcParameters::dt;
-constexpr int N = comando_parameters::MpcParameters::horizon;
+constexpr double DT = 0.1;   // direct-MPC grid [s]
+constexpr int N = 40;
 
-inline double nativeGravity(){return Ref::defaults.mpc.native_px4?Ref::defaults.px4.gravity:9.81;}
-inline double rateTau() { return std::max(0.02, Ref::defaults.mpc.rate_tau); }
+inline double nativeGravity(){return comando_parameters::defaults.mpc.native_px4?comando_parameters::defaults.px4.gravity:9.81;}
+inline double rateTau() { return std::max(0.02, comando_parameters::defaults.mpc.rate_tau); }
 // Resolve the rate transient, not just RK stability. Coarse propagation can
 // seed the next measured-root solve outside a tight physical constraint.
 // The folded interval uses this same subdivision through its dynamics adapter.
-inline int substeps() { return Ref::defaults.mpc.native_px4 ? std::max(2,static_cast<int>(std::ceil(DT*4*M_PI*Ref::defaults.px4.gyro_cutoff_hz))) : std::max(2,static_cast<int>(std::ceil(DT/(0.1*rateTau())))); }
-inline double rateLimit() { return Ref::defaults.mpc.rate_limit; }
-inline double thrustMax() { return std::min(Ref::FMAX/Ref::MASS,nativeGravity()*std::pow((1+Ref::defaults.mpc.motor_speed_offset)/std::max(.1,Ref::defaults.mpc.hover_thrust+Ref::defaults.mpc.motor_speed_offset),Ref::defaults.mpc.motor_thrust_exponent)); }
+inline int substeps() { return comando_parameters::defaults.mpc.native_px4 ? std::max(2,static_cast<int>(std::ceil(DT*4*M_PI*comando_parameters::defaults.px4.gyro_cutoff_hz))) : std::max(2,static_cast<int>(std::ceil(DT/(0.1*rateTau())))); }
+inline double rateLimit() { return comando_parameters::defaults.mpc.rate_limit; }
+inline double thrustMax() { return std::min(Ref::P.fmax/Ref::P.mass,nativeGravity()*std::pow((1+comando_parameters::defaults.mpc.motor_speed_offset)/std::max(.1,comando_parameters::defaults.mpc.hover_thrust+comando_parameters::defaults.mpc.motor_speed_offset),comando_parameters::defaults.mpc.motor_thrust_exponent)); }
 inline Eigen::VectorXd bounded(Eigen::VectorXd u) {
     if(u.size()!=NU || !u.allFinite()) throw std::runtime_error("invalid MPC control");
-    u(0)=std::clamp(u(0), Ref::FMIN/Ref::MASS, thrustMax());
+    u(0)=std::clamp(u(0), Ref::P.fmin/Ref::P.mass, thrustMax());
     for(int i=1;i<NU;++i) u(i)=std::clamp(u(i),-rateLimit(),rateLimit());
     return u;
 }
@@ -418,36 +436,36 @@ public:
     explicit Dynamics(std::shared_ptr<Ref::ConstantAccelPredictor> pred)
         : Ref::Quad6DOFVarTimeRelativePred<double>(std::move(pred)) {
         setMass(1.0);setGravity(Ref::GRAVITY);
-        if(Ref::defaults.mpc.native_px4){setJb(Ref::defaults.px4.inertia.asDiagonal());setGravity(Eigen::Vector3d(0,0,-nativeGravity()));}else setJb(Eigen::Matrix3d::Identity());
+        if(comando_parameters::defaults.mpc.native_px4){setJb(comando_parameters::defaults.px4.inertia.asDiagonal());setGravity(Eigen::Vector3d(0,0,-nativeGravity()));}else setJb(Eigen::Matrix3d::Identity());
         dim_x=NX;dim_u=NU;
     }
     struct Rates {Eigen::VectorXd v;Eigen::MatrixXd a,b;};
     static double rotorHover() {
-        const auto& p=Ref::defaults.px4;
+        const auto& p=comando_parameters::defaults.px4;
         return std::sqrt(p.mass*p.gravity/(4*p.motor_constant));
     }
     static Eigen::VectorXd initialState(const Eigen::VectorXd& physical,const Eigen::VectorXd& applied) {
         if(physical.size()==NX)return physical;
         Eigen::VectorXd x=Eigen::VectorXd::Zero(NX);x.head(13)=physical.head(13);x.tail(NU)=applied;
-        if(Ref::defaults.mpc.native_px4) {
-            const auto& p=Ref::defaults.px4;
+        if(comando_parameters::defaults.mpc.native_px4) {
+            const auto& p=comando_parameters::defaults.px4;
             x.segment<4>(ROTOR).setConstant((p.motor_min+(p.motor_max-p.motor_min)*collectiveSignal(applied(0)))/rotorHover());
             x.segment<3>(GYRO)=physical.segment<3>(10);
         }
         return x;
     }
     static Eigen::Matrix<double,4,3> nativeMixer() {
-        return Ref::defaults.px4.mixer_frd*Eigen::Vector3d(1,-1,-1).asDiagonal();
+        return comando_parameters::defaults.px4.mixer_frd*Eigen::Vector3d(1,-1,-1).asDiagonal();
     }
     static Eigen::Matrix<double,3,4> nativeMoments() {
-        const auto& p=Ref::defaults.px4;Eigen::Matrix<double,3,4> result;
+        const auto& p=comando_parameters::defaults.px4;Eigen::Matrix<double,3,4> result;
         result.row(0)=-p.rotor_position_frd.col(1).transpose();
         result.row(1)=-p.rotor_position_frd.col(0).transpose();
         result.row(2)<<-p.moment_ratio,-p.moment_ratio,p.moment_ratio,p.moment_ratio;
         return result;
     }
     static double collectiveSignal(double acceleration) {
-        const auto& p=Ref::defaults.mpc;
+        const auto& p=comando_parameters::defaults.mpc;
         return (p.hover_thrust+p.motor_speed_offset)*std::pow(std::max(1e-9,acceleration)/nativeGravity(),1/p.motor_thrust_exponent)-p.motor_speed_offset;
     }
     // Native controller states: normalized rotor speeds, I/P in rate units,
@@ -456,7 +474,7 @@ public:
     Rates rates(const Eigen::VectorXd& x,const Eigen::VectorXd& u,bool jac) const {
         Rates out{Eigen::VectorXd::Zero(NX),Eigen::MatrixXd{},Eigen::MatrixXd{}};
         if(jac){out.a=Eigen::MatrixXd::Zero(NX,NX);out.b=Eigen::MatrixXd::Zero(NX,NU);}
-        if(!Ref::defaults.mpc.native_px4) {
+        if(!comando_parameters::defaults.mpc.native_px4) {
             out.v.head(14)=Ref::Quad6DOFVarTimeRelativePred<double>::intervalRates(x.head(14),u);
             out.v.segment<3>(10)=(u.tail<3>()-x.segment<3>(10))/rateTau();
             if(jac) {
@@ -467,7 +485,7 @@ public:
             }
             return out;
         }
-        const auto& p=Ref::defaults.px4;
+        const auto& p=comando_parameters::defaults.px4;
         const double wh=rotorHover(),force_scale=p.motor_constant*wh*wh;
         const Eigen::Vector4d rotor=x.segment<4>(ROTOR);
         const Eigen::Vector4d forces=force_scale*rotor.array().square().matrix();
@@ -498,7 +516,7 @@ public:
                 out.a.block<1,3>(ROTOR+i,INTEGRAL)=gain*mix.row(i)*p.rate_p.asDiagonal();
                 out.a.block<1,3>(ROTOR+i,DERIVATIVE)=-gain*wd*mix.row(i)*p.rate_d.asDiagonal();
                 out.b.block<1,3>(ROTOR+i,1)=gain*mix.row(i)*p.rate_p.asDiagonal();
-                const auto& mp=Ref::defaults.mpc;
+                const auto& mp=comando_parameters::defaults.mpc;
                 const double base=std::max(1e-9,u(0))/nativeGravity();
                 out.b(ROTOR+i,0)=gain*(mp.hover_thrust+mp.motor_speed_offset)/
                     (nativeGravity()*mp.motor_thrust_exponent)*std::pow(base,1/mp.motor_thrust_exponent-1);
@@ -574,9 +592,9 @@ public:
 class Cost : public StageCostBase<double> {
     Ref::LandingStageCost<double> ref_{1.0,0.0,0.0,0.0,Eigen::Vector3d::Zero()};
     Eigen::Vector4d r_,s_;
-    Eigen::VectorXd oldU(const Eigen::VectorXd& u) const {Eigen::VectorXd v=Eigen::VectorXd::Zero(5);v(0)=u(0)*Ref::MASS;v(4)=DT;return v;}
+    Eigen::VectorXd oldU(const Eigen::VectorXd& u) const {Eigen::VectorXd v=Eigen::VectorXd::Zero(5);v(0)=u(0)*Ref::P.mass;v(4)=DT;return v;}
 public:
-    Cost() {r_<<0.02,0.2,0.2,0.2;s_<<Ref::defaults.mpc.slew_thrust_weight,Ref::defaults.mpc.slew_rate_weight,Ref::defaults.mpc.slew_rate_weight,Ref::defaults.mpc.slew_rate_weight;}
+    Cost() {r_<<0.02,0.2,0.2,0.2;s_<<Ref::P.slew_thrust_weight,Ref::P.slew_rate_weight,Ref::P.slew_rate_weight,Ref::P.slew_rate_weight;}
     double q(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
         return ref_.q(x.head(14),oldU(u))+(r_.array()*(u-hover()).array().square()).sum()+(s_.array()*(u-x.tail(NU)).array().square()).sum();
     }
@@ -584,20 +602,20 @@ public:
         Eigen::VectorXd g=Eigen::VectorXd::Zero(NX);g.head(14)=ref_.qx(x.head(14),oldU(u));g.tail(NU)=2*s_.cwiseProduct(x.tail(NU)-u);return g;
     }
     Eigen::VectorXd qu(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
-        Eigen::VectorXd g=2*r_.cwiseProduct(u-hover())+2*s_.cwiseProduct(u-x.tail(NU));g(0)+=Ref::MASS*ref_.qu(x.head(14),oldU(u))(0);return g;
+        Eigen::VectorXd g=2*r_.cwiseProduct(u-hover())+2*s_.cwiseProduct(u-x.tail(NU));g(0)+=Ref::P.mass*ref_.qu(x.head(14),oldU(u))(0);return g;
     }
     Eigen::MatrixXd qxx(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
         Eigen::MatrixXd h=Eigen::MatrixXd::Zero(NX,NX);h.topLeftCorner(14,14)=ref_.qxx(x.head(14),oldU(u));h.bottomRightCorner(NU,NU)=2*s_.asDiagonal();return h;
     }
     Eigen::MatrixXd quu(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
-        Eigen::MatrixXd h=2*(r_+s_).asDiagonal();h(0,0)+=Ref::MASS*Ref::MASS*ref_.quu(x.head(14),oldU(u))(0,0);return h;
+        Eigen::MatrixXd h=2*(r_+s_).asDiagonal();h(0,0)+=Ref::P.mass*Ref::P.mass*ref_.quu(x.head(14),oldU(u))(0,0);return h;
     }
     Eigen::MatrixXd qxu(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {
         Eigen::MatrixXd h=Eigen::MatrixXd::Zero(NX,NU);h.bottomRows(NU)=-2*s_.asDiagonal();return h;
     }
 };
 class Terminal : public TerminalCostBase<double> {
-    Ref::RelTermCost<double> ref_{Ref::TERM_W_POS_XY,Ref::TERM_W_POS_Z,Ref::TERM_W_VEL_XY,Ref::TERM_W_VEL_Z,Ref::TERM_W_TILT,Ref::TERM_W_OM,Ref::TERM_VZ_REF};
+    Ref::RelTermCost<double> ref_{Ref::P.term_w_pos_xy,Ref::P.term_w_pos_z,Ref::P.term_w_vel_xy,Ref::P.term_w_vel_z,Ref::P.term_w_tilt,Ref::P.term_w_om,Ref::P.term_vz_ref};
 public:
     double p(const Eigen::VectorXd& x) const override {return ref_.p(x.head(14));}
     Eigen::VectorXd px(const Eigen::VectorXd& x) const override {Eigen::VectorXd g=Eigen::VectorXd::Zero(NX);g.head(14)=ref_.px(x.head(14));return g;}
@@ -607,7 +625,7 @@ class Bounds : public StageConstraintBase<double> {
 public:
     explicit Bounds(bool include_floor=true){constraint_type=ConstraintType::NO;dim_c=2*NU+(include_floor?1:0);}
     Eigen::VectorXd c(const Eigen::VectorXd& x,const Eigen::VectorXd& u) const override {
-        Eigen::VectorXd v(dim_c);v(0)=Ref::FMIN/Ref::MASS-u(0);v(1)=u(0)-thrustMax();
+        Eigen::VectorXd v(dim_c);v(0)=Ref::P.fmin/Ref::P.mass-u(0);v(1)=u(0)-thrustMax();
         for(int i=1;i<NU;++i){v(2*i)=u(i)-rateLimit();v(2*i+1)=-u(i)-rateLimit();}if(dim_c>2*NU)v(8)=-x(2);return v;
     }
     Eigen::MatrixXd cx(const Eigen::VectorXd&,const Eigen::VectorXd&) const override {Eigen::MatrixXd a=Eigen::MatrixXd::Zero(dim_c,NX);if(dim_c>2*NU)a(8,2)=-1;return a;}
@@ -640,7 +658,7 @@ public:
                 const Eigen::VectorXd jacobian=derivative.transpose()*(term.scale*term.consequence_dx(point,u));
                 result.noalias()+=(2*multiplier(0)*h*weight*term.weight)*(jacobian*jacobian.transpose());
             }
-            for(const auto& entry:{std::pair<int,double>{3,Ref::SPEED_MAX},{10,Ref::OMEGA_MAX}}){
+            for(const auto& entry:{std::pair<int,double>{3,Ref::P.speed_max},{10,Ref::P.omega_max}}){
                 const auto v=point.segment<3>(entry.first).eval();const double norm=v.norm();
                 const double residual=norm/entry.second-1.;if(residual<=0.)continue;
                 const Eigen::Matrix3d curvature=(Eigen::Matrix3d::Identity()-v*v.transpose()/(norm*norm))/(norm*entry.second);
@@ -670,8 +688,7 @@ public:
     }
 };
 inline std::shared_ptr<StcStageConstraint<double>> foldedLimits(std::shared_ptr<Dynamics> dynamics) {
-    const auto& parameters=Ref::defaults.constraints;
-    const double budget=parameters.ctcs_step_eps;
+    const double budget=Ref::P.ctcs_step_eps;
     if(!(budget>0.)||!std::isfinite(budget))throw std::invalid_argument("landing_mpc_ctcs requires a finite positive CTCS_STEP_EPS");
     auto folded=std::make_shared<FoldedNormCurvature>(dynamics,1.);
     const auto limits=Ref::landingRows(NX,NU);
@@ -723,24 +740,24 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(const OCPCreateArgs
             // descending, and honor the configured speed rather than a fixed
             // 0.5 m/s seed. The LOS clearance allows the full permitted tilt.
             const double radius=x.head<2>().norm();
-            const double los_slope=std::tan(std::max(.1,Ref::LOS_CONE_HALF_ANGLE_DEG-
-                Ref::TILT_SCALE*Ref::TILT_MAX_DEG)*M_PI/180);
-            const double cone_height=std::max({0.,radius/Ref::GS_CONE_TAN-Ref::GS_APEX_OFFSET,radius/los_slope});
-            const double vertical_speed=-std::min({.5,.9*Ref::SPEED_MAX,std::sqrt(std::max(0.,x(2)-cone_height-.1))});
+            const double los_slope=std::tan(std::max(.1,Ref::P.los_cone_half_angle_deg-
+                Ref::P.tilt_scale*Ref::P.tilt_max_deg)*M_PI/180);
+            const double cone_height=std::max({0.,radius/Ref::GS_CONE_TAN-Ref::P.gs_apex_offset,radius/los_slope});
+            const double vertical_speed=-std::min({.5,.9*Ref::P.speed_max,std::sqrt(std::max(0.,x(2)-cone_height-.1))});
             const double acceleration=std::clamp(2*(vertical_speed-x(5)),-.5,.5);
             const double remaining=std::max(DT,(N-k)*DT);
             Eigen::Vector3d force;force.head<2>()=args.target_accel.head<2>()-2*(x.head<2>()+x.segment<2>(3)*remaining)/(remaining*remaining);
             force.z()=nativeGravity()+acceleration+args.target_accel.z();
-            const double horizontal_limit=force.z()*std::tan(.9*Ref::TILT_SCALE*Ref::TILT_MAX_DEG*M_PI/180);
+            const double horizontal_limit=force.z()*std::tan(.9*Ref::P.tilt_scale*Ref::P.tilt_max_deg*M_PI/180);
             if(force.head<2>().norm()>horizontal_limit)force.head<2>()*=horizontal_limit/force.head<2>().norm();
             Eigen::Quaterniond q(x(6),x(7),x(8),x(9));q.normalize();
             Eigen::Quaterniond goal=Eigen::Quaterniond::FromTwoVectors(q*Eigen::Vector3d::UnitZ(),force.normalized())*q;
             Eigen::Quaterniond error=q.conjugate()*goal;if(error.w()<0)error.coeffs()*=-1;
-            Eigen::Vector3d rate=4*error.vec();if(rate.norm()>.9*Ref::OMEGA_MAX)rate*=.9*Ref::OMEGA_MAX/rate.norm();
+            Eigen::Vector3d rate=4*error.vec();if(rate.norm()>.9*Ref::P.omega_max)rate*=.9*Ref::P.omega_max/rate.norm();
             u(0)=force.norm();u.tail<3>()=rate;
             // Initial guess only: account for the native I/P state so the
             // warm rollout is feasible before DDP optimizes these inputs.
-            if(Ref::defaults.mpc.native_px4)u.tail<3>()-=x.segment<3>(INTEGRAL);
+            if(comando_parameters::defaults.mpc.native_px4)u.tail<3>()-=x.segment<3>(INTEGRAL);
         }
         problem->setInitialControl(k,u);problem->setStageDynamics(k,dyn);problem->setStageCost(k,cost);
         // x0 is measured data, not a decision variable. Keep input bounds
@@ -777,7 +794,7 @@ inline OCPDescriptor descriptor(){OCPDescriptor d;d.disarm_on_landing_finish=tru
         if(x.size()<13||!x.allFinite()||x.segment<4>(6).norm()<1e-8)return false;
         return Ref::LandingLimits(18,4).c(x,Eigen::VectorXd::Zero(4)).maxCoeff()<=0;
     };
-    d.getSolverParams=[](){auto p=Ref::getSolverParams();p.max_iter=Ref::defaults.mpc.max_iter;p.use_feasibility_ms=true;p.feasibility_ms_exact_rows={13,NX-4,NX-3,NX-2,NX-1};p.reg1_min=1e-4;p.reg2_min=1e-2;return p;};return d;
+    d.getSolverParams=[](){auto p=Ref::getSolverParams();p.max_iter=Ref::P.mpc_max_iter;p.use_feasibility_ms=true;p.feasibility_ms_exact_rows={13,NX-4,NX-3,NX-2,NX-1};p.reg1_min=1e-4;p.reg2_min=1e-2;return p;};return d;
 }
 inline OCPDescriptor ctcsDescriptor(){
     auto d=descriptor();d.name="landing_mpc_ctcs";

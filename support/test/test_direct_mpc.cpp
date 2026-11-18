@@ -53,10 +53,10 @@ int main(int argc,char** argv){try{
             problem->setTerminalCost(std::make_shared<AuditTerminalScale>(problem->getTerminalCost(),scale));
         }
         std::cout.precision(17);
-        const auto& limits=comando_parameters::defaults.constraints;
+        const auto& limits=LandingMpcOCP::Formulation::P;
         std::cout<<"CONFIG type="<<type<<" N="<<model.horizon<<" dt="<<model.dt
-            <<" speed="<<limits.spd_stc_max<<" tilt_deg="<<limits.alpha_theta_stc*limits.theta_stc_deg
-            <<" rate="<<limits.omega_stc_max<<" gs_deg="<<limits.gs_cone_half_angle_deg
+            <<" speed="<<limits.speed_max<<" tilt_deg="<<limits.tilt_scale*limits.tilt_max_deg
+            <<" rate="<<limits.omega_max<<" gs_deg="<<limits.gs_cone_half_angle_deg
             <<" apex="<<limits.gs_apex_offset<<" los_deg="<<limits.los_cone_half_angle_deg
             <<" ctcs_budget="<<limits.ctcs_step_eps<<" tolerance="<<parameters.tolerance
             <<" max_iter="<<parameters.max_iter<<" inner="<<parameters.max_inner_iter
@@ -164,16 +164,16 @@ int main(int argc,char** argv){try{
         const int max_solves=comando_parameters::envOrInt("AUDIT_MPC_SOLVES",400);
         check(max_solves>0&&max_solves<=400,"AUDIT_MPC_SOLVES must lie in [1,400] (40 s)");
         const bool fresh=comando_parameters::envOrInt("AUDIT_FRESH_SOLVER",0)!=0;
-        const int warm_iterations=comando_parameters::defaults.mpc.warm_iterations;
+        const int warm_iterations=StcLandingMpcOCP::Formulation::P.warm_iterations;
         std::ofstream dump;if(const char* file=std::getenv("AUDIT_DUMP"))dump.open(file);
         if(dump.is_open())dump<<std::setprecision(17);
         const Eigen::Vector3d target_velocity=.455*Eigen::Vector3d(std::cos(.6),std::sin(.6),0);
         std::cout.precision(17);
-        const auto& limits=comando_parameters::defaults.constraints;
+        const auto& limits=LandingMpcOCP::Formulation::P;
         std::cout<<"CONFIG type="<<type<<" synchronous=1 N="<<model.horizon<<" dt="<<model.dt<<" plant_step=.001"
             <<" solver="<<(fresh?"fresh":"retained")<<" warm_iterations="<<warm_iterations<<" max_solves="<<max_solves
-            <<" target_velocity="<<target_velocity.transpose()<<" speed="<<limits.spd_stc_max
-            <<" tilt_deg="<<limits.alpha_theta_stc*limits.theta_stc_deg<<" rate="<<limits.omega_stc_max
+            <<" target_velocity="<<target_velocity.transpose()<<" speed="<<limits.speed_max
+            <<" tilt_deg="<<limits.tilt_scale*limits.tilt_max_deg<<" rate="<<limits.omega_max
             <<" gs_deg="<<limits.gs_cone_half_angle_deg<<" apex="<<limits.gs_apex_offset
             <<" los_deg="<<limits.los_cone_half_angle_deg<<" ctcs_budget="<<limits.ctcs_step_eps
             <<" tolerance="<<parameters.tolerance<<" max_iter="<<parameters.max_iter<<" inner="<<parameters.max_inner_iter
@@ -441,11 +441,11 @@ int main(int argc,char** argv){try{
             const Eigen::Vector3d axis=orientation*Eigen::Vector3d::UnitZ();
             const double axial=axis.dot(probe.head<3>());
             const double tilt=2*std::asin(std::hypot(probe(7),probe(8)));
-            const auto& limits=comando_parameters::defaults.constraints;
-            const std::array<double,6> expected={-probe(2),probe.segment<3>(3).norm()/limits.spd_stc_max-1,
-                probe.segment<3>(10).norm()/limits.omega_stc_max-1,
+            const auto& limits=LandingMpcOCP::Formulation::P;
+            const std::array<double,6> expected={-probe(2),probe.segment<3>(3).norm()/limits.speed_max-1,
+                probe.segment<3>(10).norm()/limits.omega_max-1,
                 probe.head<2>().norm()/std::tan(limits.gs_cone_half_angle_deg*M_PI/180)-probe(2)-limits.gs_apex_offset,
-                std::sin(tilt/2)/std::sin(limits.alpha_theta_stc*limits.theta_stc_deg*M_PI/360)-1,
+                std::sin(tilt/2)/std::sin(limits.tilt_scale*limits.tilt_max_deg*M_PI/360)-1,
                 (probe.head<3>()-axial*axis).norm()-std::tan(limits.los_cone_half_angle_deg*M_PI/180)*axial};
             const auto fx=dynamics->fx(probe,control),fu=dynamics->fu(probe,control);
             L::Cost stage;L::Terminal terminal;
@@ -477,8 +477,8 @@ int main(int argc,char** argv){try{
         auto folded=L::foldedLimits(dynamics);
         check(folded->getDimC()==1&&folded->numImplications()==6,"ordinary CTCS must fold all six limits into one row");
         check(folded->c(state,control)(0)>0,"always-active CTCS must detect an angular-rate violation above the STC trigger altitude");
-        const auto& parameters=comando_parameters::defaults.constraints;
-        const double rate_residual=.03/parameters.omega_stc_max-1.;
+        const auto& parameters=LandingMpcOCP::Formulation::P;
+        const double rate_residual=.03/parameters.omega_max-1.;
         const double expected=L::DT*rate_residual*rate_residual/parameters.ctcs_step_eps-1.;
         check(std::abs(folded->c(state,control)(0)-expected)<1e-10,"folded CTCS must integrate the physical residual with the declared budget and scale");
         const auto cx=folded->cx(state,control),cu=folded->cu(state,control);
@@ -578,7 +578,7 @@ int main(int argc,char** argv){try{
         double fd=(row->c(xp,up)(0)-row->c(xm,um)(0))/(2*h);double analytic=j<O::NX?cx(0,j):cu(0,j-O::NX);cerror=std::max(cerror,std::abs(fd-analytic)/(1+std::abs(fd)));}
     check(cerror<1e-5,"CTCS Jacobians");
     {
-        O::Cost cost;auto state=x;state(2)=.5*(O::Ref::Z_STAGE+O::Ref::ALT_TRIG);
+        O::Cost cost;auto state=x;state(2)=.5*(O::Ref::P.z_stage+O::Ref::P.alt_trig);
         const auto gx=cost.qx(state,u),gu=cost.qu(state,u);
         for(int j=0;j<O::NX+O::NU;++j){auto xp=state,xm=state,up=u,um=u;
             if(j<O::NX){xp(j)+=h;xm(j)-=h;}else{up(j-O::NX)+=h;um(j-O::NX)-=h;}
@@ -629,7 +629,7 @@ int main(int argc,char** argv){try{
     check(O::descriptor().command_mode==OCPDescriptor::CommandMode::CmdBodyRate,"direct command type");
     {
         OCPCreateArgs hover_args;hover_args.current_state=Eigen::VectorXd::Zero(13);
-        hover_args.current_state(2)=O::Ref::Z_STAGE+.3;hover_args.current_state(6)=1;
+        hover_args.current_state(2)=O::Ref::P.z_stage+.3;hover_args.current_state(6)=1;
         auto feasible=O::create(hover_args);
         for(double mu:{1.,.01,1e-6}){
             ALIPDDP<double> seeded(*feasible);

@@ -65,36 +65,11 @@
   <!-- Hover thrust initial estimate (normalised 0-1) -->
   <arg name="hover_thrust"                      default="0.3"/>
 
-  <!-- stc_landing scenario tuning (SZMUK_* env, read once at node start).
-       Values are TARGET-RELATIVE metres; the SITL platform sits at ~0.2 m.
-       Staging floor 1.4 / LOS trigger 1.2 is validated (faithful-port OCP,
-       e02ec53) for engagement from a TRUE world 1.8 m hover (rel 1.6 —
-       profile_hover_sitl.yaml commands 2.05 to beat the ~0.25 m open-loop
-       settle bias; run logs/px4_drone_hover_open_loop_alipddp_20260723_005256,
-       14.7 cm touchdown offset). Offline sweep from true 1.8: floor 1.4 =
-       6/8 convergent activation phases for any LOS in 1.0-1.3; floors
-       1.5/1.6 drop to 3/8. The floor needs headroom below the actual
-       engagement altitude: from a 1.54 m settle every floor >=1.4 is
-       geometrically dead (0/8) — use stc_z_stage:=1.3 there (8/8 with the
-       faithful OCP). Keep the LOS trigger below the floor: it should arm
-       only during the final descent. Code defaults stay at the
-       benchmark's 1.8. -->
-  <arg name="stc_z_stage"                       default="1.4"/>
-  <arg name="stc_los_alt_trig"                  default="1.2"/>
-
-  <!-- RH solve shaping (SZMUK_RH_N / SZMUK_MAX_ITER / SZMUK_THH /
-       SZMUK_W_LAND_GS) is deliberately NOT a launch default. The 2026-07-23
-       horizon-tuned MAVROS config (RH_N=40, MAX_ITER=120, THH=0.16,
-       W_LAND_GS=20000; README.md) improves the MAVROS glideslope,
-       but THH=0.16 inflates the per-node dt so the n_replay=4 warm-start
-       shift (~0.64 s) outruns the ~0.23 s solve lead and re-breaks the CF
-       replan loop (1 accept / 91 reject). Export those SZMUK_* by hand for a
-       MAVROS tuning run; leave them at compiled defaults for the shared,
-       CF-safe baseline. -->
+  <!-- OCP numbers (staging, LOS trigger, horizon, weights) come from each
+       OCP's preset, selected at process start by STC_PRESET, STC_MPC_PRESET,
+       LANDING_RH_PRESET or LANDING_MPC_PRESET in the environment. -->
 
   <node pkg="comando_planner" type="comando_planner" name="comando_planner" output="screen">
-    <env name="SZMUK_Z_STAGE"      value="$(arg stc_z_stage)"/>
-    <env name="SZMUK_LOS_ALT_TRIG" value="$(arg stc_los_alt_trig)"/>
     <param name="drone_name"                        value="$(arg drone_name)"/>
     <param name="platform"                          value="$(arg platform)"/>
     <param name="solver"                            value="$(arg solver)"/>

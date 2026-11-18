@@ -533,12 +533,12 @@ Example for one ordinary RH target:
 ```sh
 python3 support/scripts/run_scenario_campaign.py \
   --motions circle --levels zero --trials 1 --start cone \
-  --hover-thrust 0.7282821834 --stc-z-stage 1.55 --stc-los-alt-trig 1.2 \
+  --hover-thrust 0.7282821834 \
   --profile config/ros1/profile_landing_rh_sitl.yaml \
   --out logs/landing/ros1/ordinary_rh_check
 ```
 
-For MPC, use `profile_landing_mpc_sitl.yaml`, staging value 1.3, and the saved startup environment: `MPC_RATE_TAU=0.08`, `MPC_HOVER_THRUST=0.7282821834`, `MPC_MAX_ITER=120`, `MPC_MAX_POLICY_AGE=2`, `MPC_RATE_LIMIT=0.35`. Refer to each saved cell's environment/profile for exact reproduction settings.
+For MPC, use `profile_landing_mpc_sitl.yaml`, staging value 1.3, and the saved startup environment: `MPC_RATE_TAU=0.08`, `MPC_HOVER_THRUST=0.7282821834`, `MPC_MAX_POLICY_AGE=2`, `MPC_RATE_LIMIT=0.35`. The campaign runner selects the `campaign` presets of `landing_rh` and `landing_mpc` (horizon 40, 120 iterations, 0.16 s duration cap). Refer to each saved cell's environment/profile for exact reproduction settings.
 
 ## Logs, analysis and plots
 
@@ -705,7 +705,7 @@ The revised general architecture uses grouped problem/optimizer/controller block
 
 The startup preset [tuning_stc_mpc_sitl.env](config/ros1/tuning_stc_mpc_sitl.env) produced two sequential circle flights with **zero measured violations against the original physical limits**, both `LANDED / CLEAN`. Controlled durations were 10.00 and 12.76 s; the repeated run had 222 accepted solves, zero rejected solves, 53.38 ms median warm solve and 17.58 Hz new first inputs. DDP still supplies the unchanged first input and PX4 tracks it. Physical scoring retains the original 0.8 m landing trigger, 0.019 rad/s rate limit, 0.75 m/s speed limit, 0.95 degree tilt, 15/30 degree cones and 1.3 m staging floor. Optimizer activation/margins are stricter and are saved separately from the scoring environment.
 
-Source the preset **before starting the planner process**, and pass `stc_z_stage:=1.5 stc_los_alt_trig:=1.2` to ROS1 launch (these launch arguments override the environment). The ROS profile alone does not load startup environment settings. The preset is circle-verified; it is not a replacement for the ordinary or RH defaults.
+Source the preset **before starting the planner process**; it selects `STC_MPC_PRESET=mc` (OCP numbers, including staging 1.5 m and LOS trigger 1.2 m, in `ocp_stc_landing_mpc.hpp`) and the PX4 platform values. The preset is circle-verified; it is not a replacement for the ordinary or RH defaults.
 
 The broader fix remains incomplete: straight and figure-eight validation failed to complete cleanly, and accepted predicted horizons still have tilt/rate excesses and dynamics gaps. Do not interpret the circle result as universal physical or predicted feasibility. The existing plotters were reused with the original physical bounds; no plotting design changed. See the [full tuning report and reproduction command](logs/landing/ros1/mpc_stc_speed_margin_repeat/circle__zero__t0/tuning_report.md), [state plot](logs/landing/ros1/mpc_stc_speed_margin_repeat/circle__zero__t0/stc_flight_states.png), [3D plot](logs/landing/ros1/mpc_stc_speed_margin_repeat/circle__zero__t0/stc_flight_3d.png), and [measured/predicted audit](logs/landing/ros1/mpc_stc_speed_margin_repeat/circle__zero__t0/constraint_audit_reference.json). All flights and builds were run sequentially; recordings and failed experiments remain under `logs/`.
 

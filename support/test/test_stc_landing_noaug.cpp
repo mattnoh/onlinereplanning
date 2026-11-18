@@ -70,31 +70,11 @@ struct CircularTarget {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // The OCP's SZMUK_* statics are read before main. Re-exec once with an
-    // isolated copy of the deployed realtime configuration. Tests must not
-    // silently change behavior because the invoking shell has tuning exports.
-    if (!std::getenv("SZMUK_TEST_ENV_READY")) {
-        std::vector<std::string> inherited_szmuk;
-        for (char** entry = environ; entry && *entry; ++entry) {
-            const std::string value(*entry);
-            const auto equal = value.find('=');
-            const std::string name = value.substr(0, equal);
-            if (name.rfind("SZMUK_", 0) == 0) {
-                inherited_szmuk.push_back(name);
-            }
-        }
-        for (const auto& name : inherited_szmuk) {
-            unsetenv(name.c_str());
-        }
-
-        setenv("SZMUK_TEST_ENV_READY", "1", 1);
-        setenv("SZMUK_RH_N", "30", 1);
-        setenv("SZMUK_MAX_ITER", "30", 1);
-        setenv("SZMUK_THH", "0.16", 1);
-        setenv("SZMUK_W_LAND_GS", "20000", 1);
-        setenv("SZMUK_Z_STAGE", "1.3", 1);
-        setenv("SZMUK_LOS_ALT_TRIG", "1.3", 1);
-        setenv("SZMUK_SOLVER_VERBOSE", "0", 1);
+    // The OCP's preset is read before main. Re-exec once with the deployed
+    // realtime test configuration (preset "realtime_test").
+    if (!std::getenv("STC_TEST_ENV_READY")) {
+        setenv("STC_TEST_ENV_READY", "1", 1);
+        setenv("STC_PRESET", "realtime_test", 1);
         execv("/proc/self/exe", argv);
         // fall through and run anyway if execv fails
     }

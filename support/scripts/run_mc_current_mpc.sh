@@ -2,8 +2,8 @@
 # MC1/MC2 rerun with the current folded cSTC-DDP measured-state MPC.
 #
 # The startup preset is sourced before every planner start (the runner spawns
-# a fresh planner per cell and inherits this environment). Staging/LOS launch
-# arguments are passed explicitly because they override the environment.
+# a fresh planner per cell and inherits this environment). Staging and LOS
+# trigger altitudes are part of the stc_landing_mpc "mc" preset.
 # Trial definitions follow the original campaigns:
 #   MC1 (2026-08-25, runner 543424a): six motions x 50, zero noise, seeded shape
 #       randomization, heading-relative staging, record-and-proceed bearing.
@@ -28,7 +28,7 @@ source $P/config/ros1/tuning_stc_mpc_sitl.env
 [ -n "$MC_TUNE_ENV" ] && source "$MC_TUNE_ENV"
 RUN=(python3 -u $P/support/scripts/run_scenario_campaign.py
      --profile $P/config/ros1/profile_stc_landing_mpc_sitl.yaml
-     --hover-thrust .7282821834 --stc-z-stage 1.5 --stc-los-alt-trig 1.2
+     --hover-thrust .7282821834
      --start original --landing-timeout 300 --continue-on-failure --reuse)
 case "$1" in
   commission)  # outside both denominators

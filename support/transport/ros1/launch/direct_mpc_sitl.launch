@@ -6,7 +6,6 @@
   <arg name="motor_speed_offset" default="0.17647058823529413"/>
   <arg name="rate_tau" default="0.08"/>
   <arg name="rate_limit" default="0.35"/>
-  <arg name="max_iter" default="120"/>
   <arg name="max_policy_age" default="2.0"/>
   <group>
     <env name="MPC_HOVER_THRUST" value="$(arg hover_thrust)"/>
@@ -14,18 +13,14 @@
     <env name="MPC_MOTOR_SPEED_OFFSET" value="$(arg motor_speed_offset)"/>
     <env name="MPC_RATE_TAU" value="$(arg rate_tau)"/>
     <env name="MPC_RATE_LIMIT" value="$(arg rate_limit)"/>
-    <env name="MPC_MAX_ITER" value="$(arg max_iter)"/>
     <env name="MPC_MAX_POLICY_AGE" value="$(arg max_policy_age)"/>
-    <env name="SZMUK_CTCS_STEP_EPS" value="0.0016"/>
-    <env name="SZMUK_CTCS_Y_SCALE" value="10"/>
-    <env name="SZMUK_W_LAND_GS" value="20000"/>
+    <!-- stc_landing_mpc numbers: preset "direct_launch" in ocp_stc_landing_mpc.hpp -->
+    <env name="STC_MPC_PRESET" value="direct_launch"/>
     <include file="$(dirname)/planner_launch.launch">
       <arg name="platform" value="mavros"/>
       <arg name="drone_name" value="$(arg drone_name)"/>
       <arg name="log_dir" value="$(arg log_dir)"/>
       <arg name="hover_thrust" value="$(arg hover_thrust)"/>
-      <arg name="stc_z_stage" value="1.3"/>
-      <arg name="stc_los_alt_trig" value="1.2"/>
       <arg name="terminal_freeze_enter_vel" value="0.30"/>
     </include>
   </group>

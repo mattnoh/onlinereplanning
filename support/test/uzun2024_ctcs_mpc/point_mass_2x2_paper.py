@@ -159,30 +159,39 @@ def run_scp(P, mode, arm, N, out):
     if arm == 'ctcs':
         y = ox.State('y', (1,)); y.min = [-1e3]; y.max = [1e3]; y.scaling_min = [-1.]; y.scaling_max = [1.]
         y.initial = [0.]; y.final = [ox.Free(0.)]; y.guess = np.zeros((n, 1)); states.append(y)
-        k = 1./(R*np.sqrt(B))  # y measures I/B: density/B, row y_{k+1}-y_k <= 1
+        # y measures ys*I (default ys=1/B: y in budget units, row y_{k+1}-y_k <= 1). y_scale
+        # is a change of variables only; the feasible set {I_k <= B} is unchanged.
+        ys = cfg.get('y_scale', 1./B); k = np.sqrt(ys)/R if 'y_scale' in cfg else 1./(R*np.sqrt(B))
         dyn['y'] = (ox.Square(ox.PositivePart(k*(obs_res+P['tightening_m']['obstacle']))) +
                     ox.Square(ox.PositivePart(k*(glide_res+P['tightening_m']['glide']))))
-        cons += [(y.at(j+1)-y.at(j) <= 1.).convex() for j in range(N)]
+        cons += [(y.at(j+1)-y.at(j) <= (B*ys if 'y_scale' in cfg else 1.)).convex() for j in range(N)]
     else:
         cons += [(obs_res <= 0.).at(list(range(n))), (glide_res <= 0.).at(list(range(n)))]
     # Re-canonicalize every subproblem (ignore_dpp). Compiled DPP is ~6x faster per
     # iteration but, with the 1/B-scaled accumulator row, Clarabel reported an
     # infeasible CTCS subproblem that the non-DPP path solves; keep one mode for all.
     dpp = {'ignore_dpp': True}
+    # Paper setting (cvx_backend='clarabel_dpp' with y_scale): with y = 1e5*I instead of I/B,
+    # Clarabel solves the compiled DPP problem, so it is built once instead of every iteration.
+    if cfg.get('cvx_backend') == 'clarabel_dpp': dpp = {'enforce_dpp': True}
+    tol = cfg.get('cvx_tol', 1e-10)
+    solver = {'cvx_solver': 'CLARABEL', 'solver_args': {'tol_gap_abs': tol, 'tol_gap_rel': tol, 'tol_feas': tol, 'max_iter': 300, **dpp}}
     # CT-SCvx penalizes defects AND nonconvex constraint buffers with one exact-penalty
     # weight w_ep. ConstantProximalWeight never adapts lam_vb (default 0), so set it.
     lam_vb = cfg.get('lam_vb', cfg['lam_vc'])
+    ode = {'rtol': cfg['ode_tol'], 'atol': cfg['ode_tol'], 'num_substeps': 30,
+           'stepsize_controller': diffrax.PIDController(rtol=cfg['ode_tol'], atol=cfg['ode_tol'],
+                                                        dtmax=1./(N*cfg['max_step_divisor']))}
     problem = ox.Problem(states=states, controls=[a], time=clock, N=n, float_dtype='float64',
         dynamics=dyn, constraints=cons,
         algorithm={'k_max': cfg['max_iter'], 'lam_cost': cfg['lam_cost'], 'lam_prox': cfg['lam_prox'],
                    'lam_vc': cfg['lam_vc'], 'lam_vb': lam_vb, 'ep_tr': cfg['ep_tr'], 'ep_vc': cfg['ep_vc'], 'ep_vb': cfg['ep_vb'],
-                   'autotuner': ox.ConstantProximalWeight()},
-        discretizer={'type': 'VectorizeDiscretizeLinearize', 'ode_solver': 'Dopri8', 'diffrax_kwargs': {
-            'rtol': cfg['ode_tol'], 'atol': cfg['ode_tol'], 'num_substeps': 30,
-            'stepsize_controller': diffrax.PIDController(rtol=cfg['ode_tol'], atol=cfg['ode_tol'],
-                                                         dtmax=1./(N*cfg['max_step_divisor']))}},
-        solver={'cvx_solver': 'CLARABEL', 'solver_args': {'tol_gap_abs': cfg.get('cvx_tol', 1e-10), 'tol_gap_rel': cfg.get('cvx_tol', 1e-10),
-                'tol_feas': cfg.get('cvx_tol', 1e-10), 'max_iter': 300, **dpp}})
+                   # 'al': OpenSCvx's default acceptance-ratio weight update (Elango Remark 24 /
+                   # Fig. 3 "Update Hyperparameters"); default stays the constant-weight prox-linear loop.
+                   'autotuner': ox.AugmentedLagrangian() if cfg.get('autotuner') == 'al' else ox.ConstantProximalWeight()},
+        discretizer={'type': 'VectorizeDiscretizeLinearize', 'ode_solver': 'Dopri8', 'diffrax_kwargs': ode},
+        solver=solver)
+    if not cfg.get('printing', True): problem.settings.dev.printing = False  # per-iteration console table
     problem.initialize(); sl = problem.slices
     def physical(st):
         x = np.asarray(st.x); u = np.asarray(st.u)
@@ -198,7 +207,9 @@ def run_scp(P, mode, arm, N, out):
         import jax
         rawX, rawU = np.asarray(st.x), np.asarray(st.u); yc = sl['y'].start
         prop = np.asarray(jax.jit(problem.discretizer.get_solver(problem.lowered.dynamics, problem.settings))(rawX, rawU, problem._parameters)[3])
-        inc = np.diff(rawX[:, yc])*B; native = (prop[:, yc]-rawX[:-1, yc])*B
+        ys = cfg.get('y_scale', 1./B)
+        if 'y_scale' not in cfg: inc = np.diff(rawX[:, yc])*B; native = (prop[:, yc]-rawX[:-1, yc])*B
+        else: inc = np.diff(rawX[:, yc])/ys; native = (prop[:, yc]-rawX[:-1, yc])/ys
         extra.update(optimized_accumulator_increments=inc.tolist(), numerical_intervals=native.tolist(),
                      accumulator_defects=(inc-native).tolist())
     k_hist = len(getattr(problem.history, 'J_tr', []) or [])

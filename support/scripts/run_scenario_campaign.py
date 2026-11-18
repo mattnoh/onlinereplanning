@@ -66,8 +66,9 @@ UNCERT = {
                 "target_noise_sigma_acc": 0.50},
 }
 
-# stc_landing_noaug takes all of its numbers from the preset STC_PRESET names.
-PLANNER_ENV = {"STC_PRESET": "sitl"}
+# Each OCP takes its numbers from the preset its *_PRESET variable names
+# (see the OCP files). These match the settings earlier campaigns injected.
+PLANNER_ENV = {"STC_PRESET": "sitl", "LANDING_RH_PRESET": "campaign", "LANDING_MPC_PRESET": "campaign"}
 
 # Controller outcomes that count in a campaign denominator. Anything else is an
 # infrastructure attempt (the controller under test never got the landing).
@@ -209,7 +210,7 @@ def campaign_identity(args):
     """Everything that defines the flown controller and scenario. Commit ids
     are recorded separately: checkpoint commits during a campaign must not
     change the identity of an unchanged binary/configuration."""
-    env = {k: v for k, v in os.environ.items() if k.startswith(("SZMUK_", "STC_", "MPC_", "PX4_"))}
+    env = {k: v for k, v in os.environ.items() if k.startswith(("SZMUK_", "STC_", "LANDING_", "MPC_", "PX4_"))}
     def same(a, b):
         try:
             return float(a) == float(b)
@@ -229,8 +230,7 @@ def campaign_identity(args):
         target_launch_sha256=sha256(os.path.join(launch, "target_launch.launch")),
         hover_thrust=args.hover_thrust, hover_height=getattr(args, "hover_height", 2.05),
         settle_min_z=getattr(args,"settle_min_z",1.70), settle_max_z=getattr(args,"settle_max_z",1.90),
-        stc_z_stage=args.stc_z_stage,
-        stc_los_alt_trig=args.stc_los_alt_trig, start=args.start,
+        start=args.start,
         staging=args.staging, bearing_policy=args.bearing_policy,
         shape_random=args.shape_random, landing_timeout=args.landing_timeout,
         motions={m: MOTIONS[m] for m in args.motions.split(",")},
@@ -450,9 +450,8 @@ def run_cell(motion, level, trial, outdir, args):
             ("px4", "mavros", "target", "planner")}
     t0 = time.time()
     # Save inputs before launch, including inherited controller tuning.
-    env_snapshot = {k:v for k,v in os.environ.items() if k.startswith(("SZMUK_", "STC_", "MPC_", "PX4_"))}
+    env_snapshot = {k:v for k,v in os.environ.items() if k.startswith(("SZMUK_", "STC_", "LANDING_", "MPC_", "PX4_"))}
     env_snapshot.update(PLANNER_ENV)
-    env_snapshot.update(SZMUK_Z_STAGE=str(args.stc_z_stage), SZMUK_LOS_ALT_TRIG=str(args.stc_los_alt_trig))
     json.dump(env_snapshot, open(os.path.join(cell, "planner_environment.json"), "w"), indent=2)
     shutil.copyfile(args.profile, os.path.join(cell, "landing_profile.yaml"))
     revision = subprocess.run(["git", "-C", RUNPKG, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
@@ -497,7 +496,7 @@ def run_cell(motion, level, trial, outdir, args):
         procs.append(spawn(
             f"{SETUP} && export {env} && roslaunch comando_planner planner_launch.launch "
             f"platform:=mavros drone_name:=px4_drone hover_thrust:={args.hover_thrust} terminal_freeze_enter_vel:=0.30 "
-            f"stc_z_stage:={args.stc_z_stage} stc_los_alt_trig:={args.stc_los_alt_trig} log_dir:={cell}", logs["planner"]))
+            f"log_dir:={cell}", logs["planner"]))
         wait_for("planner node", lambda: node_alive("comando_planner"), 45)
         planner_exe, target_exe = live_exe("comando_planner"), live_exe("target_publisher")
         expected = [os.path.realpath(os.path.join(DEVEL, n)) for n in ("comando_planner", "target_publisher")]
@@ -651,8 +650,6 @@ def main():
                     help="world-frame staging hover target; historical default is unchanged")
     ap.add_argument("--settle-min-z", type=float, default=1.70)
     ap.add_argument("--settle-max-z", type=float, default=1.90)
-    ap.add_argument("--stc-z-stage", type=float, default=1.55)
-    ap.add_argument("--stc-los-alt-trig", type=float, default=1.2)
     ap.add_argument("--motions", default=",".join(MOTIONS))
     ap.add_argument("--levels", default=",".join(UNCERT))
     ap.add_argument("--staging", choices=("bearing", "offset"), default="bearing",
