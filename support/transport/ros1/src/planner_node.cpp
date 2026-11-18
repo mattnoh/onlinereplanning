@@ -1,7 +1,6 @@
 /// @file planner_node.cpp  (ROS1 Noetic branch)
 /// @brief CoManDO planner node — MAVROS platform, roscpp.
 
-#include "ocp/ocp_landing_rh.hpp"
 #include <ros/ros.h>
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
@@ -19,6 +18,7 @@
 #include "planner_logging.hpp"
 #include "planner_core/controller.hpp"
 #include "hover_controller.hpp"
+#include "ocp/ocp_landing_rh.hpp"
 
 #include <chrono>
 #include <memory>
