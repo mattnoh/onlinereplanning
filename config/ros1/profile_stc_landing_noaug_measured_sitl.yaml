@@ -1,6 +1,6 @@
 # PX4/Gazebo measured-state RH, stationary and moving targets.
-# Source config/frozen_quad_ctcs_coarse.env then
-# config/ros1/tuning_stc_measured_rh_sitl.env (see its header for launch).
+# Start the planner with STC_PRESET=sitl (OCP numbers: preset "sitl" in
+# include/ocp/ocp_stc_landing_noaug.hpp).
 ocp_type: stc_landing_noaug
 mode: mpc
 n_replay: 3

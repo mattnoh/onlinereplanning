@@ -45,7 +45,7 @@ Pointmass NODE, the current pointmass CTCS reference-adapter case, and quad NODE
 have passing frozen-time results recorded in
 [`support/test/frozen_node_baseline.json`](support/test/frozen_node_baseline.json).
 Quad interval-only CTCS RH now has a **scoped passing frozen staging/moving-target
-case** using `config/frozen_quad_ctcs.env`. It completes 20 replans / 7.73252 simulated
+case** using preset `n80` (`STC_PRESET=n80`). It completes 20 replans / 7.73252 simulated
 seconds, with zero executed original physical excess and maximum planned
 physical excess 8.13919e-7 against the unchanged 1e-6 audit threshold. Staging
 starts active and deactivates after capture. Its full-horizon control and first
@@ -76,8 +76,7 @@ passed raw runs are retained alongside it as a `.tar.gz` archive. The later
 `quad_ctcs_budget_tuning_20261105.tar.gz` alongside that record.
 
 ```bash
-# Use a shell without inherited SZMUK_*/STC_*/MPC_* overrides.
-source config/frozen_quad_ctcs.env
+export STC_PRESET=n80   # stc_landing_noaug numbers: Params presets in the OCP file
 build/test_measured_root_rh quad matched 1 /tmp/quad-ctcs-single --ctcs --staging-initial --audit-loop --single-horizon
 build/test_measured_root_rh quad matched 40 /tmp/quad-ctcs-rh --ctcs --staging-initial --audit-loop
 ```
@@ -88,7 +87,7 @@ under their existing respective checks: quad NODE (19 replans), quad CTCS N80
 validation, not a general initial-condition or real-time claim. Quad CTCS is
 not strictly integral-budget certified, as quantified above.
 
-The optional `config/frozen_quad_ctcs_coarse.env` preserves the N80 nominal
+Preset `n60` preserves the N80 nominal
 horizon time while using N60, initial duration .0933333 s, duration bounds
 .0666667–.16 s, and **three** executed intervals per replan. This tuned case
 passes its single-horizon and RH physical checks (20 replans / 7.70133 s,
@@ -115,12 +114,10 @@ BIN=build/test_measured_root_rh
 $BIN quad matched 40 /tmp/checkpoint-quad-node --audit-loop
 $BIN pointmass matched 15 /tmp/checkpoint-pointmass-node --audit-loop
 $BIN pointmass matched 15 /tmp/checkpoint-pointmass-ctcs --ctcs --audit-loop
-# Quad CTCS N80 (fresh shell):
-source config/frozen_quad_ctcs.env
-$BIN quad matched 40 /tmp/checkpoint-quad-ctcs --ctcs --staging-initial --audit-loop
-# Optional N60 (separate fresh shell):
-source config/frozen_quad_ctcs_coarse.env
-$BIN quad matched 40 /tmp/checkpoint-quad-ctcs-coarse --ctcs --staging-initial --audit-loop --replay-intervals 3
+# Quad CTCS N80:
+STC_PRESET=n80 $BIN quad matched 40 /tmp/checkpoint-quad-ctcs --ctcs --staging-initial --audit-loop
+# N60:
+STC_PRESET=n60 $BIN quad matched 40 /tmp/checkpoint-quad-ctcs-coarse --ctcs --staging-initial --audit-loop --replay-intervals 3
 ```
 
 Independent measured-plant follow-up (frozen clock): the shared loop also
@@ -172,12 +169,9 @@ physical audits cover OCP activation through touchdown handoff (or recorded
 stop/end for failures) at MAVROS odometry resolution; they are not a
 continuous-time certificate.
 
-**Measured-state SITL profile (2026-11-18).** Source
-`config/frozen_quad_ctcs_coarse.env` then
-`config/ros1/tuning_stc_measured_rh_sitl.env`, and apply
-`config/ros1/profile_stc_landing_noaug_measured_sitl.yaml`. Launch with
-staging and LOS trigger altitudes `stc_z_stage:=1.8 stc_los_alt_trig:=1.5`,
-hover target 2.4 m and settle window 2.02–2.6 m. Each replan is rooted at the
+**Measured-state SITL profile (2026-11-18).** Start the planner with
+`STC_PRESET=sitl` (staging 1.8 m and LOS trigger 1.5 m are in that preset) and
+apply `config/ros1/profile_stc_landing_noaug_measured_sitl.yaml`. Hover target 2.4 m and settle window 2.02–2.6 m. Each replan is rooted at the
 measured state, rolled forward under the PX4 tracking-error model to the plan
 handoff, against the live target. These used to be opt-in and are now defaults:
 
@@ -217,8 +211,8 @@ velocity and attitude gains match the recorded model defaults. The local model
 omits nonlinear saturation, the velocity integrator and full motor dynamics;
 it is not an exact PX4 model. Existing core analytic checks pass.
 
-LOS has its own tightening, `SZMUK_CTCS_LOS_MARGIN`, which defaults to the
-geometric margin. With the shared margin, values above 0.026795 m also
+LOS has its own tightening, `margins.los`, separate from the geometric
+margin. With a shared margin, values above 0.026795 m also
 tightened the glideslope enough to exclude the landing point. The SITL
 setpoints are trajectory references to PX4, not direct motor or body-rate
 commands. Pointmass has no PX4 SITL plant here.
@@ -276,8 +270,7 @@ native and executed-node checks. Therefore all four runtime completions must
 not be presented as four complete constraint passes. Quad CTCS still needs work.
 
 Wall-clock quad CTCS tuning now has a separate optional profile:
-source `config/frozen_quad_ctcs.env`, then
-`config/wall_clock_quad_ctcs.env`, before the same wall-clock command below.
+preset `wall_clock` (N80 with the two changes below).
 Only horizontal terminal weight (100000 to 200000) and CTCS row scale
 (0.5 to 2) change. The physical interval budget, solver/audit tolerances,
 triggers, timing, native solver and shared loop stay unchanged.
@@ -320,10 +313,9 @@ Build and run in fresh shells without inherited SZMUK/STC/MPC overrides:
 cmake -S . -B build -DCOMANDO_ROS_VERSION=0 -DCOMANDO_BUILD_TESTS=ON
 cmake --build build --target test_wall_clock_rh -j1
 # Quad NODE:
-SZMUK_RH_N=40 SZMUK_THH=.16 SZMUK_MAX_ITER=120 build/test_wall_clock_rh quad node 20 /tmp/wall-quad-node delay-compensated
-# Quad CTCS (separate fresh shell):
-source config/frozen_quad_ctcs.env
-build/test_wall_clock_rh quad ctcs 20 /tmp/wall-quad-ctcs delay-compensated
+STC_PRESET=wall_clock_node build/test_wall_clock_rh quad node 20 /tmp/wall-quad-node delay-compensated
+# Quad CTCS:
+STC_PRESET=wall_clock build/test_wall_clock_rh quad ctcs 20 /tmp/wall-quad-ctcs delay-compensated
 # Pointmass (separate fresh shell, no quad profile):
 build/test_wall_clock_rh pointmass node 30 /tmp/wall-pm-node delay-compensated
 build/test_wall_clock_rh pointmass ctcs 30 /tmp/wall-pm-ctcs delay-compensated
@@ -366,9 +358,8 @@ not been modified or overwritten.
 ```bash
 cmake -S . -B build -DCOMANDO_ROS_VERSION=0 -DCOMANDO_BUILD_TESTS=ON
 cmake --build build --target test_measured_root_rh -j1
-# Existing quad NODE check, without inherited SZMUK_*/STC_*/MPC_* tuning:
-env SZMUK_RH_N=40 SZMUK_THH=.16 SZMUK_MAX_ITER=120 \
-  build/test_measured_root_rh quad matched 40 /tmp/quad-node --audit-loop
+# Quad NODE check:
+build/test_measured_root_rh quad matched 40 /tmp/quad-node --audit-loop
 ```
 
 Saved-request replay uses the recorded descriptor, horizon and environment:

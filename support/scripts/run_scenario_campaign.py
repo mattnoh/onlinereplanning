@@ -66,10 +66,8 @@ UNCERT = {
                 "target_noise_sigma_acc": 0.50},
 }
 
-PLANNER_ENV = {
-    "SZMUK_RH_N": "40", "SZMUK_MAX_ITER": "120",
-    "SZMUK_THH": "0.16", "SZMUK_W_LAND_GS": "20000",
-}
+# stc_landing_noaug takes all of its numbers from the preset STC_PRESET names.
+PLANNER_ENV = {"STC_PRESET": "sitl"}
 
 # Controller outcomes that count in a campaign denominator. Anything else is an
 # infrastructure attempt (the controller under test never got the landing).
@@ -211,7 +209,7 @@ def campaign_identity(args):
     """Everything that defines the flown controller and scenario. Commit ids
     are recorded separately: checkpoint commits during a campaign must not
     change the identity of an unchanged binary/configuration."""
-    env = {k: v for k, v in os.environ.items() if k.startswith(("SZMUK_", "MPC_", "PX4_"))}
+    env = {k: v for k, v in os.environ.items() if k.startswith(("SZMUK_", "STC_", "MPC_", "PX4_"))}
     def same(a, b):
         try:
             return float(a) == float(b)
@@ -452,7 +450,7 @@ def run_cell(motion, level, trial, outdir, args):
             ("px4", "mavros", "target", "planner")}
     t0 = time.time()
     # Save inputs before launch, including inherited controller tuning.
-    env_snapshot = {k:v for k,v in os.environ.items() if k.startswith(("SZMUK_", "MPC_", "PX4_"))}
+    env_snapshot = {k:v for k,v in os.environ.items() if k.startswith(("SZMUK_", "STC_", "MPC_", "PX4_"))}
     env_snapshot.update(PLANNER_ENV)
     env_snapshot.update(SZMUK_Z_STAGE=str(args.stc_z_stage), SZMUK_LOS_ALT_TRIG=str(args.stc_los_alt_trig))
     json.dump(env_snapshot, open(os.path.join(cell, "planner_environment.json"), "w"), indent=2)
