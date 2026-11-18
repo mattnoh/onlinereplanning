@@ -332,7 +332,10 @@ public:
         }
 
         Eigen::VectorXd x0 = prepareOcpState(desc_, input.current_state, input.target_snapshot);
-        if (config_.terminal_freeze_live_state && config_.enable_terminal_freeze && primed_ &&
+        // Measured-state RH: detect touchdown on the LIVE relative state, before
+        // handoff scheduling. The predicted root is unavailable once the active
+        // plan is exhausted (e.g. after landing on its last sample).
+        if (config_.measured_state_delay_compensation && config_.enable_terminal_freeze && primed_ &&
             !terminal_freeze_ && desc_.coordinates == OCPDescriptor::Coordinates::TargetRelative &&
             x0.size() >= 6 && x0.head(3).norm() < config_.terminal_freeze_enter_pos &&
             x0.segment(3, 3).norm() < config_.terminal_freeze_enter_vel) {
@@ -555,7 +558,10 @@ public:
         }
         out.has_replay_sample = true;
         out.solve_num = replay.active_solve_num;
-        const auto command_target=config_.live_target_anchor?target_snapshot:targetForPlan(replay.active_solve_num,now,target_snapshot);
+        // Measured-state RH anchors relative setpoints to the LIVE target
+        // estimate; extrapolating each plan's origin target with constant
+        // acceleration accumulates prediction error into the relative state.
+        const auto command_target=config_.measured_state_delay_compensation?target_snapshot:targetForPlan(replay.active_solve_num,now,target_snapshot);
         out.command = makePlannerCommand(config_.platform, desc_, replay.x_cmd, replay.u_cmd,
                                          command_target);
         out.stale = replay.elapsed > replay.horizon_end + 0.2;
@@ -838,23 +844,13 @@ private:
                     const double elapsed=std::max(0.,std::chrono::duration<double>(stamp-handoff.active_origin).count());
                     TrajectoryReplayer::ReplaySample sample;
                     if(!replayer_.sampleActiveAtElapsed(elapsed,config_.ocp_dt,&sample))throw std::runtime_error("missing tracking reference");
-                    const auto anchor=config_.live_target_anchor
+                    const auto anchor=config_.measured_state_delay_compensation
                         ?predictTargetSnapshot(target_snapshot,std::chrono::duration<double>(stamp-handoff.measurement_time).count())
                         :targetAtPlanElapsed(sample.active_solve_num,elapsed,target_snapshot);
                     return reconstructWorldState(desc_,sample.x_cmd,anchor);
                 };
                 const auto ref_now=reference(handoff.measurement_time),ref_after=reference(handoff.activation_time);
-                if(std::getenv("COMANDO_DEBUG_ROOT")){
-                    const auto tgt_now=predictTargetSnapshot(target_snapshot,0.),tgt_act=predictTargetSnapshot(target_snapshot,delay);
-                    std::cerr<<std::fixed<<std::setprecision(4)<<"[root_debug] first="<<handoff.first_plan
-                        <<" el_now="<<std::chrono::duration<double>(handoff.measurement_time-handoff.active_origin).count()
-                        <<" el_act="<<std::chrono::duration<double>(handoff.activation_time-handoff.active_origin).count()
-                        <<" delay="<<delay<<" meas="<<state.head(6).transpose()<<" ref_now="<<ref_now.head(6).transpose()
-                        <<" ref_after="<<ref_after.head(6).transpose()<<" tgt_now="<<tgt_now.position.transpose()<<" "<<tgt_now.velocity.transpose()
-                        <<" tgt_act="<<tgt_act.position.transpose()<<"\n";
-                }
                 state=predictTrackingState(state,ref_now,ref_after,delay);
-                if(std::getenv("COMANDO_DEBUG_ROOT"))std::cerr<<"[root_debug] result="<<state.head(6).transpose()<<"\n";
                 x0_source="measured_tracking_rollout";
                 return prepareOcpState(desc_,state,predictTargetSnapshot(target_snapshot,delay));
             }

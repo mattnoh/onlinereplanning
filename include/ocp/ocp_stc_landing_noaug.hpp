@@ -157,6 +157,20 @@ inline const CtcsMargins CTCS_MARGINS{
     envOrQ("SZMUK_CTCS_STAGE_HEIGHT_MARGIN",envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.))};
 inline double gsConeTan(const CtcsMargins& m){return std::tan((GS_CONE_HALF_ANGLE_DEG-m.gs_angle_deg)*M_PI/180.0);}
 inline CtcsMargins ctcsMargins(bool tightened){return tightened?CTCS_MARGINS:CtcsMargins{};}
+// Trigger activation at the boundary. Triggers weight their consequence by
+// the squared depth past the boundary, so with a zero floor a row fades out
+// exactly at its trigger. Tightened rows move the trigger outward by the
+// trigger margins, so at the PHYSICAL boundary they already carry the depth
+// margin/scale. Physical rows (untightened intervals) get that same activation
+// as a floor at the physical boundary; without it a plan can cross a physical
+// trigger in violation at almost no cost.
+struct TriggerFloors { double landing=0., los=0., stage=0.; };
+inline TriggerFloors triggerFloors(bool tightened){
+    if(tightened)return {0.,LOS_TRIGGER_FLOOR,STAGE_TRIGGER_FLOOR};
+    return {CTCS_MARGINS.trigger,
+            std::max(LOS_TRIGGER_FLOOR,CTCS_MARGINS.trigger/LOS_TRIGGER_SCALE),
+            std::max(STAGE_TRIGGER_FLOOR,CTCS_MARGINS.stage_radius/STAGE_TRIGGER_SCALE)};
+}
 
 // ── Sigmoid helpers ───────────────────────────────────────────────────────────
 template<typename Scalar>
@@ -201,8 +215,9 @@ inline Scalar posPart(const Scalar& v) {
 }
 
 template<typename Scalar>
-inline Scalar landingAltitudeTrigger(const Scalar& z, const Scalar& rxy2,double altitude=ALT_TRIG) {
-    const Scalar trig_alt = posPart(Scalar(altitude) - z);
+inline Scalar landingAltitudeTrigger(const Scalar& z, const Scalar& rxy2,double altitude=ALT_TRIG,double floor=0.) {
+    const Scalar depth = Scalar(altitude) - z;
+    const Scalar trig_alt = depth > Scalar(0) ? Scalar(floor) + depth : Scalar(0);
     if (!useRhCaptureLandingTrigger()) return trig_alt;  // benchmark default
     const Scalar cap2 = Scalar(CAP_LAND_RADIUS * CAP_LAND_RADIUS);
     const Scalar trig_cap = posPart(cap2 - rxy2) / cap2;
@@ -268,8 +283,7 @@ public:
         Matrix<Scalar> out = Matrix<Scalar>::Zero(NX_SS, NX_SS);
         out.topLeftCorner(NX, NX) = this->Amat_impl(
             x.head(NX).template cast<double>(), u.head(NU).template cast<double>()).template cast<Scalar>();
-        // d(v_rel_dot)/dt = -d(a_target)/dt (zero for a constant prediction).
-        out.block(3, IDX_DT, 3, 1) = (-pred_->predictJerk(static_cast<double>(x(IDX_DT)))).template cast<Scalar>();
+        // ConstantAccelPredictor has zero acceleration derivative in time.
         return out;
     }
 
@@ -351,13 +365,6 @@ public:
         Matrix<Scalar> Fx = Matrix<Scalar>::Zero(NX_SS, NX_SS);
         Fx.block(0, 0, this->NX_PHYS, this->NX_PHYS) = j.dxdx.template cast<Scalar>();
         Fx(IDX_DT, IDX_DT) = Scalar(1.0);
-        if (pred_->tau > 0.) {
-            // Sensitivity of the step to its start time through the predicted
-            // target acceleration: dv = -(a(t+T)-a(t)), dp ~ T/2 of that.
-            const Eigen::Vector3d da = pred_->predictAccel(tabs + Th) - pred_->predictAccel(tabs);
-            Fx.block(3, IDX_DT, 3, 1) = (-da).template cast<Scalar>();
-            Fx.block(0, IDX_DT, 3, 1) = (-0.5 * Th * da).template cast<Scalar>();
-        }
         const_cast<Quad6DOFVarTimeRelativePred*>(this)->setTargetAccel(amid);
         return Fx;
     }
@@ -432,9 +439,10 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
                                                          const Vector<Scalar>& u,bool tightened=true) {
     CtcsIntegrandTerms<Scalar> out;
     const auto margins=ctcsMargins(tightened);
+    const auto floors=triggerFloors(tightened);
 
     const Scalar rxy2     = x(0)*x(0) + x(1)*x(1);
-    out.a_altitude_state  = landingAltitudeTrigger<Scalar>(x(2), rxy2,ALT_TRIG+margins.trigger);
+    out.a_altitude_state  = landingAltitudeTrigger<Scalar>(x(2), rxy2,ALT_TRIG+margins.trigger,floors.landing);
 
     const Scalar v2     = x.template segment<3>(3).squaredNorm();
     const Scalar qperp2 = x(7)*x(7) + x(8)*x(8);
@@ -444,7 +452,7 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
         (rxy - Scalar(STAGE_RADIUS-margins.stage_radius)) / Scalar(STAGE_TRIGGER_SCALE);
     const Scalar stage_radius_trig =
         (stage_radius_margin > Scalar(0))
-            ? Scalar(STAGE_TRIGGER_FLOOR) + stage_radius_margin
+            ? Scalar(floors.stage) + stage_radius_margin
             : Scalar(0);
     const Scalar stage_settle_tilt_lim =
         Scalar(std::pow(std::sin(0.5 * STAGE_SETTLE_TILT_DEG * M_PI / 180.0), 2));
@@ -489,7 +497,7 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
         (Scalar(LOS_ALT_TRIG+margins.trigger) - x(2)) / Scalar(LOS_TRIGGER_SCALE);
     out.a_los =
         (los_alt_margin > Scalar(0))
-            ? Scalar(LOS_TRIGGER_FLOOR) + los_alt_margin
+            ? Scalar(floors.los) + los_alt_margin
             : Scalar(0);
     const double los_tan=LOS_CONE_TAN;
     out.los = posPart(lateral - Scalar(los_tan) * axial
@@ -859,6 +867,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
     using StateFn = std::function<Scalar(const Vec&)>;
     using GradFn = std::function<Vec(const Vec&)>;
     const auto margins=ctcsMargins(tightened);
+    const auto floors=triggerFloors(tightened);
     if(margins.trigger<0.||margins.trigger>=STAGE_RADIUS||margins.stage_radius<0.||margins.stage_radius>=STAGE_RADIUS||margins.geometric<0.||margins.stage_height<0.||margins.speed<0.||margins.speed>=SPD_STC_MAX||
         margins.tilt_deg<0.||margins.tilt_deg>=ALPHA_THETA_STC*THETA_STC_DEG||margins.path_tilt_deg<0.||margins.path_tilt_deg>=THETA_PHASE0_DEG||margins.rate<0.||margins.rate>=OMEGA_STC_MAX||
         margins.los<0.||margins.los/GS_APEX_OFFSET>=LOS_CONE_TAN||
@@ -902,7 +911,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
                 posPart(omega(x) - Scalar(STAGE_SETTLE_OMEGA_MAX*STAGE_SETTLE_OMEGA_MAX)));
             const Scalar margin = (std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) -
                                    Scalar(STAGE_RADIUS-margins.stage_radius)) / Scalar(STAGE_TRIGGER_SCALE);
-            return margin > Scalar(0) ? -(Scalar(STAGE_TRIGGER_FLOOR) + margin) : Scalar(0);
+            return margin > Scalar(0) ? -(Scalar(floors.stage) + margin) : Scalar(0);
         };
         GradFn dstage = [=](const Vec& x) -> Vec {
             Vec g = Vec::Zero(x.size());
@@ -924,7 +933,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
 
         StateFn losTrigger = [=](const Vec& x) -> Scalar {
             const Scalar m = (Scalar(LOS_ALT_TRIG+margins.trigger) - x(2))/Scalar(LOS_TRIGGER_SCALE);
-            return m > Scalar(0) ? -(Scalar(LOS_TRIGGER_FLOOR) + m) : Scalar(0);
+            return m > Scalar(0) ? -(Scalar(floors.los) + m) : Scalar(0);
         };
         GradFn dlosTrigger = [=](const Vec& x) -> Vec {
             Vec g = Vec::Zero(x.size());
@@ -970,14 +979,16 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
 
         const bool capture = useRhCaptureLandingTrigger();
         StateFn landTrigger = [=](const Vec& x) -> Scalar {
-            if (!capture) return x(2) - Scalar(ALT_TRIG+margins.trigger);
-            return -landingAltitudeTrigger<Scalar>(x(2), x(0)*x(0)+x(1)*x(1),ALT_TRIG+margins.trigger);
+            const Scalar depth = Scalar(ALT_TRIG+margins.trigger) - x(2);
+            if (!capture) return depth > Scalar(0) ? -(Scalar(floors.landing) + depth) : -depth;
+            return -landingAltitudeTrigger<Scalar>(x(2), x(0)*x(0)+x(1)*x(1),ALT_TRIG+margins.trigger,floors.landing);
         };
         GradFn dland = [=](const Vec& x) -> Vec {
             Vec g = Vec::Zero(x.size());
             if (!capture) { g(2) = Scalar(1); return g; }
             const Scalar cap2 = Scalar(CAP_LAND_RADIUS*CAP_LAND_RADIUS);
-            const Scalar altitude = posPart(Scalar(ALT_TRIG+margins.trigger)-x(2));
+            const Scalar depth = Scalar(ALT_TRIG+margins.trigger)-x(2);
+            const Scalar altitude = depth > Scalar(0) ? Scalar(floors.landing) + depth : Scalar(0);
             const Scalar lateral = posPart(cap2-x(0)*x(0)-x(1)*x(1));
             const Scalar denominator = Scalar(ALT_TRIG+margins.trigger)*cap2;
             if (altitude > Scalar(0)) g(2) = lateral/denominator;
@@ -1063,53 +1074,34 @@ inline bool plausibleTrajectory(const std::vector<Eigen::VectorXd>& X,
     return true;
 }
 
-// Opt-in damped target-acceleration prediction (see target/predictor.hpp).
-inline double targetAccelTau(){static const double t=envOrQ("SZMUK_TARGET_ACCEL_TAU",0.);return t;}
-
-// ── Stabilized native initial guess (opt-in) ────────────────────────────────
-// SZMUK_NATIVE_GUESS=stabilized replaces the zero-moment hover rollout with a
-// hover rollout under a PD attitude/rate loop and velocity damping. A measured
-// root carries small body rates; with zero moments they never decay, so over a
-// 5-9 s horizon the uniform-hover guess tilts several degrees and drifts,
-// starting the solver at CTCS errors ~1e5 (SITL capture: 32/37 vs 5/37 roots
-// solved). Only the initial guess changes; the OCP is unchanged.
-// SZMUK_NATIVE_GUESS=staged adds position feedback that respects the staging
-// geometry: fly toward the target at a height above the LOS trigger and descend
-// only along a reference height that stays inside the glideslope. Without it a
-// cold start far from the target hovers at the root and the solver descends
-// into the LOS-triggered band outside the cone, then stalls there.
-inline const std::string& nativeGuessMode(){
-    static const std::string m=[]{const char* v=std::getenv("SZMUK_NATIVE_GUESS");return std::string(v?v:"");}();
-    return m;
-}
-inline bool useStabilizedNativeGuess(){return nativeGuessMode()=="stabilized"||nativeGuessMode()=="staged";}
-inline bool useStagedNativeGuess(){return nativeGuessMode()=="staged";}
-inline Eigen::VectorXd stabilizedNativeControl(const Eigen::VectorXd& x,const Eigen::Vector3d& target_accel){
-    static const double kp=envOrQ("SZMUK_GUESS_KP",1.),kd=envOrQ("SZMUK_GUESS_KD",2.),
-        kv=envOrQ("SZMUK_GUESS_KV",.5),kvz=envOrQ("SZMUK_GUESS_KVZ",.5),amax=envOrQ("SZMUK_GUESS_AMAX",2.);
+// ── Native initial guess ─────────────────────────────────────────────────────
+// Rollout under a PD attitude/rate loop with velocity feedback toward a staged
+// reference: approach the target above the LOS trigger / staging height and
+// descend only along a height that stays inside a fraction of the glideslope.
+// A measured root carries small body rates; with zero moments they never decay,
+// so a uniform-hover guess tilts and drifts over a multi-second horizon and the
+// solver starts at CTCS errors ~1e5. Without the staged reference a cold start
+// far from the target descends into the LOS-triggered band outside the cone and
+// stalls there. Only the initial guess changes; the OCP is unchanged.
+inline Eigen::VectorXd nativeGuessControl(const Eigen::VectorXd& x,const Eigen::Vector3d& target_accel){
+    constexpr double kp=1.,kd=2.,amax=2.;            // attitude PD, horizontal accel cap
+    constexpr double kpos=.3,kvs=.9,vmax=1.;          // position -> velocity -> accel
+    constexpr double hold=.25,slope=.6;               // hold height above max(Z_STAGE,LOS trigger); GS fraction
     const Eigen::Vector3d v=x.segment<3>(3),w=x.segment<3>(10);
     Eigen::Quaterniond q(x(6),x(7),x(8),x(9));q.normalize();
-    Eigen::Vector3d a(-kv*v.x(),-kv*v.y(),-kvz*v.z());
-    if(useStagedNativeGuess()){
-        static const double kpos=envOrQ("SZMUK_GUESS_KPOS",.3),kvs=envOrQ("SZMUK_GUESS_KVS",.9),
-            vmax=envOrQ("SZMUK_GUESS_VMAX",1.),hold=envOrQ("SZMUK_GUESS_HOLD_DZ",.15),
-            slope=envOrQ("SZMUK_GUESS_GS_FRACTION",.6);
-        const double rxy=x.head<2>().norm();
-        // Reference height: inside a fraction of the glideslope cone, capped
-        // above the LOS trigger / staging height while still far out.
-        const double cap=std::max(Z_STAGE,LOS_ALT_TRIG)+hold;
-        const double zref=std::min(cap,rxy/(slope*std::tan(GS_CONE_HALF_ANGLE_DEG*M_PI/180.))-GS_APEX_OFFSET);
-        Eigen::Vector3d vref(-kpos*x(0),-kpos*x(1),kpos*(std::max(zref,0.)-x(2)));
-        if(vref.head<2>().norm()>vmax)vref.head<2>()*=vmax/vref.head<2>().norm();
-        vref.z()=std::clamp(vref.z(),-.5,.5);
-        a=kvs*(vref-v);
-    }
+    const double rxy=x.head<2>().norm();
+    const double cap=std::max(Z_STAGE,LOS_ALT_TRIG)+hold;
+    const double zref=std::min(cap,rxy/(slope*std::tan(GS_CONE_HALF_ANGLE_DEG*M_PI/180.))-GS_APEX_OFFSET);
+    Eigen::Vector3d vref(-kpos*x(0),-kpos*x(1),kpos*(std::max(zref,0.)-x(2)));
+    if(vref.head<2>().norm()>vmax)vref.head<2>()*=vmax/vref.head<2>().norm();
+    vref.z()=std::clamp(vref.z(),-.5,.5);
+    Eigen::Vector3d a=kvs*(vref-v);
     a.head<2>()=a.head<2>().cwiseMax(-amax).cwiseMin(amax);
     // While descending, brake at least enough to stop above the floor, so the
     // guess rollout never passes through the hard z>=0 row (weak damping from
     // ~0.5 m at -0.6 m/s otherwise drives it into the floor and the barrier
     // line search stalls on BOUNDARY_INEQ).
-    static const double floor_z=envOrQ("SZMUK_GUESS_FLOOR_Z",.05);
+    constexpr double floor_z=.05;
     if(v.z()<0.)a.z()=std::max(a.z(),v.z()*v.z()/(2.*std::max(x(2)-floor_z,.02)));
     // Relative frame: the vehicle must also match the target's acceleration.
     const Eigen::Vector3d f=a+target_accel-GRAVITY;
@@ -1159,11 +1151,13 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     // CTCS_STEP_EPS is divided by CTCS_Y_SCALE (same zero set as unscaled).
     // Hard-wired: this OCP has no other enforcement mode.
     auto cstep = makeCtcsConstraint<double>(dyn);
-    // Opt-in: intervals before node SZMUK_CTCS_TIGHTEN_FROM_NODE use the
-    // original physical implications (no tightening). The measured root is
-    // fixed, so a root inside the physical set but in the margin band would
-    // otherwise make the tightened OCP infeasible from its first interval.
-    static const int tighten_from=envOrInt("SZMUK_CTCS_TIGHTEN_FROM_NODE",0);
+    // Intervals before node SZMUK_CTCS_TIGHTEN_FROM_NODE use the physical
+    // implications (no consequence tightening; trigger floors keep the
+    // physical boundary sharp, see triggerFloors). The measured root is fixed,
+    // so a root inside the physical set but in the margin band would otherwise
+    // make the tightened OCP infeasible from its first interval. Without
+    // tightening margins both rows are identical.
+    static const int tighten_from=envOrInt("SZMUK_CTCS_TIGHTEN_FROM_NODE",4);
     if(tighten_from<0)throw std::invalid_argument("SZMUK_CTCS_TIGHTEN_FROM_NODE must be >= 0");
     auto cstep_physical = tighten_from>0 ?
         makeCtcsConstraint<double>(dyn, CTCS_STEP_EPS / CTCS_Y_SCALE, IDX_THETA, 0.0, 1, false) : cstep;
@@ -1269,13 +1263,9 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
             }
 
         } else {
-            // Match the retained single-horizon noaug benchmark: a uniform
-            // hover input (plus vertical target acceleration), zero moments
-            // and TH0. The previous geometric thrust
-            // guess changed the cold OCP initialization before RH even began.
-            uk(0) = HOVER_THRUST + MASS * predictor->predictAccel(sim14(13)).z();
-            uk(IDX_THETA) = TH0;
-            if (useStabilizedNativeGuess()) uk = stabilizedNativeControl(sim14, predictor->predictAccel(sim14(13)));
+            // Native guess (see nativeGuessControl). It replaces the uniform
+            // hover input of the retained single-horizon benchmark.
+            uk = nativeGuessControl(sim14, predictor->predictAccel(sim14(13)));
         }
         clampWarmControl(uk);
 
@@ -1361,13 +1351,12 @@ inline OCPDescriptor descriptor() {
         ex.predictor->setState(tgt_snapshot.position,
                                tgt_snapshot.velocity,
                                tgt_snapshot.acceleration);
-        ex.predictor->tau = targetAccelTau();
         return std::any(ex);
     };
 
     d.sanitize_warm_control = [](Eigen::VectorXd& u) { clampWarmControl(u); };
     d.make_model=[](const Eigen::Vector3d& accel) {
-        auto pred=std::make_shared<ConstantAccelPredictor>();pred->a=accel;pred->tau=targetAccelTau();
+        auto pred=std::make_shared<ConstantAccelPredictor>();pred->a=accel;
         auto dyn=std::make_shared<Quad6DOFVarTimeRelativePred<double>>(pred);
         dyn->setMass(MASS);dyn->setGravity(GRAVITY);dyn->setJb(J_B);
         OCPDescriptor::Model model;model.nx=NX_SS;model.nu=NU_SS;model.horizon=HORIZON;model.dt=TH0;
@@ -1396,7 +1385,6 @@ inline OCPDescriptor descriptor() {
             pred = std::make_shared<ConstantAccelPredictor>();
             pred->setState(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
                            a.target_accel);
-            pred->tau = targetAccelTau();
         }
         return create(a.current_state, a.prev_U, a.prev_X, a.prev_K, pred, a.horizon);
     };

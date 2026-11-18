@@ -19,8 +19,9 @@ int main(int argc,char** argv){try{
  if(argc!=3)throw std::runtime_error("Usage: constraint_audit OCP RUN_DIRECTORY");
  const std::string type=argv[1],dir=argv[2];const auto& descriptor=OCPRegistry::getDescriptor(type);
  if(!descriptor.make_model)throw std::runtime_error("OCP has no propagation model");
- std::set<int> accepted;for(const auto& r:read(dir+"/solver_events.csv"))if(r.at("event")=="accepted")accepted.insert(static_cast<int>(val(r,"solve_num")));
- std::map<int,std::vector<Row>> solves;for(const auto& r:read(dir+"/all_solves.csv")){const int n=static_cast<int>(val(r,"solve_num"));if(accepted.count(n))solves[n].push_back(r);}
+ // all_solves.csv holds accepted horizons in order; solve_num restarts after a
+ // re-prime, so a horizon is delimited by its node-0 row, not by its number.
+ std::map<int,std::vector<Row>> solves;int horizon=-1;for(const auto& r:read(dir+"/all_solves.csv")){if(val(r,"node")==0)++horizon;if(horizon<0)throw std::runtime_error("all_solves.csv does not start at node 0");solves[horizon].push_back(r);}
  Stats nodes,initial,local,rollout;double defect=0;int initial_infeasible=0;const bool ordinary=type.rfind("landing_",0)==0;
  const std::array<std::string,13> columns={"px","py","pz","vx","vy","vz","qw","qx","qy","qz","wx","wy","wz"};
  for(auto& [number,rows]:solves){

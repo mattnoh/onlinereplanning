@@ -452,10 +452,6 @@ private:
                   core_cfg.use_native_initial_guess);
         nh_.param("predict_tracking_error", core_cfg.predict_tracking_error,
                   core_cfg.predict_tracking_error);
-        nh_.param("live_target_anchor", core_cfg.live_target_anchor,
-                  core_cfg.live_target_anchor);
-        nh_.param("terminal_freeze_live_state", core_cfg.terminal_freeze_live_state,
-                  core_cfg.terminal_freeze_live_state);
         core_cfg.max_constraint_error    = max_constraint_error_;
         core_cfg.skip_trajectory_validation = skip_trajectory_validation_;
         core_cfg.seed_alpha_pos          = seed_alpha_pos_;
@@ -809,8 +805,8 @@ private:
             logCoreDiagnostics(core_result.diagnostics);
         logSolverEvents(core_result);
         if (!core_result.solve_accepted && core_result.rejection_reason == "solve_failed" && is_primed_.load()) {
-            int reprime_after = 0;
-            nh_.param("reprime_after_rejections", reprime_after, 0);
+            int reprime_after = 5;  // <= 0 disables
+            nh_.param("reprime_after_rejections", reprime_after, reprime_after);
             if (reprime_after > 0 && ++consecutive_solve_failures_ >= reprime_after) {
                 // The active plan no longer describes the vehicle (e.g. after a
                 // target velocity reversal), so roots predicted along it keep

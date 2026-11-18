@@ -1,12 +1,12 @@
-# Diagnostic only: one physical pass, failed identical repeat; circle unresolved.
-# Source frozen_quad_ctcs_coarse.env then tuning_stc_measured_rh_sitl.env.
-# Keep SZMUK_Z_STAGE=1.8 / SZMUK_LOS_ALT_TRIG=1.8 at launch; hover above the floor.
+# PX4/Gazebo measured-state RH, stationary and moving targets.
+# Source config/frozen_quad_ctcs_coarse.env then
+# config/ros1/tuning_stc_measured_rh_sitl.env (see its header for launch).
 ocp_type: stc_landing_noaug
 mode: mpc
 n_replay: 3
 measured_state_delay_compensation: true
-initial_solve_lead_sec: 0.7
-solve_lead_guard_sec: 0.2
+initial_solve_lead_sec: 0.5
+solve_lead_guard_sec: 0.15
+land_action: force_disarm
 use_native_initial_guess: true
 predict_tracking_error: true
-land_action: force_disarm
