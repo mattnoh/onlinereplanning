@@ -172,22 +172,36 @@ physical audits cover OCP activation through touchdown handoff (or recorded
 stop/end for failures) at MAVROS odometry resolution; they are not a
 continuous-time certificate.
 
-**Stationary-target widened configuration (2026-11-17).** Sourcing
+**Measured-state SITL profile (2026-11-18).** Source
 `config/frozen_quad_ctcs_coarse.env` then
-`config/ros1/tuning_stc_measured_rh_sitl_widened.env` with
-`config/ros1/profile_stc_landing_noaug_measured_sitl_widened.yaml` gave 8/8
-consecutive identical PX4/Gazebo landings with zero physical excess against
-the configured bounds and no stale plan. The bounds are widened (glideslope
-17°, LOS 34°, landing rate 0.022 rad/s, staging radius 1.2 m); against the
-original bounds 7/8 are zero and one run exceeds the 15° glideslope by
-3.5 mm. Three opt-in changes make measured-state replanning work: a
-rate-damped native initial guess (`SZMUK_NATIVE_GUESS=stabilized`), physical
-bounds on the first interval from the fixed measured root
-(`SZMUK_CTCS_TIGHTEN_FROM_NODE=1`), and corner buffers sized to observed PX4
-lag (staging-radius margin 0.3 m, glideslope angle margin 3°). Moving targets
-are not validated. Record: `measured_sitl_widened_20261117` in
-`support/test/frozen_node_baseline.json`; evidence
-`logs/measured_sitl_widened_20261117.tar.gz`.
+`config/ros1/tuning_stc_measured_rh_sitl.env`, and apply
+`config/ros1/profile_stc_landing_noaug_measured_sitl.yaml`. Launch with
+staging and LOS trigger altitudes `stc_z_stage:=1.8 stc_los_alt_trig:=1.5`,
+hover target 2.4 m and settle window 2.02–2.6 m. Each replan is rooted at the
+measured state, rolled forward under the PX4 tracking-error model to the plan
+handoff, against the live target. These used to be opt-in and are now defaults:
+
+- `measured_state_delay_compensation: true` also anchors the target and the
+  terminal freeze on the live target state.
+- Intervals before `SZMUK_CTCS_TIGHTEN_FROM_NODE` (default 4) use the physical
+  CTCS rows, so a fixed measured root inside the physical set but in the margin
+  band is still feasible. Physical rows keep the tightened rows' trigger floors
+  (`triggerFloors`), so they stay active at trigger boundaries.
+- The native initial guess is one staged controller (`nativeGuessControl`).
+- `reprime_after_rejections` defaults to 5 (`<= 0` disables).
+
+Approach tilt, approach rate, approach speed and landing rate are sized from
+what the planned trajectories used (a 1 ms dense audit of every accepted
+horizon), not from PX4 tracking error. The remaining bounds are active in the
+plans and keep the values moving targets need; see the env header. In the
+final campaign all 7 target motions landed (circle, figure-eight, straight,
+stop-and-go, piecewise acceleration, random acceleration, stationary).
+Planner-side excess on accepted plans was at most 0.0099 m/s speed,
+0.0012 rad/s rate and 0.2 mm position. The plant had no excess except on
+stop-and-go, whose instant target reversal near the pad drove the measured rate
+to 0.297 rad/s and the glideslope error to 2.4 cm. The earlier widened and
+moving profiles were removed; their records remain in
+`support/test/frozen_node_baseline.json`.
 
 The retained runtime changes are optional native control initialization and
 local PX4 tracking-error propagation to the future handoff. The latter
@@ -198,18 +212,11 @@ velocity and attitude gains match the recorded model defaults. The local model
 omits nonlinear saturation, the velocity integrator and full motor dynamics;
 it is not an exact PX4 model. Existing core analytic checks pass.
 
-SITL uses the existing N60 profile, 0.7 s initial computation lead plus 0.2 s
-guard, and separate 0.035 m LOS tightening. The former shared geometric margin
-also tightened glideslope; increasing it beyond 0.026795 m excludes the landing
-point. LOS now has `SZMUK_CTCS_LOS_MARGIN`, defaulting to the old geometric
-margin, so all frozen profiles retain their previous equations and settings.
-The physical constraints and their triggers are unchanged. Use
-`config/ros1/profile_stc_landing_noaug_measured_sitl.yaml`, sourcing
-`config/frozen_quad_ctcs_coarse.env` followed by
-`config/ros1/tuning_stc_measured_rh_sitl.env` before starting the planner.
-Launch with staging/LOS trigger 1.8 m, hover target 2.4 m and measured settle
-window 2.02–2.6 m world altitude. These are trajectory references to PX4,
-not direct motor or body-rate control. Pointmass has no PX4 SITL plant here.
+LOS has its own tightening, `SZMUK_CTCS_LOS_MARGIN`, which defaults to the
+geometric margin. With the shared margin, values above 0.026795 m also
+tightened the glideslope enough to exclude the landing point. The SITL
+setpoints are trajectory references to PX4, not direct motor or body-rate
+commands. Pointmass has no PX4 SITL plant here.
 
 The circle recording identifies both forecast and tracking errors: at its first
 LOS violation they were 0.1277 m and 0.1048 m, respectively. Its required steady
