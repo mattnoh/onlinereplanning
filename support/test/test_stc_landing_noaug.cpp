@@ -99,12 +99,12 @@ int main(int argc, char** argv) {
         // fall through and run anyway if execv fails
     }
     (void)argc;
-    using StcLandingNoAugOCP::HORIZON;
-    using StcLandingNoAugOCP::NEX;
+    const int HORIZON = StcLandingNoAugOCP::P.horizon;
+    const int NEX = StcLandingNoAugOCP::P.nex;
     using StcLandingNoAugOCP::IDX_DT;
     using StcLandingNoAugOCP::NX_SS;
-    using StcLandingNoAugOCP::CTCS_Y_SCALE;
-    using StcLandingNoAugOCP::CTCS_STEP_EPS;
+    const double CTCS_Y_SCALE = StcLandingNoAugOCP::P.ctcs_y_scale;
+    const double CTCS_STEP_EPS = StcLandingNoAugOCP::P.ctcs_step_eps;
 
     try {
         require(HORIZON == 30, "realtime test must use the deployed 30-node horizon");
@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
             for(double vertical_acceleration:{-.2,.2}){
                 OCPCreateArgs args;args.current_state=state;args.target_accel.z()=vertical_acceleration;
                 const auto problem=desc.create(args);
-                const double expected=StcLandingNoAugOCP::MASS*(9.81+vertical_acceleration);
+                const double expected=StcLandingNoAugOCP::P.mass*(9.81+vertical_acceleration);
                 require(std::abs(problem->getInitialControl(0)(0)-expected)<1e-10,
                     "relative seed thrust must add target acceleration to requested relative acceleration");
             }
@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
             OcpSolver cold_mpc(cold_cfg);
 
             Eigen::VectorXd x_rel_hover(13);
-            x_rel_hover << 2.0, 1.5, StcLandingNoAugOCP::Z_STAGE + 0.05,
+            x_rel_hover << 2.0, 1.5, StcLandingNoAugOCP::P.z_stage + 0.05,
                            0.0, 0.0, 0.0,
                            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
             const TargetSnapshot snap = tgt.snapshot(0.0);
@@ -246,7 +246,7 @@ int main(int argc, char** argv) {
             // constraint enforced and check it against eps (small AL slack).
             auto pred = std::any_cast<StcLandingNoAugOCP::StcLandingNoAugExtra>(extra).predictor;
             StcLandingNoAugOCP::Quad6DOFVarTimeRelativePred<double> dyn(pred);
-            dyn.setMass(StcLandingNoAugOCP::MASS);
+            dyn.setMass(StcLandingNoAugOCP::P.mass);
             dyn.setGravity(StcLandingNoAugOCP::GRAVITY);
             dyn.setJb(StcLandingNoAugOCP::J_B);
             dyn.setTargetAccel(pred->predictAccel(0.0));
@@ -281,10 +281,10 @@ int main(int argc, char** argv) {
                 thrust_max = std::max(thrust_max, u(0));
                 moment_max = std::max(moment_max, u.segment(1,3).norm());
             }
-            require(speed_max <= StcLandingNoAugOCP::SPD_PHASE0_MAX + 1e-3,
+            require(speed_max <= StcLandingNoAugOCP::P.spd_phase0_max + 1e-3,
                     "physical general-speed bound must not be violated");
-            require(thrust_min >= StcLandingNoAugOCP::FMIN - 1e-3 &&
-                    thrust_max <= StcLandingNoAugOCP::FMAX + 1e-3,
+            require(thrust_min >= StcLandingNoAugOCP::P.fmin - 1e-3 &&
+                    thrust_max <= StcLandingNoAugOCP::P.fmax + 1e-3,
                     "physical planning thrust bounds must not be violated");
             require(moment_max <= StcLandingNoAugOCP::TAU_MAX + 1e-3,
                     "physical moment bound must not be violated");

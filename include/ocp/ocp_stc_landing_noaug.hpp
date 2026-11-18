@@ -1,36 +1,16 @@
 /// @file ocp_stc_landing_noaug.hpp
-/// @brief No-aug interval CT-cSTC receding-horizon landing OCP ("stc_landing_noaug").
+/// @brief Interval CT-cSTC landing on a moving target ("stc_landing_noaug").
 ///
-/// Ported from ALIPDDP-main/problem_examples/STC/quad_single_horizon_noaug_stc.cpp
-/// (the "interval_noaug" benchmark arm), grafted onto the receding-horizon
-/// machinery of ocp_stc_landing.hpp (which is the terminal-eq port of
-/// quad_landing_rh_clean_stc.cpp). Relative-frame landing on a moving target:
+/// Relative-frame quadrotor landing:
+///   state   = [13 physical | IDX_DT time since horizon start]
+///   control = [fz, Mx, My, Mz | IDX_THETA interval duration]
 ///
-///   state   = [13 physical | IDX_DT cumulative time]        (NO accumulator)
-///   control = [fz, Mx, My, Mz | IDX_THETA free per-step dt]
-///
-/// Instead of carrying the CT-cSTC violation as an augmented state y with a
-/// terminal EQ y_N = 0, the SAME RK4 interval integral of the STC density H
-/// is integrated by StcStageConstraint directly from (x_k, u_k) inside a
-/// per-stage inequality, using the host dynamics and analytic Jacobians:
-///
-///   integral(H dt) over [t_k, t_k + theta_k]  <=  eps      (hard-wired, always on)
-///
-/// This isolates state augmentation from the constraint functional: the zero
-/// set is the same, but there is no y row/column in the Riccati recursion and
-/// no y defect. SZMUK_CTCS_MODE is intentionally IGNORED here (the benchmark
-/// file's in-code default was a vacuous terminal_eq stub — see its header).
-///
-/// Tuning (noaug_basin champion): SZMUK_CTCS_STEP_EPS = 1.6e-3 with
-/// SZMUK_CTCS_Y_SCALE = 10 — a ~10x looser budget and much smaller Y_SCALE
-/// than the augmented arm, because Y_SCALE existed to condition the y row of
-/// the augmented dynamics and there is no such row here. These are the
-/// defaults below; export the SZMUK_* vars before launching to retune.
-///
-/// Warm-start note: the planner core's makeXshifted() does a plain index
-/// shift, so create() rebases IDX_DT against the new horizon start
-/// (prev_X[0] after the shift == the previously executed node), exactly as
-/// ocp_stc_landing.hpp does — minus the y-rebase, which no longer exists.
+/// State-triggered constraints (staging, line of sight, landing speed/tilt/
+/// rate/glideslope) are enforced per interval as the RK4 integral of their
+/// violation density, kept within a budget eps:
+///   integral(H dt) over [t_k, t_k + theta_k]  <=  eps
+/// All numbers live in Params; preset() holds the validated configurations,
+/// selected per process by STC_PRESET.
 #pragma once
 #include "target/predictor.hpp"
 #include "parameters.hpp"
@@ -52,104 +32,131 @@
 
 namespace StcLandingNoAugOCP {
 
-using comando_parameters::defaults;
-using comando_parameters::envOrQ;
-using comando_parameters::envOrInt;
 constexpr int NX=13, NU=4, NX_SS=14, NU_SS=5, IDX_DT=13, IDX_THETA=4;
-inline const auto& MASS = defaults.vehicle.mass;
-inline const auto& IXX = defaults.vehicle.ixx;
-inline const auto& IYY = defaults.vehicle.iyy;
-inline const auto& IZZ = defaults.vehicle.izz;
-inline const auto& ACTUATOR_FMIN = defaults.vehicle.actuator_fmin;
-inline const auto& ACTUATOR_FMAX = defaults.vehicle.actuator_fmax;
-inline const auto& FMIN = defaults.vehicle.fmin;
-inline const auto& FMAX = defaults.vehicle.fmax;
-inline const auto& L_ARM = defaults.vehicle.l_arm;
-inline const auto& HORIZON = defaults.horizon.horizon;
-inline const auto& NEX = defaults.horizon.nex;
-inline const auto& TH0 = defaults.horizon.th0;
-inline const auto& THL = defaults.horizon.thl;
-inline const auto& THH = defaults.horizon.thh;
-inline const auto& TERM_W_POS_XY = defaults.cost.term_w_pos_xy;
-inline const auto& TERM_W_POS_Z = defaults.cost.term_w_pos_z;
-inline const auto& TERM_W_VEL_XY = defaults.cost.term_w_vel_xy;
-inline const auto& TERM_W_VEL_Z = defaults.cost.term_w_vel_z;
-inline const auto& TERM_W_TILT = defaults.cost.term_w_tilt;
-inline const auto& TERM_W_OM = defaults.cost.term_w_om;
-inline const auto& TERM_VZ_REF = defaults.cost.term_vz_ref;
-inline const auto& STAGE_W_TIME = defaults.cost.stage_w_time;
-inline const auto& R_THETA = defaults.cost.r_theta;
-inline const auto& THETA_REF = defaults.cost.theta_ref;
-inline const auto& R_CTRL_THR = defaults.cost.r_ctrl_thr;
-inline const auto& R_CTRL_MOM = defaults.cost.r_ctrl_mom;
-inline const auto& W_TOUCH_VEL = defaults.cost.w_touch_vel;
-inline const auto& TOUCH_ALT = defaults.cost.touch_alt;
-inline const auto& TOUCH_SCALE = defaults.cost.touch_scale;
-inline const auto& W_STAGE_TARGET_XY = defaults.cost.w_stage_target_xy;
-inline const auto& W_STAGE_TARGET_Z = defaults.cost.w_stage_target_z;
-inline const auto& W_STAGE_TARGET_VEL = defaults.cost.w_stage_target_vel;
-inline const auto& W_LAND_SPEED = defaults.cost.w_land_speed;
-inline const auto& W_LAND_TILT = defaults.cost.w_land_tilt;
-inline const auto& W_LAND_OMEGA = defaults.cost.w_land_omega;
-inline const auto& W_LAND_GS = defaults.cost.w_land_gs;
-inline const auto& W_STC_LOS = defaults.cost.w_stc_los;
-inline const auto& W_STC_STAGE = defaults.cost.w_stc_stage;
-inline const auto& CAP_COST_RADIUS = defaults.cost.cap_cost_radius;
-inline const auto& K_CAP = defaults.cost.k_cap;
-inline const auto& CAP_DESC_RADIUS = defaults.cost.cap_desc_radius;
-inline const auto& K_DESC = defaults.cost.k_desc;
-inline const auto& GS_APEX_OFFSET = defaults.constraints.gs_apex_offset;
-inline const auto& THETA_PHASE0_DEG = defaults.constraints.theta_phase0_deg;
-inline const auto& OMEGA_PHASE0_MAX = defaults.constraints.omega_phase0_max;
-inline const auto& SPD_PHASE0_MAX = defaults.constraints.spd_phase0_max;
-inline const auto& THETA_STC_DEG = defaults.constraints.theta_stc_deg;
-inline const auto& ALPHA_THETA_STC = defaults.constraints.alpha_theta_stc;
-inline const auto& OMEGA_STC_MAX = defaults.constraints.omega_stc_max;
-inline const auto& GS_CONE_HALF_ANGLE_DEG = defaults.constraints.gs_cone_half_angle_deg;
-inline const auto& SPD_STC_MAX = defaults.constraints.spd_stc_max;
-inline const auto& LOS_CONE_HALF_ANGLE_DEG = defaults.constraints.los_cone_half_angle_deg;
-inline const auto& LOS_ALT_TRIG = defaults.constraints.los_alt_trig;
-inline const auto& LOS_TRIGGER_SCALE = defaults.constraints.los_trigger_scale;
-inline const auto& LOS_TRIGGER_FLOOR = defaults.constraints.los_trigger_floor;
-inline const auto& ALT_TRIG = defaults.constraints.alt_trig;
-inline const auto& Z_STAGE = defaults.constraints.z_stage;
-inline const auto& STAGE_RADIUS = defaults.constraints.stage_radius;
-inline const auto& STAGE_TRIGGER_SCALE = defaults.constraints.stage_trigger_scale;
-inline const auto& STAGE_TRIGGER_FLOOR = defaults.constraints.stage_trigger_floor;
-inline const auto& CTCS_Y_SCALE = defaults.constraints.ctcs_y_scale;
-inline const auto& CTCS_STEP_EPS = defaults.constraints.ctcs_step_eps;
-inline const double J_SCALE = 1.0/IXX;
-inline const double TAU_MAX = L_ARM*(ACTUATOR_FMAX/4.0-ACTUATOR_FMIN/4.0)*J_SCALE;
-inline const Eigen::Matrix3d J_B = (Eigen::Matrix3d()<<IXX*J_SCALE,0,0,0,IYY*J_SCALE,0,0,0,IZZ*J_SCALE).finished();
-inline const Eigen::Vector3d GRAVITY{0,0,-9.81};
-inline const double HOVER_THRUST = MASS*9.81;
-inline const double GS_CONE_TAN = std::tan(GS_CONE_HALF_ANGLE_DEG*M_PI/180.0);
-inline const double LOS_CONE_TAN = std::tan(LOS_CONE_HALF_ANGLE_DEG*M_PI/180.0);
-inline bool useRhFeedbackWarmStart(){return defaults.horizon.feedback_warm_start;}
 
+// Optimizer tightening inside the physical bounds, applied to intervals from
+// CTCS_TIGHTEN_FROM_NODE on. Zero means none.
 struct CtcsMargins {
-    double trigger=0., geometric=0., speed=0., tilt_deg=0., path_tilt_deg=0., rate=0., los=0.;
-    // Staging-radius tightening, separate from the altitude-trigger margin so
-    // the staging hold ends inside the LOS cone without raising the tightened
-    // LOS trigger into the hover band. Defaults to `trigger`.
-    double stage_radius=0.;
-    // Glideslope half-angle tightening [deg]; grows with height, unlike the
-    // additive geometric margin, which the cone apex caps at tan(gs)*apex.
-    double gs_angle_deg=0.;
-    // Staging-height tightening [m], separate from the geometric margin that
-    // also tightens the glideslope. Defaults to `geometric`.
-    double stage_height=0.;
+    double trigger=0.;        // trigger altitudes/radius moved outward [m]
+    double geometric=0.;      // glideslope offset [m]
+    double speed=0.;          // landing speed [m/s]
+    double tilt_deg=0.;       // landing tilt [deg]
+    double path_tilt_deg=0.;  // approach tilt [deg]
+    double rate=0.;           // body rate [rad/s]
+    double los=0.;            // LOS cone distance [m], tapered to an angle at the apex
+    double stage_radius=0.;   // staging radius [m]
+    double gs_angle_deg=0.;   // glideslope half angle [deg]
+    double stage_height=0.;   // staging height [m]
 };
-inline const CtcsMargins CTCS_MARGINS{
-    envOrQ("SZMUK_CTCS_TRIGGER_MARGIN",0.),envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.),
-    envOrQ("SZMUK_CTCS_SPEED_MARGIN",0.),envOrQ("SZMUK_CTCS_TILT_MARGIN_DEG",0.),
-    envOrQ("SZMUK_CTCS_PATH_TILT_MARGIN_DEG",0.),envOrQ("SZMUK_CTCS_RATE_MARGIN",0.),
-    envOrQ("SZMUK_CTCS_LOS_MARGIN",envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.)),
-    envOrQ("SZMUK_CTCS_STAGE_RADIUS_MARGIN",envOrQ("SZMUK_CTCS_TRIGGER_MARGIN",0.)),
-    envOrQ("SZMUK_CTCS_GS_ANGLE_MARGIN_DEG",0.),
-    envOrQ("SZMUK_CTCS_STAGE_HEIGHT_MARGIN",envOrQ("SZMUK_CTCS_GEOMETRIC_MARGIN",0.))};
-inline double gsConeTan(const CtcsMargins& m){return std::tan((GS_CONE_HALF_ANGLE_DEG-m.gs_angle_deg)*M_PI/180.0);}
-inline CtcsMargins ctcsMargins(bool tightened){return tightened?CTCS_MARGINS:CtcsMargins{};}
+
+// Every number this OCP uses. Presets below hold the validated configurations.
+struct Params {
+    // Vehicle (Crazyflie-scale model)
+    double mass=0.027, ixx=1.66e-5, iyy=1.66e-5, izz=2.92e-5, l_arm=0.046;
+    double actuator_fmin=0.08, actuator_fmax=0.60;  // per-motor sum limits [N]
+    double fmin=0.12, fmax=0.52;                    // collective thrust bounds [N]
+    // Horizon: intervals, intervals executed per replan, interval duration [s]
+    int horizon=30, nex=7;
+    double th0=0.07, thl=0.05, thh=0.12;
+    // Stage cost
+    double w_eps=1.0, w_pos_xy=0.0, w_pos_z=0.0, w_vel=0.0;
+    double stage_w_time=0.04, r_theta=10.0, theta_ref=0.10, r_ctrl_thr=2.0, r_ctrl_mom=0.6;
+    double w_touch_vel=10.0, touch_alt=0.25, touch_scale=0.25;
+    double cap_cost_radius=0.50, k_cap=20.0, cap_desc_radius=0.12, k_desc=40.0;
+    // Terminal cost
+    double term_w_pos_xy=2500.0, term_w_pos_z=2500.0, term_w_vel_xy=900.0, term_w_vel_z=900.0;
+    double term_w_tilt=200.0, term_w_om=50.0, term_vz_ref=0.0;
+    // Physical bounds: approach (always) and landing (below alt_trig)
+    double tilt_phase0_deg=11.0, omega_phase0_max=0.35, spd_phase0_max=3.0;
+    double tilt_stc_deg=0.95, alpha_theta_stc=1.0, omega_stc_max=0.019, spd_stc_max=0.75;
+    double gs_cone_deg=15.0, gs_apex_offset=0.1, los_cone_deg=30.0;
+    // Triggers
+    double alt_trig=0.8;                                  // landing phase below [m]
+    double los_alt_trig=1.8, los_trigger_scale=0.25, los_trigger_floor=0.0;
+    double z_stage=1.8, stage_radius=1.10, stage_trigger_scale=0.25, stage_trigger_floor=0.0;
+    // CTCS density weights and per-interval budget
+    double w_land_speed=1.0, w_land_tilt=1.0e5, w_land_omega=100.0, w_land_gs=5000.0;
+    double w_stc_los=50.0, w_stc_stage=10.0;
+    double ctcs_y_scale=10.0, ctcs_step_eps=1.6e-3;
+    CtcsMargins margins;
+    bool scale_bounds=false;        // divide thrust/duration rows by their range
+    double max_feedback_du=0.05;    // feedback warm start: largest accepted correction
+    Param solver=solverDefaults();
+    static Param solverDefaults(){
+        Param p;p.reg1_min=1e-3;p.reg2_min=0.1;p.mu_mul=0.1;
+        p.rho=5;p.rhoT=5;p.rho_mul=10;p.tolerance=1e-6;p.max_iter=180;
+        p.verbose=false;p.is_quaternion_in_state=false;p.use_ddp_terms=false;
+        return p;
+    }
+};
+
+// Validated configurations (see support/test/frozen_node_baseline.json):
+//   default          quad NODE frozen runs
+//   n80, n60         frozen quad CTCS (80 / 60 intervals)
+//   wall_clock       non-SITL advancing-time quad CTCS
+//   wall_clock_node  non-SITL advancing-time quad NODE
+//   sitl             PX4/Gazebo measured-state replanning (all target motions)
+inline Params preset(const std::string& name){
+    Params p;
+    if(name.empty()||name=="default")return p;
+    if(name=="n80"){
+        p.horizon=80;p.term_w_pos_xy=100000;p.term_w_pos_z=10000;p.r_theta=0.0;p.w_touch_vel=0.0;
+        p.w_land_speed=100;p.w_land_tilt=300000000;p.w_land_omega=1000000;p.w_land_gs=7500;
+        p.w_stc_los=200;p.w_stc_stage=100;p.ctcs_step_eps=1e-05;p.w_eps=0.0;p.margins.trigger=.05;
+        p.margins.geometric=0.02;p.margins.speed=.05;p.margins.tilt_deg=.2;
+        p.margins.path_tilt_deg=.5;p.margins.rate=.005;p.solver.mu=0.1;p.solver.rho=100.0;
+        p.solver.rhoT=100;p.solver.max_iter=1200;p.ctcs_y_scale=0.5;p.scale_bounds=true;
+        p.solver.muT=.1;p.margins.los=0.02;p.margins.stage_radius=.05;p.margins.stage_height=0.02;
+        return p;}
+    if(name=="n60"){
+        p.horizon=60;p.th0=0.09333333333333334;p.thl=0.06666666666666667;p.thh=0.15999999999999998;
+        p.term_w_pos_xy=100000;p.term_w_pos_z=10000;p.r_theta=0.0;p.w_touch_vel=0.0;
+        p.w_land_speed=100;p.w_land_tilt=300000000;p.w_land_omega=1000000;p.w_land_gs=7500;
+        p.w_stc_los=200;p.w_stc_stage=100;p.ctcs_step_eps=1.3333333333333333e-05;p.w_eps=0.0;
+        p.margins.trigger=.05;p.margins.geometric=0.02;p.margins.speed=.05;p.margins.tilt_deg=.2;
+        p.margins.path_tilt_deg=.5;p.margins.rate=.005;p.solver.mu=0.1;p.solver.rho=50;
+        p.solver.rhoT=50;p.solver.max_iter=1200;p.ctcs_y_scale=5;p.scale_bounds=true;
+        p.solver.muT=.1;p.margins.los=0.02;p.margins.stage_radius=.05;p.margins.stage_height=0.02;
+        return p;}
+    if(name=="wall_clock"){
+        p.horizon=80;p.term_w_pos_xy=200000;p.term_w_pos_z=10000;p.r_theta=0.0;p.w_touch_vel=0.0;
+        p.w_land_speed=100;p.w_land_tilt=300000000;p.w_land_omega=1000000;p.w_land_gs=7500;
+        p.w_stc_los=200;p.w_stc_stage=100;p.ctcs_step_eps=1e-05;p.w_eps=0.0;p.margins.trigger=.05;
+        p.margins.geometric=0.02;p.margins.speed=.05;p.margins.tilt_deg=.2;
+        p.margins.path_tilt_deg=.5;p.margins.rate=.005;p.solver.mu=0.1;p.solver.rho=100.0;
+        p.solver.rhoT=100;p.solver.max_iter=1200;p.ctcs_y_scale=2;p.scale_bounds=true;
+        p.solver.muT=.1;p.margins.los=0.02;p.margins.stage_radius=.05;p.margins.stage_height=0.02;
+        return p;}
+    if(name=="wall_clock_node"){
+        p.horizon=40;p.thh=.16;p.solver.max_iter=120;
+        return p;}
+    if(name=="sitl"){
+        p.horizon=40;p.th0=0.13999999999999999;p.thl=0.06;p.thh=0.24;p.term_w_pos_xy=100000;
+        p.term_w_pos_z=10000;p.r_theta=0.0;p.w_touch_vel=0.0;p.w_land_speed=100;
+        p.w_land_tilt=300000000;p.w_land_omega=1000000;p.w_land_gs=7500;p.w_stc_los=200;
+        p.w_stc_stage=100;p.tilt_phase0_deg=8;p.omega_phase0_max=0.2;p.spd_phase0_max=2.0;
+        p.tilt_stc_deg=5;p.omega_stc_max=0.15;p.gs_cone_deg=31;p.gs_apex_offset=0.25;
+        p.spd_stc_max=1.0;p.los_cone_deg=57;p.los_alt_trig=1.5;p.stage_radius=1.2;
+        p.ctcs_step_eps=1.3333333333333333e-05;p.w_eps=0.0;p.margins.trigger=0.2;
+        p.margins.geometric=0.05;p.margins.speed=0.2;p.margins.tilt_deg=.2;
+        p.margins.path_tilt_deg=.5;p.margins.rate=0.06;p.margins.gs_angle_deg=3;p.solver.rho=50;
+        p.solver.rhoT=50;p.solver.max_iter=1200;p.ctcs_y_scale=5;p.scale_bounds=true;
+        p.solver.muT=.1;p.margins.los=0.09;p.margins.stage_radius=0.7;p.margins.stage_height=0.12;
+        return p;}
+    throw std::invalid_argument("unknown stc_landing_noaug preset: "+name);
+}
+// STC_PRESET selects the configuration for this process.
+inline const Params P=[]{const char* n=std::getenv("STC_PRESET");return preset(n?n:"");}();
+
+inline const double J_SCALE = 1.0/P.ixx;
+inline const double TAU_MAX = P.l_arm*(P.actuator_fmax/4.0-P.actuator_fmin/4.0)*J_SCALE;
+inline const Eigen::Matrix3d J_B = (Eigen::Matrix3d()<<P.ixx*J_SCALE,0,0,0,P.iyy*J_SCALE,0,0,0,P.izz*J_SCALE).finished();
+inline const Eigen::Vector3d GRAVITY{0,0,-9.81};
+inline const double HOVER_THRUST = P.mass*9.81;
+inline const double LOS_CONE_TAN = std::tan(P.los_cone_deg*M_PI/180.0);
+
+inline double gsConeTan(const CtcsMargins& m){return std::tan((P.gs_cone_deg-m.gs_angle_deg)*M_PI/180.0);}
+inline CtcsMargins ctcsMargins(bool tightened){return tightened?P.margins:CtcsMargins{};}
 // Trigger activation at the boundary. Triggers weight their consequence by
 // the squared depth past the boundary, so with a zero floor a row fades out
 // exactly at its trigger. Tightened rows move the trigger outward by the
@@ -159,44 +166,44 @@ inline CtcsMargins ctcsMargins(bool tightened){return tightened?CTCS_MARGINS:Ctc
 // trigger in violation at almost no cost.
 struct TriggerFloors { double landing=0., los=0., stage=0.; };
 inline TriggerFloors triggerFloors(bool tightened){
-    if(tightened)return {0.,LOS_TRIGGER_FLOOR,STAGE_TRIGGER_FLOOR};
-    return {CTCS_MARGINS.trigger,
-            std::max(LOS_TRIGGER_FLOOR,CTCS_MARGINS.trigger/LOS_TRIGGER_SCALE),
-            std::max(STAGE_TRIGGER_FLOOR,CTCS_MARGINS.stage_radius/STAGE_TRIGGER_SCALE)};
+    if(tightened)return {0.,P.los_trigger_floor,P.stage_trigger_floor};
+    return {P.margins.trigger,
+            std::max(P.los_trigger_floor,P.margins.trigger/P.los_trigger_scale),
+            std::max(P.stage_trigger_floor,P.margins.stage_radius/P.stage_trigger_scale)};
 }
 
 // ── Sigmoid helpers ───────────────────────────────────────────────────────────
 template<typename Scalar>
 inline Scalar sigmaLandVal(const Scalar& rxy2) {
-    const Scalar g = Scalar(CAP_COST_RADIUS * CAP_COST_RADIUS) - rxy2;
-    return Scalar(0.5) * (Scalar(1) + std::tanh(Scalar(K_CAP) * g));
+    const Scalar g = Scalar(P.cap_cost_radius * P.cap_cost_radius) - rxy2;
+    return Scalar(0.5) * (Scalar(1) + std::tanh(Scalar(P.k_cap) * g));
 }
 
 template<typename Scalar>
 inline void sigmaLandGrad(const Scalar& rxy2, const Scalar& x0, const Scalar& x1,
                           Scalar& sig, Scalar& gx0, Scalar& gx1) {
-    const Scalar g       = Scalar(CAP_COST_RADIUS * CAP_COST_RADIUS) - rxy2;
-    const Scalar th      = std::tanh(Scalar(K_CAP) * g);
+    const Scalar g       = Scalar(P.cap_cost_radius * P.cap_cost_radius) - rxy2;
+    const Scalar th      = std::tanh(Scalar(P.k_cap) * g);
     sig     = Scalar(0.5) * (Scalar(1) + th);
-    const Scalar dsig_dg = Scalar(0.5) * Scalar(K_CAP) * (Scalar(1) - th * th);
+    const Scalar dsig_dg = Scalar(0.5) * Scalar(P.k_cap) * (Scalar(1) - th * th);
     gx0 = dsig_dg * Scalar(-2) * x0;
     gx1 = dsig_dg * Scalar(-2) * x1;
 }
 
 template<typename Scalar>
 inline Scalar sigmaDescVal(const Scalar& rxy2, const Scalar& /*z*/) {
-    const Scalar g = Scalar(CAP_DESC_RADIUS * CAP_DESC_RADIUS) - rxy2;
-    return Scalar(0.5) * (Scalar(1) + std::tanh(Scalar(K_DESC) * g));
+    const Scalar g = Scalar(P.cap_desc_radius * P.cap_desc_radius) - rxy2;
+    return Scalar(0.5) * (Scalar(1) + std::tanh(Scalar(P.k_desc) * g));
 }
 
 template<typename Scalar>
 inline void sigmaDescGrad(const Scalar& rxy2, const Scalar& x0, const Scalar& x1,
                           const Scalar& /*z*/,
                           Scalar& sig, Scalar& gx0, Scalar& gx1, Scalar& gz) {
-    const Scalar g    = Scalar(CAP_DESC_RADIUS * CAP_DESC_RADIUS) - rxy2;
-    const Scalar th   = std::tanh(Scalar(K_DESC) * g);
+    const Scalar g    = Scalar(P.cap_desc_radius * P.cap_desc_radius) - rxy2;
+    const Scalar th   = std::tanh(Scalar(P.k_desc) * g);
     sig = Scalar(0.5) * (Scalar(1) + th);
-    const Scalar dsig = Scalar(0.5) * Scalar(K_DESC) * (Scalar(1) - th * th);
+    const Scalar dsig = Scalar(0.5) * Scalar(P.k_desc) * (Scalar(1) - th * th);
     gx0 = dsig * Scalar(-2) * x0;
     gx1 = dsig * Scalar(-2) * x1;
     gz  = Scalar(0);
@@ -209,7 +216,7 @@ inline Scalar posPart(const Scalar& v) {
 
 // Landing trigger activation: floor + depth below the trigger altitude.
 template<typename Scalar>
-inline Scalar landingAltitudeTrigger(const Scalar& z,double altitude=ALT_TRIG,double floor=0.) {
+inline Scalar landingAltitudeTrigger(const Scalar& z,double altitude=P.alt_trig,double floor=0.) {
     const Scalar depth = Scalar(altitude) - z;
     return depth > Scalar(0) ? Scalar(floor) + depth : Scalar(0);
 }
@@ -243,7 +250,7 @@ private:
         Eigen::VectorXd x_aug(NX_SS);
         x_aug.setZero();
         x_aug.segment(0, this->NX_PHYS) = x_phys;
-        return evalCtcsIntegrand<double>(x_aug, u_full) / CTCS_Y_SCALE;
+        return evalCtcsIntegrand<double>(x_aug, u_full) / P.ctcs_y_scale;
     }
 
 public:
@@ -422,30 +429,30 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     const auto floors=triggerFloors(tightened);
 
     const Scalar rxy2     = x(0)*x(0) + x(1)*x(1);
-    out.a_altitude_state  = landingAltitudeTrigger<Scalar>(x(2),ALT_TRIG+margins.trigger,floors.landing);
+    out.a_altitude_state  = landingAltitudeTrigger<Scalar>(x(2),P.alt_trig+margins.trigger,floors.landing);
 
     const Scalar v2     = x.template segment<3>(3).squaredNorm();
     const Scalar qperp2 = x(7)*x(7) + x(8)*x(8);
     const Scalar om2    = x.template segment<3>(10).squaredNorm();
     const Scalar rxy    = std::sqrt(rxy2 + Scalar(1e-12));
     const Scalar stage_radius_margin =
-        (rxy - Scalar(STAGE_RADIUS-margins.stage_radius)) / Scalar(STAGE_TRIGGER_SCALE);
+        (rxy - Scalar(P.stage_radius-margins.stage_radius)) / Scalar(P.stage_trigger_scale);
     out.a_stage =
         (stage_radius_margin > Scalar(0))
             ? Scalar(floors.stage) + stage_radius_margin
             : Scalar(0);
 
     const Scalar loose_tilt_lim =
-        Scalar(std::pow(std::sin(0.5 * (THETA_PHASE0_DEG-margins.path_tilt_deg) * M_PI / 180.0), 2));
+        Scalar(std::pow(std::sin(0.5 * (P.tilt_phase0_deg-margins.path_tilt_deg) * M_PI / 180.0), 2));
     out.loose_tilt  = posPart(qperp2 - loose_tilt_lim);
-    out.loose_omega = posPart(om2 - Scalar(std::pow(OMEGA_PHASE0_MAX-margins.rate,2)));
+    out.loose_omega = posPart(om2 - Scalar(std::pow(P.omega_phase0_max-margins.rate,2)));
 
     const Scalar tilt_lim =
-        Scalar(std::pow(std::sin(0.5 * (ALPHA_THETA_STC * THETA_STC_DEG-margins.tilt_deg) * M_PI / 180.0), 2));
-    out.speed      = posPart(v2     - Scalar(std::pow(SPD_STC_MAX-margins.speed,2)));
+        Scalar(std::pow(std::sin(0.5 * (P.alpha_theta_stc * P.tilt_stc_deg-margins.tilt_deg) * M_PI / 180.0), 2));
+    out.speed      = posPart(v2     - Scalar(std::pow(P.spd_stc_max-margins.speed,2)));
     out.tilt       = posPart(qperp2 - tilt_lim);
-    out.omega      = posPart(om2    - Scalar(std::pow(OMEGA_STC_MAX-margins.rate,2)));
-    const Scalar gs_val = rxy - Scalar(gsConeTan(margins)) * (x(2) + Scalar(GS_APEX_OFFSET));
+    out.omega      = posPart(om2    - Scalar(std::pow(P.omega_stc_max-margins.rate,2)));
+    const Scalar gs_val = rxy - Scalar(gsConeTan(margins)) * (x(2) + Scalar(P.gs_apex_offset));
     out.glideslope = posPart(gs_val+Scalar(margins.geometric));
 
     const Scalar qw = x(6), qx = x(7), qy = x(8), qz = x(9);
@@ -463,14 +470,14 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
     const Scalar lat2 = posPart(los_norm2 - axial * axial);
     const Scalar lateral = std::sqrt(lat2 + Scalar(1e-12));
     const Scalar los_alt_margin =
-        (Scalar(LOS_ALT_TRIG+margins.trigger) - x(2)) / Scalar(LOS_TRIGGER_SCALE);
+        (Scalar(P.los_alt_trig+margins.trigger) - x(2)) / Scalar(P.los_trigger_scale);
     out.a_los =
         (los_alt_margin > Scalar(0))
             ? Scalar(floors.los) + los_alt_margin
             : Scalar(0);
     const double los_tan=LOS_CONE_TAN;
     out.los = posPart(lateral - Scalar(los_tan) * axial
-        + Scalar(margins.los)*std::tanh(axial/Scalar(GS_APEX_OFFSET)));
+        + Scalar(margins.los)*std::tanh(axial/Scalar(P.gs_apex_offset)));
 
     // NOTE: no thrust STC blocks — faithful to quad_single_horizon_noaug_stc,
     // whose integrand carries only stage/LOS/landing. Thrust limits stay
@@ -480,18 +487,18 @@ inline CtcsIntegrandTerms<Scalar> evalCtcsIntegrandTerms(const Vector<Scalar>& x
         out.loose_omega * out.loose_omega;
 
     const Scalar landing_sum =
-        Scalar(W_LAND_SPEED) * out.speed      * out.speed      +
-        Scalar(W_LAND_TILT)  * out.tilt       * out.tilt       +
-        Scalar(W_LAND_OMEGA) * out.omega      * out.omega      +
-        Scalar(W_LAND_GS)    * out.glideslope * out.glideslope;
+        Scalar(P.w_land_speed) * out.speed      * out.speed      +
+        Scalar(P.w_land_tilt)  * out.tilt       * out.tilt       +
+        Scalar(P.w_land_omega) * out.omega      * out.omega      +
+        Scalar(P.w_land_gs)    * out.glideslope * out.glideslope;
 
     out.path_value = path_sum;
 
-    const Scalar stage_height_viol = posPart(Scalar(Z_STAGE+margins.stage_height) - x(2));
-    out.staging_value = Scalar(W_STC_STAGE) *
+    const Scalar stage_height_viol = posPart(Scalar(P.z_stage+margins.stage_height) - x(2));
+    out.staging_value = Scalar(P.w_stc_stage) *
                         out.a_stage * out.a_stage *
                         stage_height_viol * stage_height_viol;
-    out.los_value = Scalar(W_STC_LOS) *
+    out.los_value = Scalar(P.w_stc_los) *
                     out.a_los * out.a_los *
                     out.los * out.los;
     out.landing_value =
@@ -545,28 +552,28 @@ public:
 
         const Scalar rref_x = (Scalar(1) - sc) * rf_x_;
         const Scalar rref_y = (Scalar(1) - sc) * rf_y_;
-        const Scalar rref_z = (Scalar(1) - sc) * rf_z_ + sc*(Scalar(1)-sd)*Scalar(Z_STAGE);
+        const Scalar rref_z = (Scalar(1) - sc) * rf_z_ + sc*(Scalar(1)-sd)*Scalar(P.z_stage);
 
         const Scalar drx = x(0) - rref_x;
         const Scalar dry = x(1) - rref_y;
         const Scalar drz = x(2) - rref_z;
         const Scalar v2  = x.template segment<3>(3).squaredNorm();
-        const Scalar touch_margin = (Scalar(TOUCH_ALT) - x(2)) / Scalar(TOUCH_SCALE);
+        const Scalar touch_margin = (Scalar(P.touch_alt) - x(2)) / Scalar(P.touch_scale);
         const Scalar touch = touch_margin > Scalar(0) ? touch_margin : Scalar(0);
 
         const Scalar pos_cost = w_pos_xy_*(drx*drx + dry*dry) + w_pos_z_*drz*drz;
         const Scalar vel_cost = sd * w_vel_ * v2;
-        const Scalar touch_vel_cost = Scalar(W_TOUCH_VEL) * touch * touch * v2;
+        const Scalar touch_vel_cost = Scalar(P.w_touch_vel) * touch * touch * v2;
         const Scalar reg      = eps_*(v2 + x.template segment<3>(10).squaredNorm());
 
         const Scalar dT  = u(0) - Scalar(HOVER_THRUST);
-        const Scalar ctrl_cost = Scalar(R_CTRL_THR)*dT*dT
-                               + Scalar(R_CTRL_MOM)*(u(1)*u(1) + u(2)*u(2) + u(3)*u(3));
+        const Scalar ctrl_cost = Scalar(P.r_ctrl_thr)*dT*dT
+                               + Scalar(P.r_ctrl_mom)*(u(1)*u(1) + u(2)*u(2) + u(3)*u(3));
 
-        const Scalar dTheta = u(IDX_THETA) - Scalar(THETA_REF);
-        const Scalar time_reg = Scalar(R_THETA) * dTheta * dTheta;
+        const Scalar dTheta = u(IDX_THETA) - Scalar(P.theta_ref);
+        const Scalar time_reg = Scalar(P.r_theta) * dTheta * dTheta;
 
-        return Scalar(STAGE_W_TIME)*u(IDX_THETA) + time_reg + reg
+        return Scalar(P.stage_w_time)*u(IDX_THETA) + time_reg + reg
              + pos_cost + vel_cost + touch_vel_cost + ctrl_cost;
     }
 
@@ -580,7 +587,7 @@ public:
         Scalar sd, sd_gx0, sd_gx1, sd_gz;
         sigmaDescGrad(rxy2, x(0), x(1), x(2), sd, sd_gx0, sd_gx1, sd_gz);
 
-        const Scalar Zs    = Scalar(Z_STAGE);
+        const Scalar Zs    = Scalar(P.z_stage);
         const Scalar rref_x = (Scalar(1) - sc) * rf_x_;
         const Scalar rref_y = (Scalar(1) - sc) * rf_y_;
         const Scalar rref_z = (Scalar(1) - sc) * rf_z_ + sc*(Scalar(1)-sd)*Zs;
@@ -589,9 +596,9 @@ public:
         const Scalar dry = x(1) - rref_y;
         const Scalar drz = x(2) - rref_z;
         const Scalar v2  = x.template segment<3>(3).squaredNorm();
-        const Scalar touch_margin = (Scalar(TOUCH_ALT) - x(2)) / Scalar(TOUCH_SCALE);
+        const Scalar touch_margin = (Scalar(P.touch_alt) - x(2)) / Scalar(P.touch_scale);
         const Scalar touch = touch_margin > Scalar(0) ? touch_margin : Scalar(0);
-        const Scalar dtouch_dz = touch_margin > Scalar(0) ? -Scalar(1) / Scalar(TOUCH_SCALE) : Scalar(0);
+        const Scalar dtouch_dz = touch_margin > Scalar(0) ? -Scalar(1) / Scalar(P.touch_scale) : Scalar(0);
 
         const Scalar ddrx_dx0 = Scalar(1) + sc_gx0 * rf_x_;
         const Scalar ddrx_dx1 = sc_gx1 * rf_x_;
@@ -614,9 +621,9 @@ public:
         g(1) += sd_gx1 * w_vel_ * v2;
         g(2) += sd_gz  * w_vel_ * v2;
         g.template segment<3>(3) =
-            (Scalar(2)*eps_ + Scalar(2)*sd*w_vel_ + Scalar(2)*Scalar(W_TOUCH_VEL)*touch*touch)
+            (Scalar(2)*eps_ + Scalar(2)*sd*w_vel_ + Scalar(2)*Scalar(P.w_touch_vel)*touch*touch)
             * x.template segment<3>(3);
-        g(2) += Scalar(2)*Scalar(W_TOUCH_VEL)*touch*dtouch_dz*v2;
+        g(2) += Scalar(2)*Scalar(P.w_touch_vel)*touch*dtouch_dz*v2;
         g.template segment<3>(10) = Scalar(2)*eps_ * x.template segment<3>(10);
 
         return g;
@@ -625,11 +632,11 @@ public:
     Vector<Scalar> qu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
         (void)x;
         Vector<Scalar> g = Vector<Scalar>::Zero(NU_SS);
-        g(IDX_THETA) = Scalar(STAGE_W_TIME) + Scalar(2 * R_THETA) * (u(IDX_THETA) - Scalar(THETA_REF));
-        g(0) = Scalar(2 * R_CTRL_THR) * (u(0) - Scalar(HOVER_THRUST));
-        g(1) = Scalar(2 * R_CTRL_MOM) * u(1);
-        g(2) = Scalar(2 * R_CTRL_MOM) * u(2);
-        g(3) = Scalar(2 * R_CTRL_MOM) * u(3);
+        g(IDX_THETA) = Scalar(P.stage_w_time) + Scalar(2 * P.r_theta) * (u(IDX_THETA) - Scalar(P.theta_ref));
+        g(0) = Scalar(2 * P.r_ctrl_thr) * (u(0) - Scalar(HOVER_THRUST));
+        g(1) = Scalar(2 * P.r_ctrl_mom) * u(1);
+        g(2) = Scalar(2 * P.r_ctrl_mom) * u(2);
+        g(3) = Scalar(2 * P.r_ctrl_mom) * u(3);
         return g;
     }
 
@@ -641,10 +648,10 @@ public:
         sigmaLandGrad(rxy2, x(0), x(1), sc, sc_gx0, sc_gx1);
         Scalar sd, sd_gx0, sd_gx1, sd_gz;
         sigmaDescGrad(rxy2, x(0), x(1), x(2), sd, sd_gx0, sd_gx1, sd_gz);
-        const Scalar Zs = Scalar(Z_STAGE);
-        const Scalar touch_margin = (Scalar(TOUCH_ALT) - x(2)) / Scalar(TOUCH_SCALE);
+        const Scalar Zs = Scalar(P.z_stage);
+        const Scalar touch_margin = (Scalar(P.touch_alt) - x(2)) / Scalar(P.touch_scale);
         const Scalar touch = touch_margin > Scalar(0) ? touch_margin : Scalar(0);
-        const Scalar dtouch_dz = touch_margin > Scalar(0) ? -Scalar(1) / Scalar(TOUCH_SCALE) : Scalar(0);
+        const Scalar dtouch_dz = touch_margin > Scalar(0) ? -Scalar(1) / Scalar(P.touch_scale) : Scalar(0);
         const Scalar v2  = x.template segment<3>(3).squaredNorm();
 
         const Scalar ddrx_dx0 = Scalar(1) + sc_gx0 * rf_x_;
@@ -669,13 +676,13 @@ public:
 
         for (int i = 3;  i < 6;  ++i) {
             H(i,i) = Scalar(2)*eps_ + Scalar(2)*sd*w_vel_
-                   + Scalar(2)*Scalar(W_TOUCH_VEL)*touch*touch;
-            // Gauss-Newton curvature of sqrt(W_TOUCH_VEL)*touch(z)*v.
+                   + Scalar(2)*Scalar(P.w_touch_vel)*touch*touch;
+            // Gauss-Newton curvature of sqrt(P.w_touch_vel)*touch(z)*v.
             // Its mixed block is 2*w*touch*dtouch*v, matching both diagonals.
-            H(2,i) += Scalar(2)*Scalar(W_TOUCH_VEL)*touch*dtouch_dz*x(i);
-            H(i,2) += Scalar(2)*Scalar(W_TOUCH_VEL)*touch*dtouch_dz*x(i);
+            H(2,i) += Scalar(2)*Scalar(P.w_touch_vel)*touch*dtouch_dz*x(i);
+            H(i,2) += Scalar(2)*Scalar(P.w_touch_vel)*touch*dtouch_dz*x(i);
         }
-        H(2,2) += Scalar(2)*Scalar(W_TOUCH_VEL)*dtouch_dz*dtouch_dz*v2;
+        H(2,2) += Scalar(2)*Scalar(P.w_touch_vel)*dtouch_dz*dtouch_dz*v2;
         for (int i = 10; i < 13; ++i) H(i,i) = Scalar(2)*eps_;
         return H;
     }
@@ -683,11 +690,11 @@ public:
     Matrix<Scalar> quu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
         (void)x; (void)u;
         Matrix<Scalar> H = Matrix<Scalar>::Zero(NU_SS, NU_SS);
-        H(0, 0) = Scalar(2 * R_CTRL_THR);
-        H(1, 1) = Scalar(2 * R_CTRL_MOM);
-        H(2, 2) = Scalar(2 * R_CTRL_MOM);
-        H(3, 3) = Scalar(2 * R_CTRL_MOM);
-        H(IDX_THETA, IDX_THETA) = Scalar(2 * R_THETA);
+        H(0, 0) = Scalar(2 * P.r_ctrl_thr);
+        H(1, 1) = Scalar(2 * P.r_ctrl_mom);
+        H(2, 2) = Scalar(2 * P.r_ctrl_mom);
+        H(3, 3) = Scalar(2 * P.r_ctrl_mom);
+        H(IDX_THETA, IDX_THETA) = Scalar(2 * P.r_theta);
         return H;
     }
 
@@ -751,7 +758,7 @@ template<typename Scalar>
 class FminCon : public StageConstraintBase<Scalar> { public:
     FminCon() { this->constraint_type=ConstraintType::NO; this->dim_c=1; }
     Vector<Scalar> c(const Vector<Scalar>&, const Vector<Scalar>& u) const override {
-        return (Vector<Scalar>(1) << Scalar(FMIN)-u(0)).finished(); }
+        return (Vector<Scalar>(1) << Scalar(P.fmin)-u(0)).finished(); }
     Matrix<Scalar> cx(const Vector<Scalar>& x, const Vector<Scalar>&) const override {
         return Matrix<Scalar>::Zero(1, x.size()); }
     Matrix<Scalar> cu(const Vector<Scalar>&, const Vector<Scalar>& u) const override {
@@ -761,7 +768,7 @@ template<typename Scalar>
 class FmaxCon : public StageConstraintBase<Scalar> { public:
     FmaxCon() { this->constraint_type=ConstraintType::NO; this->dim_c=1; }
     Vector<Scalar> c(const Vector<Scalar>&, const Vector<Scalar>& u) const override {
-        return (Vector<Scalar>(1) << u(0)-Scalar(FMAX)).finished(); }
+        return (Vector<Scalar>(1) << u(0)-Scalar(P.fmax)).finished(); }
     Matrix<Scalar> cx(const Vector<Scalar>& x, const Vector<Scalar>&) const override {
         return Matrix<Scalar>::Zero(1, x.size()); }
     Matrix<Scalar> cu(const Vector<Scalar>&, const Vector<Scalar>& u) const override {
@@ -819,7 +826,7 @@ template<typename Scalar>
 class GeneralSpeedCon : public StageConstraintBase<Scalar> { public:
     GeneralSpeedCon() { this->constraint_type=ConstraintType::SOC; this->dim_c=4; }
     Vector<Scalar> c(const Vector<Scalar>& x, const Vector<Scalar>&) const override {
-        Vector<Scalar> cn(4); cn << Scalar(SPD_PHASE0_MAX), x(3), x(4), x(5); return -cn; }
+        Vector<Scalar> cn(4); cn << Scalar(P.spd_phase0_max), x(3), x(4), x(5); return -cn; }
     Matrix<Scalar> cx(const Vector<Scalar>&, const Vector<Scalar>&) const override {
         Matrix<Scalar> J=Matrix<Scalar>::Zero(4,NX_SS);
         J(1,3)=Scalar(-1); J(2,4)=Scalar(-1); J(3,5)=Scalar(-1); return J; }
@@ -832,18 +839,18 @@ class GeneralSpeedCon : public StageConstraintBase<Scalar> { public:
 template<typename Scalar, typename Dynamics>
 std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
     std::shared_ptr<Dynamics> dyn,
-    double eps = CTCS_STEP_EPS / CTCS_Y_SCALE,
+    double eps = P.ctcs_step_eps / P.ctcs_y_scale,
     int idx_theta = IDX_THETA, double fixed_dt = 0.0, int substeps = 1,bool tightened=true) {
     using Vec = Vector<Scalar>;
     using StateFn = std::function<Scalar(const Vec&)>;
     using GradFn = std::function<Vec(const Vec&)>;
     const auto margins=ctcsMargins(tightened);
     const auto floors=triggerFloors(tightened);
-    if(margins.trigger<0.||margins.trigger>=STAGE_RADIUS||margins.stage_radius<0.||margins.stage_radius>=STAGE_RADIUS||margins.geometric<0.||margins.stage_height<0.||margins.speed<0.||margins.speed>=SPD_STC_MAX||
-        margins.tilt_deg<0.||margins.tilt_deg>=ALPHA_THETA_STC*THETA_STC_DEG||margins.path_tilt_deg<0.||margins.path_tilt_deg>=THETA_PHASE0_DEG||margins.rate<0.||margins.rate>=OMEGA_STC_MAX||
-        margins.los<0.||margins.los/GS_APEX_OFFSET>=LOS_CONE_TAN||
-        margins.gs_angle_deg<0.||margins.gs_angle_deg>=GS_CONE_HALF_ANGLE_DEG||
-        margins.geometric>=gsConeTan(margins)*GS_APEX_OFFSET)
+    if(margins.trigger<0.||margins.trigger>=P.stage_radius||margins.stage_radius<0.||margins.stage_radius>=P.stage_radius||margins.geometric<0.||margins.stage_height<0.||margins.speed<0.||margins.speed>=P.spd_stc_max||
+        margins.tilt_deg<0.||margins.tilt_deg>=P.alpha_theta_stc*P.tilt_stc_deg||margins.path_tilt_deg<0.||margins.path_tilt_deg>=P.tilt_phase0_deg||margins.rate<0.||margins.rate>=P.omega_stc_max||
+        margins.los<0.||margins.los/P.gs_apex_offset>=LOS_CONE_TAN||
+        margins.gs_angle_deg<0.||margins.gs_angle_deg>=P.gs_cone_deg||
+        margins.geometric>=gsConeTan(margins)*P.gs_apex_offset)
         throw std::invalid_argument("invalid CTCS physical tightening margins");
     auto row=std::make_shared<StcStageConstraint<Scalar>>(StcForm::Density, eps);
     const auto zero = [](const Vec& x) -> Vec { return Vec::Zero(x.size()); };
@@ -866,40 +873,40 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
                 [consequence](const Vec& x, const Vec&) -> Scalar { return consequence(x); },
                 [dconsequence](const Vec& x, const Vec&) -> Vec { return dconsequence(x); },
                 [](const Vec&, const Vec& u) -> Vec { return Vec::Zero(u.size()); })
-            .weight(Scalar(weight / CTCS_Y_SCALE));
+            .weight(Scalar(weight / P.ctcs_y_scale));
     };
-    const Scalar looseTilt = tiltLimit(THETA_PHASE0_DEG-margins.path_tilt_deg);
+    const Scalar looseTilt = tiltLimit(P.tilt_phase0_deg-margins.path_tilt_deg);
     add("loose_tilt", always, zero,
         [=](const Vec& x) -> Scalar { return tilt(x) - looseTilt; }, dtilt, 1.0);
     add("loose_omega", always, zero,
-        [=](const Vec& x) -> Scalar { return omega(x) - Scalar(std::pow(OMEGA_PHASE0_MAX-margins.rate,2)); }, domega, 1.0);
+        [=](const Vec& x) -> Scalar { return omega(x) - Scalar(std::pow(P.omega_phase0_max-margins.rate,2)); }, domega, 1.0);
 
     {
         StateFn stageTrigger = [=](const Vec& x) -> Scalar {
             const Scalar margin = (std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) -
-                                   Scalar(STAGE_RADIUS-margins.stage_radius)) / Scalar(STAGE_TRIGGER_SCALE);
+                                   Scalar(P.stage_radius-margins.stage_radius)) / Scalar(P.stage_trigger_scale);
             return margin > Scalar(0) ? -(Scalar(floors.stage) + margin) : Scalar(0);
         };
         GradFn dstage = [=](const Vec& x) -> Vec {
             Vec g = Vec::Zero(x.size());
             const Scalar r = std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
-            if (r > Scalar(STAGE_RADIUS-margins.stage_radius)) {
-                g(0) = -x(0)/(r*Scalar(STAGE_TRIGGER_SCALE));
-                g(1) = -x(1)/(r*Scalar(STAGE_TRIGGER_SCALE));
+            if (r > Scalar(P.stage_radius-margins.stage_radius)) {
+                g(0) = -x(0)/(r*Scalar(P.stage_trigger_scale));
+                g(1) = -x(1)/(r*Scalar(P.stage_trigger_scale));
             }
             return g;
         };
         add("staging", stageTrigger, dstage,
-            [=](const Vec& x) -> Scalar { return Scalar(Z_STAGE+margins.stage_height) - x(2); },
-            [](const Vec& x) -> Vec { Vec g = Vec::Zero(x.size()); g(2) = Scalar(-1); return g; }, W_STC_STAGE);
+            [=](const Vec& x) -> Scalar { return Scalar(P.z_stage+margins.stage_height) - x(2); },
+            [](const Vec& x) -> Vec { Vec g = Vec::Zero(x.size()); g(2) = Scalar(-1); return g; }, P.w_stc_stage);
 
         StateFn losTrigger = [=](const Vec& x) -> Scalar {
-            const Scalar m = (Scalar(LOS_ALT_TRIG+margins.trigger) - x(2))/Scalar(LOS_TRIGGER_SCALE);
+            const Scalar m = (Scalar(P.los_alt_trig+margins.trigger) - x(2))/Scalar(P.los_trigger_scale);
             return m > Scalar(0) ? -(Scalar(floors.los) + m) : Scalar(0);
         };
         GradFn dlosTrigger = [=](const Vec& x) -> Vec {
             Vec g = Vec::Zero(x.size());
-            if (x(2) < Scalar(LOS_ALT_TRIG+margins.trigger)) g(2) = Scalar(1)/Scalar(LOS_TRIGGER_SCALE);
+            if (x(2) < Scalar(P.los_alt_trig+margins.trigger)) g(2) = Scalar(1)/Scalar(P.los_trigger_scale);
             return g;
         };
         // Body boresight and its quaternion derivatives, without normalizing
@@ -916,7 +923,7 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
             // For axial<0, |tanh(s)|<=|s| and margin/range<tan(angle) keep the
             // entire rear half-space infeasible. The landing point is retained.
             return std::sqrt(posPart(lateral2)+Scalar(1e-12)) - Scalar(los_tan)*axial
-                + Scalar(margins.los)*std::tanh(axial/Scalar(GS_APEX_OFFSET));
+                + Scalar(margins.los)*std::tanh(axial/Scalar(P.gs_apex_offset));
         };
         GradFn dlos = [=](const Vec& x) -> Vec {
             const Scalar w=x(6), a=x(7), b=x(8), c=x(9);
@@ -929,37 +936,37 @@ std::shared_ptr<StcStageConstraint<Scalar>> makeCtcsConstraint(
                   Scalar(2)*w, -Scalar(2)*a, -Scalar(2)*b, Scalar(2)*c;
             da.template segment<4>(6) = db.transpose()*x.template head<3>();
             const Scalar lateral2 = x.template head<3>().squaredNorm()-axial*axial;
-            const Scalar taper=std::tanh(axial/Scalar(GS_APEX_OFFSET));
-            Vec g = (-Scalar(los_tan)+Scalar(margins.los/GS_APEX_OFFSET)*(Scalar(1)-taper*taper))*da;
+            const Scalar taper=std::tanh(axial/Scalar(P.gs_apex_offset));
+            Vec g = (-Scalar(los_tan)+Scalar(margins.los/P.gs_apex_offset)*(Scalar(1)-taper*taper))*da;
             if (lateral2 > Scalar(0)) {
                 Vec dl = -Scalar(2)*axial*da; dl.template head<3>() += Scalar(2)*x.template head<3>();
                 g += dl/(Scalar(2)*std::sqrt(lateral2+Scalar(1e-12)));
             }
             return g;
         };
-        add("los", losTrigger, dlosTrigger, los, dlos, W_STC_LOS);
+        add("los", losTrigger, dlosTrigger, los, dlos, P.w_stc_los);
 
         StateFn landTrigger = [=](const Vec& x) -> Scalar {
-            const Scalar depth = Scalar(ALT_TRIG+margins.trigger) - x(2);
+            const Scalar depth = Scalar(P.alt_trig+margins.trigger) - x(2);
             return depth > Scalar(0) ? -(Scalar(floors.landing) + depth) : -depth;
         };
         GradFn dland = [=](const Vec& x) -> Vec {
             Vec g = Vec::Zero(x.size()); g(2) = Scalar(1); return g;
         };
         add("landing_speed", landTrigger, dland,
-            [=](const Vec& x) -> Scalar { return x.template segment<3>(3).squaredNorm()-Scalar(std::pow(SPD_STC_MAX-margins.speed,2)); },
-            [](const Vec& x) -> Vec { Vec g=Vec::Zero(x.size()); g.template segment<3>(3)=Scalar(2)*x.template segment<3>(3); return g; }, W_LAND_SPEED);
-        const Scalar landTilt = tiltLimit(ALPHA_THETA_STC*THETA_STC_DEG-margins.tilt_deg);
+            [=](const Vec& x) -> Scalar { return x.template segment<3>(3).squaredNorm()-Scalar(std::pow(P.spd_stc_max-margins.speed,2)); },
+            [](const Vec& x) -> Vec { Vec g=Vec::Zero(x.size()); g.template segment<3>(3)=Scalar(2)*x.template segment<3>(3); return g; }, P.w_land_speed);
+        const Scalar landTilt = tiltLimit(P.alpha_theta_stc*P.tilt_stc_deg-margins.tilt_deg);
         add("landing_tilt", landTrigger, dland,
-            [=](const Vec& x) -> Scalar { return tilt(x)-landTilt; }, dtilt, W_LAND_TILT);
+            [=](const Vec& x) -> Scalar { return tilt(x)-landTilt; }, dtilt, P.w_land_tilt);
         add("landing_omega", landTrigger, dland,
-            [=](const Vec& x) -> Scalar { return omega(x)-Scalar(std::pow(OMEGA_STC_MAX-margins.rate,2)); }, domega, W_LAND_OMEGA);
+            [=](const Vec& x) -> Scalar { return omega(x)-Scalar(std::pow(P.omega_stc_max-margins.rate,2)); }, domega, P.w_land_omega);
         add("landing_glideslope", landTrigger, dland,
-            [=](const Vec& x) -> Scalar { return std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) - Scalar(gsConeTan(margins))*(x(2)+Scalar(GS_APEX_OFFSET))+Scalar(margins.geometric); },
+            [=](const Vec& x) -> Scalar { return std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12)) - Scalar(gsConeTan(margins))*(x(2)+Scalar(P.gs_apex_offset))+Scalar(margins.geometric); },
             [=](const Vec& x) -> Vec {
                 Vec g=Vec::Zero(x.size()); const Scalar r=std::sqrt(x(0)*x(0)+x(1)*x(1)+Scalar(1e-12));
                 g(0)=x(0)/r; g(1)=x(1)/r; g(2)=-Scalar(gsConeTan(margins)); return g;
-            }, W_LAND_GS);
+            }, P.w_land_gs);
     }
     StcIntervalDynamics<Scalar> host;
     host.idx_theta = idx_theta;
@@ -982,21 +989,17 @@ inline Eigen::VectorXd ensureNoAugStateSize(const Eigen::VectorXd& x) {
 
 // ── Solver params ─────────────────────────────────────────────────────────────
 inline Param getSolverParams() {
-    auto parameters=defaults.solver;
-    parameters.forward_filter=envOrInt("SZMUK_FORWARD_FILTER",parameters.forward_filter);
-    if(parameters.forward_filter!=0&&parameters.forward_filter!=1)
-        throw std::invalid_argument("SZMUK_FORWARD_FILTER must select native filter 0 or 1");
-    return parameters;
+    return P.solver;
 }
 
 // ── Warm-start / validity helpers ─────────────────────────────────────────────
 inline void clampWarmControl(Eigen::VectorXd& u) {
     if (u.size() < NU_SS) return;
-    u(0) = std::clamp((double)u(0), (double)FMIN, (double)FMAX);
+    u(0) = std::clamp((double)u(0), (double)P.fmin, (double)P.fmax);
     u(1) = std::clamp((double)u(1), -TAU_MAX, TAU_MAX);
     u(2) = std::clamp((double)u(2), -TAU_MAX, TAU_MAX);
     u(3) = std::clamp((double)u(3), -TAU_MAX, TAU_MAX);
-    u(IDX_THETA) = std::clamp((double)u(IDX_THETA), THL, THH);
+    u(IDX_THETA) = std::clamp((double)u(IDX_THETA), P.thl, P.thh);
 }
 
 inline bool finiteTrajectory(const std::vector<Eigen::VectorXd>& X,
@@ -1008,7 +1011,7 @@ inline bool finiteTrajectory(const std::vector<Eigen::VectorXd>& X,
 
 inline bool plausibleTrajectory(const std::vector<Eigen::VectorXd>& X,
                                 int max_node, int n_solve) {
-    const double dt_limit = static_cast<double>(n_solve) * THH + 1.0;
+    const double dt_limit = static_cast<double>(n_solve) * P.thh + 1.0;
     const int last = std::min(max_node, static_cast<int>(X.size()) - 1);
     for (int k = 0; k <= last; ++k) {
         const auto& x = X[k];
@@ -1034,12 +1037,12 @@ inline bool plausibleTrajectory(const std::vector<Eigen::VectorXd>& X,
 inline Eigen::VectorXd nativeGuessControl(const Eigen::VectorXd& x,const Eigen::Vector3d& target_accel){
     constexpr double kp=1.,kd=2.,amax=2.;            // attitude PD, horizontal accel cap
     constexpr double kpos=.3,kvs=.9,vmax=1.;          // position -> velocity -> accel
-    constexpr double hold=.25,slope=.6;               // hold height above max(Z_STAGE,LOS trigger); GS fraction
+    constexpr double hold=.25,slope=.6;               // hold height above max(P.z_stage,LOS trigger); GS fraction
     const Eigen::Vector3d v=x.segment<3>(3),w=x.segment<3>(10);
     Eigen::Quaterniond q(x(6),x(7),x(8),x(9));q.normalize();
     const double rxy=x.head<2>().norm();
-    const double cap=std::max(Z_STAGE,LOS_ALT_TRIG)+hold;
-    const double zref=std::min(cap,rxy/(slope*std::tan(GS_CONE_HALF_ANGLE_DEG*M_PI/180.))-GS_APEX_OFFSET);
+    const double cap=std::max(P.z_stage,P.los_alt_trig)+hold;
+    const double zref=std::min(cap,rxy/(slope*std::tan(P.gs_cone_deg*M_PI/180.))-P.gs_apex_offset);
     Eigen::Vector3d vref(-kpos*x(0),-kpos*x(1),kpos*(std::max(zref,0.)-x(2)));
     if(vref.head<2>().norm()>vmax)vref.head<2>()*=vmax/vref.head<2>().norm();
     vref.z()=std::clamp(vref.z(),-.5,.5);
@@ -1056,9 +1059,9 @@ inline Eigen::VectorXd nativeGuessControl(const Eigen::VectorXd& x,const Eigen::
     const Eigen::Vector3d bz=q*Eigen::Vector3d::UnitZ();
     const Eigen::Vector3d err=q.conjugate()*bz.cross(f.normalized());
     Eigen::VectorXd u=Eigen::VectorXd::Zero(NU_SS);
-    u(0)=MASS*f.dot(bz);
+    u(0)=P.mass*f.dot(bz);
     u.segment<3>(1)=J_B*(kp*err-kd*w);
-    u(IDX_THETA)=TH0;
+    u(IDX_THETA)=P.th0;
     return u;
 }
 
@@ -1071,8 +1074,8 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     std::shared_ptr<ConstantAccelPredictor> predictor = nullptr,
     int requested_horizon = 0)
 {
-    const int N = requested_horizon > 0 ? requested_horizon : HORIZON;
-    if(N>HORIZON)throw std::invalid_argument("remaining landing horizon exceeds configured maneuver");
+    const int N = requested_horizon > 0 ? requested_horizon : P.horizon;
+    if(N>P.horizon)throw std::invalid_argument("remaining landing horizon exceeds configured maneuver");
     auto problem = std::make_shared<OptimalControlProblem<double>>(N);
 
     if (!predictor) {
@@ -1080,23 +1083,23 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     }
 
     auto dyn = std::make_shared<Quad6DOFVarTimeRelativePred<double>>(predictor);
-    dyn->setMass(MASS);
+    dyn->setMass(P.mass);
     dyn->setGravity(GRAVITY);
     dyn->setJb(J_B);
     dyn->setTargetAccel(predictor->predictAccel(0.0));
 
     auto tcost  = std::make_shared<RelTermCost<double>>(
-        TERM_W_POS_XY, TERM_W_POS_Z,
-        TERM_W_VEL_XY, TERM_W_VEL_Z,
-        TERM_W_TILT, TERM_W_OM, TERM_VZ_REF);
+        P.term_w_pos_xy, P.term_w_pos_z,
+        P.term_w_vel_xy, P.term_w_vel_z,
+        P.term_w_tilt, P.term_w_om, P.term_vz_ref);
     auto cfmin  = std::make_shared<FminCon<double>>();
     auto cfmax  = std::make_shared<FmaxCon<double>>();
     auto cmom   = std::make_shared<MomentCon<double>>();
-    auto cth    = std::make_shared<ThetaBounds<double>>(THL, THH);
+    auto cth    = std::make_shared<ThetaBounds<double>>(P.thl, P.thh);
     auto czfl   = std::make_shared<ZFloorCon<double>>();
     auto cspeed = std::make_shared<GeneralSpeedCon<double>>();
     // The constraint sees the SCALED integral, so the physical budget
-    // CTCS_STEP_EPS is divided by CTCS_Y_SCALE (same zero set as unscaled).
+    // P.ctcs_step_eps is divided by P.ctcs_y_scale (same zero set as unscaled).
     // Hard-wired: this OCP has no other enforcement mode.
     auto cstep = makeCtcsConstraint<double>(dyn);
     // Intervals before node CTCS_TIGHTEN_FROM_NODE use the physical
@@ -1110,25 +1113,25 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     // they integrate with ctcsPhysicalSubsteps() RK4 substeps.
     const int tighten_from=ctcsTightenFromNode();
     auto cstep_physical = tighten_from>0 ?
-        makeCtcsConstraint<double>(dyn, CTCS_STEP_EPS / CTCS_Y_SCALE, IDX_THETA, 0.0, ctcsPhysicalSubsteps(), false) : cstep;
-    const double eps_cost = envOrQ("SZMUK_W_EPS", 1.0);
-    const Eigen::Vector3d r_follow(0.0, 0.0, Z_STAGE);
+        makeCtcsConstraint<double>(dyn, P.ctcs_step_eps / P.ctcs_y_scale, IDX_THETA, 0.0, ctcsPhysicalSubsteps(), false) : cstep;
+    const double eps_cost = P.w_eps;
+    const Eigen::Vector3d r_follow(0.0, 0.0, P.z_stage);
     auto stage_cost = std::make_shared<CTcSTCStageCost<double>>(
         eps_cost,
-        envOrQ("SZMUK_W_POS_XY", W_STAGE_TARGET_XY),
-        envOrQ("SZMUK_W_POS_Z", W_STAGE_TARGET_Z),
-        envOrQ("SZMUK_W_VEL", W_STAGE_TARGET_VEL),
+        P.w_pos_xy,
+        P.w_pos_z,
+        P.w_vel,
         r_follow);
 
     for (int k = 0; k < N; ++k) {
         problem->setStageDynamics(k, dyn);
         problem->setStageCost(k, stage_cost);
-        if(envOrInt("SZMUK_BOUND_SCALE",0)==1){
+        if(P.scale_bounds){
             // Same positive row factors as the supplied quad_sh_ctcs baseline.
-            problem->addStageConstraint(k,std::make_shared<ScaledCon<double>>(cfmin,FMAX-FMIN));
-            problem->addStageConstraint(k,std::make_shared<ScaledCon<double>>(cfmax,FMAX-FMIN));
+            problem->addStageConstraint(k,std::make_shared<ScaledCon<double>>(cfmin,P.fmax-P.fmin));
+            problem->addStageConstraint(k,std::make_shared<ScaledCon<double>>(cfmax,P.fmax-P.fmin));
             problem->addStageConstraint(k,cmom);
-            problem->addStageConstraint(k,std::make_shared<ScaledCon<double>>(cth,THH-THL));
+            problem->addStageConstraint(k,std::make_shared<ScaledCon<double>>(cth,P.thh-P.thl));
         }else{
             problem->addStageConstraint(k,cfmin);
             problem->addStageConstraint(k,cfmax);
@@ -1172,7 +1175,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     }
 
     const bool use_feedback =
-        useRhFeedbackWarmStart() &&
+        true &&
         static_cast<int>(prev_U.size()) >= N &&
         static_cast<int>(Xw.size()) > N &&
         static_cast<int>(prev_K.size()) >= N;
@@ -1194,19 +1197,19 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
                 }
                 Eigen::VectorXd du = Eigen::VectorXd::Zero(NU_SS);
                 if (feedback_dim_ok) du = u_fb - uk;
-                const double max_du = envOrQ("SZMUK_RH_MAX_FB_DU", 0.05);
+                const double max_du = P.max_feedback_du;
                 const bool wild_feedback =
                     !feedback_dim_ok ||
                     !u_fb.allFinite() ||
                     !du.allFinite() ||
                     (max_du > 0.0 && du.norm() > max_du) ||
-                    u_fb(0) < 0.5 * FMIN ||
-                    u_fb(0) > 1.5 * FMAX ||
+                    u_fb(0) < 0.5 * P.fmin ||
+                    u_fb(0) > 1.5 * P.fmax ||
                     std::abs(u_fb(1)) > 2.0 * TAU_MAX ||
                     std::abs(u_fb(2)) > 2.0 * TAU_MAX ||
                     std::abs(u_fb(3)) > 2.0 * TAU_MAX ||
                     u_fb(IDX_THETA) < 0.0 ||
-                    u_fb(IDX_THETA) > 2.0 * THH;
+                    u_fb(IDX_THETA) > 2.0 * P.thh;
                 if (!wild_feedback) {
                     uk = u_fb;
                 }
@@ -1233,9 +1236,9 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
 inline OCPDescriptor descriptor() {
     OCPDescriptor d;d.disarm_on_landing_finish=true;
     d.name = "stc_landing_noaug";
-    d.dt = TH0;
-    d.default_n_replay = NEX;
-    d.default_mass_kg = MASS;
+    d.dt = P.th0;
+    d.default_n_replay = P.nex;
+    d.default_mass_kg = P.mass;
     d.warm_start = OCPDescriptor::WarmStart::Feedback;
     // A shifted plan from a different measured root leaves the CTCS solve
     // uncertified; the staged nativeGuessControl seed converges.
@@ -1245,7 +1248,7 @@ inline OCPDescriptor descriptor() {
         if(x.size()<13||u.size()<1||!x.allFinite()||!u.allFinite())throw std::invalid_argument("invalid DDP acceleration input");
         Eigen::Quaterniond q(x(6),x(7),x(8),x(9));
         if(q.norm()<1e-8)throw std::invalid_argument("invalid DDP attitude");
-        return Eigen::Vector3d(q.normalized()*Eigen::Vector3d(0,0,u(0)/MASS)+Eigen::Vector3d(0,0,-9.81));
+        return Eigen::Vector3d(q.normalized()*Eigen::Vector3d(0,0,u(0)/P.mass)+Eigen::Vector3d(0,0,-9.81));
     };
     // Invert PX4 PositionControl's native acceleration conversion at the
     // nominal DDP state. With zero position/velocity error and integrator,
@@ -1257,13 +1260,13 @@ inline OCPDescriptor descriptor() {
         Eigen::Quaterniond q(x(6),x(7),x(8),x(9));
         const Eigen::Vector3d axis=q.normalized()*Eigen::Vector3d::UnitZ();
         Eigen::Vector3d feedforward=acceleration;
-        if(defaults.px4.decouple_acceleration) {
+        if(comando_parameters::defaults.px4.decouple_acceleration) {
             if(axis.z()<=1e-6)throw std::invalid_argument("PX4 acceleration mapping requires upright thrust axis");
             feedforward.head<2>()=9.81*axis.head<2>()/axis.z();
         }
-        feedforward.x()+=defaults.px4.velocity_d_xy*acceleration.x();
-        feedforward.y()+=defaults.px4.velocity_d_xy*acceleration.y();
-        feedforward.z()+=defaults.px4.velocity_d_z*acceleration.z();
+        feedforward.x()+=comando_parameters::defaults.px4.velocity_d_xy*acceleration.x();
+        feedforward.y()+=comando_parameters::defaults.px4.velocity_d_xy*acceleration.y();
+        feedforward.z()+=comando_parameters::defaults.px4.velocity_d_z*acceleration.z();
         return feedforward;
     };
     d.coordinates = OCPDescriptor::Coordinates::TargetRelative;
@@ -1294,7 +1297,7 @@ inline OCPDescriptor descriptor() {
         if (r.success &&
             (!finiteTrajectory(r.state_trajectory, r.control_trajectory) ||
              !plausibleTrajectory(r.state_trajectory,
-                                  std::min(NEX, HORIZON), HORIZON))) {
+                                  std::min(P.nex, P.horizon), P.horizon))) {
             r.success = false;
         }
     };
@@ -1311,9 +1314,9 @@ inline OCPDescriptor descriptor() {
     d.make_model=[](const Eigen::Vector3d& accel) {
         auto pred=std::make_shared<ConstantAccelPredictor>();pred->a=accel;
         auto dyn=std::make_shared<Quad6DOFVarTimeRelativePred<double>>(pred);
-        dyn->setMass(MASS);dyn->setGravity(GRAVITY);dyn->setJb(J_B);
-        OCPDescriptor::Model model;model.nx=NX_SS;model.nu=NU_SS;model.horizon=HORIZON;model.dt=TH0;
-        model.hover=Eigen::VectorXd::Zero(NU_SS);model.hover(0)=HOVER_THRUST;model.hover(IDX_THETA)=TH0;
+        dyn->setMass(P.mass);dyn->setGravity(GRAVITY);dyn->setJb(J_B);
+        OCPDescriptor::Model model;model.nx=NX_SS;model.nu=NU_SS;model.horizon=P.horizon;model.dt=P.th0;
+        model.hover=Eigen::VectorXd::Zero(NU_SS);model.hover(0)=HOVER_THRUST;model.hover(IDX_THETA)=P.th0;
         model.stage_duration=[](const Eigen::VectorXd&,const Eigen::VectorXd& u){return u(IDX_THETA);};
         model.initial_state=[](const Eigen::VectorXd& physical,const Eigen::VectorXd&){
             Eigen::VectorXd x=Eigen::VectorXd::Zero(NX_SS);x.head(NX)=physical.head(NX);return x;

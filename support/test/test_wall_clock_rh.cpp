@@ -24,11 +24,11 @@ int run(int argc,char**argv){try{
  auto hard=[&](const Saved& p,const Vec& x,const Vec&u){double v=0.;for(auto type:{ConstraintType::NO,ConstraintType::SOC})for(const auto&row:p.problem->getStageConstraints(0,type)){
   if(std::dynamic_pointer_cast<StcStageConstraint<double>>(row))continue;const Vec c=row->c(x,u);if(c.size())v=std::max(v,type==ConstraintType::SOC?c(0)+c.tail(c.size()-1).norm():c.maxCoeff());}return v;};
  auto physical=[&](const Saved&p,const Vec&x,const Vec&u,std::map<std::string,double>&terms){double v=0.;if(quad){if(ctcs)for(int j=0;j<p.physical->numImplications();++j)if(p.physical->triggered(j,x)){const auto&im=p.physical->implication(j);if(im.name=="los"&&x.head<3>().norm()<.05)continue;const double c=im.consequence(x,u);v=std::max(v,c);if(&terms==&planned_terms&&c>peak){peak=c;peak_time=x(13);peak_plan=p.id;peak_name=im.name;}terms[im.name]=std::max(terms[im.name],c);}}else for(int j=0;j<NOBS;++j)if(p.p.mask[j]){double c=obstacleG(p.p,x.head<2>(),j);v=std::max(v,c);terms["active_obstacle_"+std::to_string(j)]=std::max(terms["active_obstacle_"+std::to_string(j)],c);}return v;};
- auto density=[&](const Saved&p,const Vec&x,const Vec&u,int k){if(quad)return Q::evalCtcsIntegrand<double>(x,u,k>=Q::ctcsTightenFromNode())/Q::CTCS_STEP_EPS;double v=0.;for(int j=0;j<NOBS;++j)if(p.p.mask[j]){const double c=std::max(0.,obstacleG(p.p,x.head<2>(),j)+p.p.delta);v+=c*c/p.p.eps;}return v;};
+ auto density=[&](const Saved&p,const Vec&x,const Vec&u,int k){if(quad)return Q::evalCtcsIntegrand<double>(x,u,k>=Q::ctcsTightenFromNode())/Q::P.ctcs_step_eps;double v=0.;for(int j=0;j<NOBS;++j)if(p.p.mask[j]){const double c=std::max(0.,obstacleG(p.p,x.head<2>(),j)+p.p.delta);v+=c*c/p.p.eps;}return v;};
  for(int z=0;z<count;++z){Saved p;p.id=z;int nx,nu;in>>p.epoch>>nx>>nu;for(int i=0;i<nx;++i)p.x.push_back(readvec(in));for(int i=0;i<nu;++i)p.u.push_back(readvec(in));
   OCPCreateArgs args;args.current_state=p.x.front();args.target_accel=acc;args.horizon=nu;args.t_abs=p.epoch;p.problem=desc->create(args);
   for(int j=0;j<NOBS;++j)p.p.mask[j]=(p.p.s_diag.cwiseProduct(p.x.front().head<2>()-p.p.centers[j])).norm()<=6.;
-  if(quad&&ctcs){auto dyn=std::dynamic_pointer_cast<Q::Quad6DOFVarTimeRelativePred<double>>(p.problem->getDynamics(0));p.physical=Q::makeCtcsConstraint<double>(dyn,Q::CTCS_STEP_EPS/Q::CTCS_Y_SCALE,Q::IDX_THETA,0.,1,false);}
+  if(quad&&ctcs){auto dyn=std::dynamic_pointer_cast<Q::Quad6DOFVarTimeRelativePred<double>>(p.problem->getDynamics(0));p.physical=Q::makeCtcsConstraint<double>(dyn,Q::P.ctcs_step_eps/Q::P.ctcs_y_scale,Q::IDX_THETA,0.,1,false);}
   native=std::max(native,auditPrimal(*p.problem,p.x,p.u,desc->getSolverParams()).constraints);
   for(int k=0;k<nu;++k){auto x=p.x[k];const auto&u=p.u[k];const double h=quad?u(4):model.dt;const int n=std::max(1,int(std::ceil(h/.001)));const double dt=h/n;double integral=0.;
    if(ctcs)for(const auto&c:p.problem->getStageConstraints(k,ConstraintType::NO))if(auto row=std::dynamic_pointer_cast<StcStageConstraint<double>>(c))native_ratio=std::max(native_ratio,row->intervalIntegral(x,u)/row->getEpsilon());
@@ -170,11 +170,11 @@ int main(int argc,char** argv){try{
     plant=model.flow(plant,u,.001,false).x;++ticks;sim=.001*ticks;
     if(!plant.allFinite())throw std::runtime_error("nonfinite physical plant");
     const auto rel=planner_core::prepareOcpState(*desc,plant,targetAt(sim));
-    if(quad){max_hard=std::max({max_hard,-rel(2),rel.segment<3>(3).norm()-StcLandingNoAugOCP::SPD_PHASE0_MAX});
+    if(quad){max_hard=std::max({max_hard,-rel(2),rel.segment<3>(3).norm()-StcLandingNoAugOCP::P.spd_phase0_max});
      if(ctcs){const auto terms=StcLandingNoAugOCP::evalCtcsIntegrandTerms<double>(rel,u,false);
       const auto note=[&](const char* name,double value){if(value>max_physical_stc){max_physical_stc=value;peak_physical_term=name;peak_physical_time=sim;}};
       note("loose_tilt",terms.loose_tilt);note("loose_omega",terms.loose_omega);
-      if(terms.a_stage>0)note("staging",StcLandingNoAugOCP::Z_STAGE-rel(2));
+      if(terms.a_stage>0)note("staging",StcLandingNoAugOCP::P.z_stage-rel(2));
       if(terms.a_los>0&&rel.head<3>().norm()>=.05)note("los",terms.los);  // LOS not graded within 5 cm of the pad
       if(terms.a_altitude_state>0){note("landing_speed",terms.speed);note("landing_tilt",terms.tilt);note("landing_omega",terms.omega);note("glideslope",terms.glideslope);}
      }

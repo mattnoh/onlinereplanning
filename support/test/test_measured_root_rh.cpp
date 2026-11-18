@@ -77,7 +77,7 @@ public:
         return original_->lagrangianHessian(x,lift(u,dt_),multiplier).topLeftCorner(x.size()+Q::NU,x.size()+Q::NU);}
 };
 static std::shared_ptr<OCPDescriptor> descriptor(const OCPDescriptor& original,double dt){
-    requireRh(std::isfinite(dt)&&dt>0.&&dt>=Q::THL&&dt<=Q::THH,"fixed dt must lie in the original duration range");
+    requireRh(std::isfinite(dt)&&dt>0.&&dt>=Q::P.thl&&dt<=Q::P.thh,"fixed dt must lie in the original duration range");
     auto result=std::make_shared<OCPDescriptor>(original);result->name=original.name+"_fixed_dt";
     result->dt=dt;result->variable_dt=false;
     result->sanitize_warm_control=[dt](Vec& u){auto v=lift(u,dt);Q::clampWarmControl(v);u=v.head(Q::NU);};
@@ -189,7 +189,7 @@ static void ordinaryNodeContract(){
     Vec x=args.current_state,u=node->getInitialControl(0);x(2)=-.01;
     bool floor_rejected=false,speed_rejected=false;
     for(const auto& row:node->getStageConstraints(0,ConstraintType::NO))floor_rejected|=row->c(x,u).maxCoeff()>0.;
-    x=args.current_state;x(3)=2*Q::SPD_PHASE0_MAX;
+    x=args.current_state;x(3)=2*Q::P.spd_phase0_max;
     for(const auto& row:node->getStageConstraints(0,ConstraintType::SOC)){
         const Vec c=row->c(x,u);speed_rejected|=c(0)+c.tail(c.size()-1).norm()>0.;
     }
@@ -336,12 +336,12 @@ int main(int argc,char** argv){try{
                 auto dyn=std::dynamic_pointer_cast<FixedQuadTime::Dynamics>(captured_problem->getDynamics(0));
                 requireRh(bool(dyn),"fixed physical audit requires the original quad adapter");
                 physical_stc=StcLandingNoAugOCP::makeCtcsConstraint<double>(dyn,
-                    StcLandingNoAugOCP::CTCS_STEP_EPS/StcLandingNoAugOCP::CTCS_Y_SCALE,-1,fixed_dt,1,false);
+                    StcLandingNoAugOCP::P.ctcs_step_eps/StcLandingNoAugOCP::P.ctcs_y_scale,-1,fixed_dt,1,false);
             }else{
                 auto dyn=std::dynamic_pointer_cast<StcLandingNoAugOCP::Quad6DOFVarTimeRelativePred<double>>(captured_problem->getDynamics(0));
                 requireRh(bool(dyn),"physical STC audit requires the original quad model");
                 physical_stc=StcLandingNoAugOCP::makeCtcsConstraint<double>(dyn,
-                    StcLandingNoAugOCP::CTCS_STEP_EPS/StcLandingNoAugOCP::CTCS_Y_SCALE,
+                    StcLandingNoAugOCP::P.ctcs_step_eps/StcLandingNoAugOCP::P.ctcs_y_scale,
                     StcLandingNoAugOCP::IDX_THETA,0.,1,false);
             }
         }
@@ -359,7 +359,7 @@ int main(int argc,char** argv){try{
     auto model=descriptor->make_model(acceleration);
     const auto world_model=descriptor->make_model(Eigen::Vector3d::Zero());
     // Single horizon: one solve, every interval executed.
-    const int K=single_horizon?(quad?StcLandingNoAugOCP::HORIZON:model.horizon):replay_intervals;
+    const int K=single_horizon?(quad?StcLandingNoAugOCP::P.horizon:model.horizon):replay_intervals;
     // Exogenous plant acceleration is absent from the solver's prediction.
     // Applied only to the independently integrated physical state, never its
     // measured root or the constraints. Zero preserves the historical path.
@@ -376,7 +376,7 @@ int main(int argc,char** argv){try{
     if(quad){
         if(reference_initial)plant<<2.4,2.,2.,0.,-2.,0.,1.,0.,0.,0.,0.,0.,0.;
         // Existing noaug activation test's settled staging-hover start.
-        else if(staging_initial)plant<<2.,1.5,StcLandingNoAugOCP::Z_STAGE+.05,0.,0.,0.,1.,0.,0.,0.,0.,0.,0.;
+        else if(staging_initial)plant<<2.,1.5,StcLandingNoAugOCP::P.z_stage+.05,0.,0.,0.,1.,0.,0.,0.,0.,0.,0.;
         else plant<<-.07320069131,-.04604300079,1.832031775,.07864153001,-.004976944706,.008655228599,
         .999980267207,-.004416340294,.003462269278,-.00282379661,.01105888095,.001028963132,-.002000458539;
         plant.segment<4>(6).normalize();}else plant<<-10,0,0,0;
@@ -432,7 +432,7 @@ int main(int argc,char** argv){try{
     };
     // Interval k uses the physical row before ctcsTightenFromNode(), as the OCP does.
     const auto densityRatio=[&](const Vec& x,const Vec& u,int k){
-        if(quad)return StcLandingNoAugOCP::evalCtcsIntegrand<double>(x,u,k>=StcLandingNoAugOCP::ctcsTightenFromNode())/StcLandingNoAugOCP::CTCS_STEP_EPS;
+        if(quad)return StcLandingNoAugOCP::evalCtcsIntegrand<double>(x,u,k>=StcLandingNoAugOCP::ctcsTightenFromNode())/StcLandingNoAugOCP::P.ctcs_step_eps;
         double density=0.;for(int j=0;j<NOBS;++j)if(audit_problem.mask[j]){
             const double excess=std::max(0.,obstacleG(audit_problem,x.head<2>(),j)+audit_problem.delta);
             density+=excess*excess;
@@ -464,7 +464,7 @@ int main(int argc,char** argv){try{
             if(c>planned_stc_excess){planned_stc_excess=c;planned_peak_name=physical_stc->implication(j).name;planned_peak_cycle=current_cycle;planned_peak_k=k;planned_peak_z=x(2);}
         }
     };
-    const double physical_budget=quad?StcLandingNoAugOCP::CTCS_STEP_EPS:audit_problem.eps;
+    const double physical_budget=quad?StcLandingNoAugOCP::P.ctcs_step_eps:audit_problem.eps;
 
     std::ofstream log(out/"cycles.jsonl");log<<std::setprecision(17);
     std::ofstream executed(out/"executed.csv");executed<<std::setprecision(17)<<"t";
@@ -569,7 +569,7 @@ int main(int argc,char** argv){try{
             const auto row=rowAt(0);
             if(quad){
                 requireRh(row&&row->numImplications()==8,"original quad STC implications are disabled or missing");
-                requireRh(std::abs(row->getEpsilon()*StcLandingNoAugOCP::CTCS_Y_SCALE-physical_budget)<1e-15,"quad CTCS physical budget changed");
+                requireRh(std::abs(row->getEpsilon()*StcLandingNoAugOCP::P.ctcs_y_scale-physical_budget)<1e-15,"quad CTCS physical budget changed");
             }
             if(row){
                 requireRh(row->getForm()==StcForm::Density&&row->getEpsilon()>0.,"invalid CTCS interval row");

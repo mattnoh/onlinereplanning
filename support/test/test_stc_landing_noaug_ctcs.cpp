@@ -10,7 +10,7 @@ int main() {
         auto pred = std::make_shared<ConstantAccelPredictor>();
         pred->a = Eigen::Vector3d(0.13, -0.09, 0.02);
         auto dyn = std::make_shared<Quad6DOFVarTimeRelativePred<double>>(pred);
-        dyn->setMass(MASS); dyn->setGravity(GRAVITY); dyn->setJb(J_B);
+        dyn->setMass(P.mass); dyn->setGravity(GRAVITY); dyn->setJb(J_B);
         auto row = makeCtcsConstraint<double>(dyn);
         if (row->getForm() != StcForm::Density || row->getDimC() != 1 ||
             row->numImplications() != 8)
@@ -27,9 +27,9 @@ int main() {
             u(0)=HOVER_THRUST*(1.0+0.2*unit(gen));
             for(int i=1;i<NU;++i) u(i)=0.002*unit(gen);
             u(IDX_THETA)=0.1+0.04*unit(gen);
-            const double density=evalCtcsIntegrand<double>(x,u)/CTCS_Y_SCALE;
+            const double density=evalCtcsIntegrand<double>(x,u)/P.ctcs_y_scale;
             const double integral=dyn->intervalIntegral(x,u);
-            const double row_value=row->c(x,u)(0)+CTCS_STEP_EPS/CTCS_Y_SCALE;
+            const double row_value=row->c(x,u)(0)+P.ctcs_step_eps/P.ctcs_y_scale;
             value_error=std::max(value_error,std::abs(row->density(x,u)-density)/(1.0+std::abs(density)));
             value_error=std::max(value_error,std::abs(row_value-integral)/(1.0+std::abs(integral)));
             const auto jx=row->cx(x,u); const auto ju=row->cu(x,u);
@@ -56,19 +56,19 @@ int main() {
             throw std::runtime_error("CTCS value/Jacobian parity failed");
         // Physical auditing uses the original implication, never the tightened
         // trigger or the historical grader's excluded switching band.
-        auto physical=makeCtcsConstraint<double>(dyn,CTCS_STEP_EPS/CTCS_Y_SCALE,IDX_THETA,0.,1,false);
+        auto physical=makeCtcsConstraint<double>(dyn,P.ctcs_step_eps/P.ctcs_y_scale,IDX_THETA,0.,1,false);
         const auto check=[&](bool ok,const char* message){if(!ok)throw std::runtime_error(message);};
         const auto index=[&](const char* name){for(int j=0;j<row->numImplications();++j)if(row->implication(j).name==name)return j;throw std::runtime_error("missing original implication");};
-        Eigen::VectorXd x=Eigen::VectorXd::Zero(NX_SS),u=Eigen::VectorXd::Zero(NU_SS);x(6)=1.;u(0)=HOVER_THRUST;u(IDX_THETA)=TH0;
-        if(CTCS_MARGINS.trigger>0.){
+        Eigen::VectorXd x=Eigen::VectorXd::Zero(NX_SS),u=Eigen::VectorXd::Zero(NU_SS);x(6)=1.;u(0)=HOVER_THRUST;u(IDX_THETA)=P.th0;
+        if(P.margins.trigger>0.){
             const int stage=index("staging"),los=index("los"),land=index("landing_speed");
-            x(0)=STAGE_RADIUS-.5*CTCS_MARGINS.trigger;x(2)=Z_STAGE+.05;
+            x(0)=P.stage_radius-.5*P.margins.trigger;x(2)=P.z_stage+.05;
             check(row->triggered(stage,x)&&!physical->triggered(stage,x),"staging preactivation has the wrong polarity");
-            x(0)=STAGE_RADIUS-CTCS_MARGINS.trigger-.01;
+            x(0)=P.stage_radius-P.margins.trigger-.01;
             check(!row->triggered(stage,x),"staging became always active");
-            x(2)=LOS_ALT_TRIG+.5*CTCS_MARGINS.trigger;
+            x(2)=P.los_alt_trig+.5*P.margins.trigger;
             check(row->triggered(los,x)&&!physical->triggered(los,x),"LOS audit uses the tightened trigger");
-            x(0)=.1;x(2)=ALT_TRIG+.5*CTCS_MARGINS.trigger;
+            x(0)=.1;x(2)=P.alt_trig+.5*P.margins.trigger;
             check(row->triggered(land,x)&&!physical->triggered(land,x),"landing audit uses the tightened trigger");
         }
         x.setZero();x(6)=.9;x(7)=.1;x(8)=.2;x(9)=.3;

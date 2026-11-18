@@ -571,7 +571,7 @@ int main(int argc,char** argv){try{
     }
     check(maxerr<1e-5,"dynamics Jacobians");
     x(2)=.45; x.segment<3>(3)<<.6,.4,-.5;
-    auto row=StcLandingNoAugOCP::makeCtcsConstraint<double>(dyn,StcLandingNoAugOCP::CTCS_STEP_EPS/StcLandingNoAugOCP::CTCS_Y_SCALE,-1,O::DT,O::substeps());
+    auto row=StcLandingNoAugOCP::makeCtcsConstraint<double>(dyn,StcLandingNoAugOCP::P.ctcs_step_eps/StcLandingNoAugOCP::P.ctcs_y_scale,-1,O::DT,O::substeps());
     auto cx=row->cx(x,u),cu=row->cu(x,u);
     double cerror=0;
     for(int j=0;j<O::NX+O::NU;++j){auto xp=x,xm=x,up=u,um=u;if(j<O::NX){xp(j)+=h;xm(j)-=h;}else{up(j-O::NX)+=h;um(j-O::NX)-=h;}
@@ -591,14 +591,14 @@ int main(int argc,char** argv){try{
         // The touchdown residual has a product of altitude and velocity.
         // Check GN curvature against its independent residual Jacobian.
         using R=StcLandingNoAugOCP::CTcSTCStageCost<double>;
-        const double weight=StcLandingNoAugOCP::W_TOUCH_VEL;
+        const double weight=StcLandingNoAugOCP::P.w_touch_vel;
         R full(1.,0.,0.,0.,Eigen::Vector3d::Zero());
         Eigen::VectorXd state=Eigen::VectorXd::Zero(StcLandingNoAugOCP::NX_SS);
         state(2)=.1;state(3)=.6;state(4)=-.3;state(5)=-.4;state(6)=1;
         const auto input=Eigen::VectorXd::Zero(StcLandingNoAugOCP::NU_SS);
-        const double touch=(StcLandingNoAugOCP::TOUCH_ALT-state(2))/StcLandingNoAugOCP::TOUCH_SCALE;
+        const double touch=(StcLandingNoAugOCP::P.touch_alt-state(2))/StcLandingNoAugOCP::P.touch_scale;
         Eigen::MatrixXd j=Eigen::MatrixXd::Zero(3,state.size());
-        j.block<3,1>(0,2)=-state.segment<3>(3)/StcLandingNoAugOCP::TOUCH_SCALE;
+        j.block<3,1>(0,2)=-state.segment<3>(3)/StcLandingNoAugOCP::P.touch_scale;
         j.block<3,3>(0,3)=touch*Eigen::Matrix3d::Identity();
         Eigen::MatrixXd expected=2*weight*j.transpose()*j;
         expected.block<3,3>(3,3).diagonal().array()+=2;
@@ -679,7 +679,7 @@ int main(int argc,char** argv){try{
     }
     planner_core::PlannerCoreConfig cfg;cfg.ocp_type="stc_landing_mpc";cfg.platform=planner_core::Platform::Mavros;cfg.enable_terminal_freeze=false;
     planner_core::DirectMpcController controller;controller.configure(cfg);
-    planner_core::PlannerCoreInput input;input.current_state=Eigen::VectorXd::Zero(13);input.current_state<<1.98,0,StcLandingNoAugOCP::Z_STAGE+0.3,0,0,0,1,0,0,0,0,0,0;
+    planner_core::PlannerCoreInput input;input.current_state=Eigen::VectorXd::Zero(13);input.current_state<<1.98,0,StcLandingNoAugOCP::P.z_stage+0.3,0,0,0,1,0,0,0,0,0,0;
     input.target_snapshot.valid=true;input.target_snapshot.position<<0,0,.2;
     input.now=std::chrono::steady_clock::now();auto started=input.now;controller.trySolve(input);
     check(std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()<.02,"submission blocks command loop");
@@ -718,7 +718,7 @@ int main(int argc,char** argv){try{
     cfg.ocp_type=type;
     planner_core::DirectMpcController moving;moving.configure(cfg);
     auto moving_pred=std::make_shared<StcLandingNoAugOCP::ConstantAccelPredictor>();O::Dynamics plant(moving_pred);
-    Eigen::VectorXd plant_state=O::Dynamics::initialState(Eigen::VectorXd::Zero(13),O::hover());plant_state(0)=-.6;plant_state(1)=-2;plant_state(2)=StcLandingNoAugOCP::Z_STAGE+.1;plant_state(6)=1;plant_state.tail(4)=O::hover();
+    Eigen::VectorXd plant_state=O::Dynamics::initialState(Eigen::VectorXd::Zero(13),O::hover());plant_state(0)=-.6;plant_state(1)=-2;plant_state(2)=StcLandingNoAugOCP::P.z_stage+.1;plant_state(6)=1;plant_state.tail(4)=O::hover();
     const Eigen::Vector3d target_velocity(.134,.435,0);plant_state.segment<3>(3)=-target_velocity;
     if(type=="landing_mpc") {
         // Viable cone start: match the moving target's velocity before
