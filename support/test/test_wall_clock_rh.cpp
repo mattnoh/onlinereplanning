@@ -23,7 +23,7 @@ int run(int argc,char**argv){try{
  std::vector<Saved> plans;plans.reserve(count);double planned_physical=0,planned_hard=0,native=0,native_ratio=0,dense_ratio=0,planned_all_obstacles=0,defect=0;std::map<std::string,double> planned_terms,executed_terms;double peak=0.,peak_time=0.;int peak_plan=-1;std::string peak_name;
  auto hard=[&](const Saved& p,const Vec& x,const Vec&u){double v=0.;for(auto type:{ConstraintType::NO,ConstraintType::SOC})for(const auto&row:p.problem->getStageConstraints(0,type)){
   if(std::dynamic_pointer_cast<StcStageConstraint<double>>(row))continue;const Vec c=row->c(x,u);if(c.size())v=std::max(v,type==ConstraintType::SOC?c(0)+c.tail(c.size()-1).norm():c.maxCoeff());}return v;};
- auto physical=[&](const Saved&p,const Vec&x,const Vec&u,std::map<std::string,double>&terms){double v=0.;if(quad){if(ctcs)for(int j=0;j<p.physical->numImplications();++j)if(p.physical->triggered(j,x)){const auto&im=p.physical->implication(j);const double c=im.consequence(x,u);v=std::max(v,c);if(&terms==&planned_terms&&c>peak){peak=c;peak_time=x(13);peak_plan=p.id;peak_name=im.name;}terms[im.name]=std::max(terms[im.name],c);}}else for(int j=0;j<NOBS;++j)if(p.p.mask[j]){double c=obstacleG(p.p,x.head<2>(),j);v=std::max(v,c);terms["active_obstacle_"+std::to_string(j)]=std::max(terms["active_obstacle_"+std::to_string(j)],c);}return v;};
+ auto physical=[&](const Saved&p,const Vec&x,const Vec&u,std::map<std::string,double>&terms){double v=0.;if(quad){if(ctcs)for(int j=0;j<p.physical->numImplications();++j)if(p.physical->triggered(j,x)){const auto&im=p.physical->implication(j);if(im.name=="los"&&x.head<3>().norm()<.05)continue;const double c=im.consequence(x,u);v=std::max(v,c);if(&terms==&planned_terms&&c>peak){peak=c;peak_time=x(13);peak_plan=p.id;peak_name=im.name;}terms[im.name]=std::max(terms[im.name],c);}}else for(int j=0;j<NOBS;++j)if(p.p.mask[j]){double c=obstacleG(p.p,x.head<2>(),j);v=std::max(v,c);terms["active_obstacle_"+std::to_string(j)]=std::max(terms["active_obstacle_"+std::to_string(j)],c);}return v;};
  auto density=[&](const Saved&p,const Vec&x,const Vec&u,int k){if(quad)return Q::evalCtcsIntegrand<double>(x,u,k>=Q::ctcsTightenFromNode())/Q::CTCS_STEP_EPS;double v=0.;for(int j=0;j<NOBS;++j)if(p.p.mask[j]){const double c=std::max(0.,obstacleG(p.p,x.head<2>(),j)+p.p.delta);v+=c*c/p.p.eps;}return v;};
  for(int z=0;z<count;++z){Saved p;p.id=z;int nx,nu;in>>p.epoch>>nx>>nu;for(int i=0;i<nx;++i)p.x.push_back(readvec(in));for(int i=0;i<nu;++i)p.u.push_back(readvec(in));
   OCPCreateArgs args;args.current_state=p.x.front();args.target_accel=acc;args.horizon=nu;args.t_abs=p.epoch;p.problem=desc->create(args);
@@ -175,7 +175,7 @@ int main(int argc,char** argv){try{
       const auto note=[&](const char* name,double value){if(value>max_physical_stc){max_physical_stc=value;peak_physical_term=name;peak_physical_time=sim;}};
       note("loose_tilt",terms.loose_tilt);note("loose_omega",terms.loose_omega);
       if(terms.a_stage>0)note("staging",StcLandingNoAugOCP::Z_STAGE-rel(2));
-      if(terms.a_los>0)note("los",terms.los);
+      if(terms.a_los>0&&rel.head<3>().norm()>=.05)note("los",terms.los);  // LOS not graded within 5 cm of the pad
       if(terms.a_altitude_state>0){note("landing_speed",terms.speed);note("landing_tilt",terms.tilt);note("landing_omega",terms.omega);note("glideslope",terms.glideslope);}
      }
      if(accepted.load()>0)reached=rel.head<3>().norm()<=.1&&rel.segment<3>(3).norm()<=.3;

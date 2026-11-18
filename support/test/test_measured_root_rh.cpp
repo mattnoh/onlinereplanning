@@ -453,6 +453,9 @@ int main(int argc,char** argv){try{
             double c=physical_stc->implication(j).consequence(x,u);
             // The row's LOS lateral distance is sqrt(lateral^2+1e-12) (a
             // derivative regulariser, 1e-6 m at the apex); grade the exact one.
+            // LOS is not graded within 5 cm of the pad (same as the SITL plan audit):
+            // the cone apex is on the pad, so touchdown makes it degenerate.
+            if(physical_stc->implication(j).name=="los"&&x.head<3>().norm()<.05)continue;
             if(physical_stc->implication(j).name=="los"){
                 const Eigen::Vector3d axis(2*(x(7)*x(9)+x(6)*x(8)),2*(x(8)*x(9)-x(6)*x(7)),x(6)*x(6)-x(7)*x(7)-x(8)*x(8)+x(9)*x(9));
                 const double axial=x.head<3>().dot(axis),lateral2=std::max(0.,x.head<3>().squaredNorm()-axial*axial);
