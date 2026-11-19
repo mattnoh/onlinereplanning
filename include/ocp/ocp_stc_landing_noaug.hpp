@@ -96,7 +96,6 @@ struct Params {
 //   wall_clock       non-SITL advancing-time quad CTCS
 //   wall_clock_node  non-SITL advancing-time quad NODE
 //   sitl             PX4/Gazebo measured-state replanning (all target motions)
-//   realtime_test    test_stc_landing_noaug
 inline Params preset(const std::string& name){
     Params p;
     if(name.empty()||name=="default")return p;
@@ -127,9 +126,6 @@ inline Params preset(const std::string& name){
         p.margins.path_tilt_deg=.5;p.margins.rate=.005;p.solver.mu=0.1;p.solver.rho=100.0;
         p.solver.rhoT=100;p.solver.max_iter=1200;p.ctcs_y_scale=2;p.scale_bounds=true;
         p.solver.muT=.1;p.margins.los=0.02;p.margins.stage_radius=.05;p.margins.stage_height=0.02;
-        return p;}
-    if(name=="realtime_test"){                      // test_stc_landing_noaug
-        p.horizon=30;p.thh=0.16;p.w_land_gs=20000;p.z_stage=1.3;p.los_alt_trig=1.3;p.solver.max_iter=30;
         return p;}
     if(name=="wall_clock_node"){
         p.horizon=40;p.thh=.16;p.solver.max_iter=120;

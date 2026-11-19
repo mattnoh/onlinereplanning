@@ -770,15 +770,6 @@ the original shared solver nor the active STC formulation was changed.
 
 The demanding matched near-cone benchmark is tracked in
 [the authoritative gate record](.Codex/comando-constraint-satisfaction-control.md).
-Run its production cold-start diagnostic after building `test_direct_mpc`:
-
-```sh
-env MPC_MAX_ITER=120 SZMUK_RH_N=40 SZMUK_SPD_STC_MAX=.25 \
-  SZMUK_TILT_STC_DEG=.1 SZMUK_OMEGA_STC_MAX=.019 SZMUK_GS_CONE_DEG=15 \
-  SZMUK_LOS_CONE_DEG=16 SZMUK_CTCS_STEP_EPS=1e-8 \
-  ./test_direct_mpc --open-loop landing_mpc
-# Then run the same command with landing_mpc_ctcs, sequentially.
-```
 
 The relative root is (.518,0,1.85), upright with zero relative velocity/rates.
 For the constant target (.455 m/s at heading .6), this is the measured world

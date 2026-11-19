@@ -352,7 +352,7 @@ int main(int argc,char** argv){try{
         }
         return captured_problem;
     };
-    // Exact nonzero measured-root SH control already recorded by test_controller.
+    // Exact nonzero measured-root SH control.
     const Eigen::Vector3d acceleration=quad&&!stationary_target?Eigen::Vector3d(.04306807449,.07358261346,0):Eigen::Vector3d::Zero();
     auto targetAt=[&](double t){TargetSnapshot target;target.valid=true;
         target.position=.5*acceleration*t*t;target.velocity=acceleration*t;target.acceleration=acceleration;return target;};
