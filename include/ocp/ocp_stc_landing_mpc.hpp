@@ -92,8 +92,18 @@ struct Params {
     std::string stage_trigger="radius";
     double slew_thrust_weight=0.1, slew_rate_weight=2.0, angular_rate_weight=0.0;  // direct-MPC command costs
     int mpc_max_iter=60, warm_iterations=8;
-    Param solver=[]{Param p;p.reg1_min=1e-3;p.reg2_min=0.1;p.mu_mul=0.1;p.rho=5;p.rhoT=5;p.rho_mul=10;p.tolerance=1e-6;
-        p.max_iter=180;p.verbose=false;p.is_quaternion_in_state=false;p.use_ddp_terms=false;return p;}();
+    Param solver=[]{
+        Param p;
+        p.max_iter = 180;
+        p.tolerance = 1e-6;
+        p.mu_mul = 0.1;
+        p.rho = 5;  p.rhoT = 5;  p.rho_mul = 10;
+        p.reg1_min = 1e-3;  p.reg2_min = 0.1;
+        p.verbose = false;
+        p.is_quaternion_in_state = false;
+        p.use_ddp_terms = false;
+        return p;
+    }();
 };
 // Validated configurations:
 //   default        code values
@@ -103,30 +113,44 @@ struct Params {
 inline Params preset(const std::string& name){
     Params p;
     if(name.empty()||name=="default")return p;
-    if(name=="mc"){
-        p.horizon=40;p.thh=.16;p.w_stage_target_xy=.2;p.w_stage_target_z=.2;p.w_stage_target_vel=.2;
-        p.w_land_speed=1000;p.w_land_tilt=100000;p.w_land_omega=100;p.w_land_gs=20000;
-        p.w_stc_los=1000;p.w_stc_stage=100;p.cap_desc_radius=.12;p.omega_stc_max=.012;
-        p.gs_cone_half_angle_deg=12;p.spd_stc_max=.5;p.los_cone_half_angle_deg=25;
-        p.los_alt_trig=1.2;p.los_trigger_floor=1;p.alt_trig=1.0;p.z_stage=1.5;
-        p.stage_trigger_floor=1;p.ctcs_step_eps=.00001;p.angular_rate_weight=1000;
-        p.slew_thrust_weight=.1;p.slew_rate_weight=2;p.solver.max_iter=120;p.mpc_max_iter=120;
-        p.warm_iterations=24;
-        return p;}
-    if(name=="mc_rerun_c1"){
-        p.horizon=40;p.thh=.16;p.w_stage_target_xy=.2;p.w_stage_target_z=.2;p.w_stage_target_vel=.2;
-        p.w_land_speed=1000;p.w_land_tilt=100000;p.w_land_omega=100;p.w_land_gs=20000;
-        p.w_stc_los=1000;p.w_stc_stage=100;p.cap_desc_radius=.12;p.theta_stc_deg=1.6;
-        p.omega_stc_max=.012;p.gs_cone_half_angle_deg=12;p.spd_stc_max=.5;
-        p.los_cone_half_angle_deg=25;p.los_alt_trig=1.2;p.los_trigger_floor=1;p.alt_trig=1.0;
-        p.z_stage=1.5;p.stage_trigger_floor=1;p.ctcs_step_eps=.00001;p.angular_rate_weight=1000;
-        p.slew_thrust_weight=.1;p.slew_rate_weight=2;p.solver.max_iter=120;p.mpc_max_iter=120;
-        p.warm_iterations=24;
-        return p;}
+    if(name=="mc"||name=="mc_rerun_c1"){
+        p.horizon = 40;
+        p.thh = 0.16;
+        // costs
+        p.w_stage_target_xy = 0.2;  p.w_stage_target_z = 0.2;  p.w_stage_target_vel = 0.2;
+        p.angular_rate_weight = 1000;
+        // CTCS density weights and budget
+        p.w_land_speed = 1000;
+        p.w_land_tilt  = 1e5;
+        p.w_land_omega = 100;
+        p.w_land_gs    = 20000;
+        p.w_stc_los    = 1000;
+        p.w_stc_stage  = 100;
+        p.ctcs_step_eps = 1e-5;
+        // bounds and triggers
+        p.omega_stc_max = 0.012;               // rad/s
+        p.spd_stc_max = 0.5;                   // m/s
+        p.gs_cone_half_angle_deg = 12;
+        p.los_cone_half_angle_deg = 25;
+        p.alt_trig = 1.0;                      // m
+        p.los_alt_trig = 1.2;                  // m
+        p.z_stage = 1.5;                       // m
+        p.los_trigger_floor = 1;
+        p.stage_trigger_floor = 1;
+        if(name=="mc_rerun_c1")p.theta_stc_deg = 1.6;  // looser landing tilt cap
+        // solver
+        p.solver.max_iter = 120;
+        p.mpc_max_iter = 120;
+        p.warm_iterations = 24;
+        return p;
+    }
     if(name=="direct_launch"){
-        p.w_land_gs=20000;p.los_alt_trig=1.2;p.z_stage=1.3;p.ctcs_step_eps=0.0016;
-        p.mpc_max_iter=120;p.ctcs_y_scale=10;
-        return p;}
+        p.w_land_gs = 20000;
+        p.los_alt_trig = 1.2;                  // m
+        p.z_stage = 1.3;                       // m
+        p.mpc_max_iter = 120;
+        return p;
+    }
     throw std::invalid_argument("unknown stc_landing_mpc preset: "+name);
 }
 // STC_MPC_PRESET selects the configuration for this process.

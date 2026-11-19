@@ -54,8 +54,18 @@ struct Params {
     double w_eps=1.0;            // stage velocity/rate regulariser
     bool feedback_warm_start=true;
     double max_feedback_du=0.05;  // largest accepted feedback warm-start correction
-    Param solver=[]{Param p;p.reg1_min=1e-3;p.reg2_min=0.1;p.mu_mul=0.1;p.rho=5;p.rhoT=5;p.rho_mul=10;p.tolerance=1e-6;
-        p.max_iter=180;p.verbose=false;p.is_quaternion_in_state=false;p.use_ddp_terms=false;return p;}();
+    Param solver=[]{
+        Param p;
+        p.max_iter = 180;
+        p.tolerance = 1e-6;
+        p.mu_mul = 0.1;
+        p.rho = 5;  p.rhoT = 5;  p.rho_mul = 10;
+        p.reg1_min = 1e-3;  p.reg2_min = 0.1;
+        p.verbose = false;
+        p.is_quaternion_in_state = false;
+        p.use_ddp_terms = false;
+        return p;
+    }();
 };
 // Validated configurations:
 //   default   code values (unit tests)
@@ -63,7 +73,12 @@ struct Params {
 inline Params preset(const std::string& name){
     Params p;
     if(name.empty()||name=="default")return p;
-    if(name=="campaign"){p.horizon=40;p.thh=0.16;p.solver.max_iter=120;return p;}
+    if(name=="campaign"){
+        p.horizon = 40;
+        p.thh = 0.16;
+        p.solver.max_iter = 120;
+        return p;
+    }
     throw std::invalid_argument("unknown landing_rh preset: "+name);
 }
 // LANDING_RH_PRESET selects the configuration for this process.

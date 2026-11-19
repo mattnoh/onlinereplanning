@@ -83,66 +83,131 @@ struct Params {
     double max_feedback_du=0.05;    // feedback warm start: largest accepted correction
     Param solver=solverDefaults();
     static Param solverDefaults(){
-        Param p;p.reg1_min=1e-3;p.reg2_min=0.1;p.mu_mul=0.1;
-        p.rho=5;p.rhoT=5;p.rho_mul=10;p.tolerance=1e-6;p.max_iter=180;
-        p.verbose=false;p.is_quaternion_in_state=false;p.use_ddp_terms=false;
+        Param p;
+        p.max_iter = 180;
+        p.tolerance = 1e-6;
+        p.mu_mul = 0.1;
+        p.rho = 5;  p.rhoT = 5;  p.rho_mul = 10;
+        p.reg1_min = 1e-3;  p.reg2_min = 0.1;
+        p.verbose = false;
+        p.is_quaternion_in_state = false;
+        p.use_ddp_terms = false;
         return p;
     }
 };
 
-// Validated configurations (see support/test/frozen_node_baseline.json):
-//   default          quad NODE frozen runs
-//   n80, n60         frozen quad CTCS (80 / 60 intervals)
-//   wall_clock       non-SITL advancing-time quad CTCS
+// ── Presets ───────────────────────────────────────────────────────────────────
+// Validated configurations (see support/test/frozen_node_baseline.json). Each
+// one states only how it differs from what it builds on.
+//   default          quad NODE frozen runs (the struct defaults above)
 //   wall_clock_node  non-SITL advancing-time quad NODE
+//   n80              frozen quad CTCS, 80 intervals   = ctcsBase()
+//   n60              frozen quad CTCS, 60 intervals   = n80 rescaled to 60
+//   wall_clock       non-SITL advancing-time quad CTCS
 //   sitl             PX4/Gazebo measured-state replanning (all target motions)
-inline Params preset(const std::string& name){
+
+// Shared by every CTCS preset: the interval rows carry the constraints, so
+// the touchdown/theta shaping costs are off and the density weights are high.
+inline Params ctcsBase(){
     Params p;
-    if(name.empty()||name=="default")return p;
-    if(name=="n80"){
-        p.horizon=80;p.term_w_pos_xy=100000;p.term_w_pos_z=10000;p.r_theta=0.0;p.w_touch_vel=0.0;
-        p.w_land_speed=100;p.w_land_tilt=300000000;p.w_land_omega=1000000;p.w_land_gs=7500;
-        p.w_stc_los=200;p.w_stc_stage=100;p.ctcs_step_eps=1e-05;p.w_eps=0.0;p.margins.trigger=.05;
-        p.margins.geometric=0.02;p.margins.speed=.05;p.margins.tilt_deg=.2;
-        p.margins.path_tilt_deg=.5;p.margins.rate=.005;p.solver.mu=0.1;p.solver.rho=100.0;
-        p.solver.rhoT=100;p.solver.max_iter=1200;p.ctcs_y_scale=0.5;p.scale_bounds=true;
-        p.solver.muT=.1;p.margins.los=0.02;p.margins.stage_radius=.05;p.margins.stage_height=0.02;
-        return p;}
-    if(name=="n60"){
-        p.horizon=60;p.th0=0.09333333333333334;p.thl=0.06666666666666667;p.thh=0.15999999999999998;
-        p.term_w_pos_xy=100000;p.term_w_pos_z=10000;p.r_theta=0.0;p.w_touch_vel=0.0;
-        p.w_land_speed=100;p.w_land_tilt=300000000;p.w_land_omega=1000000;p.w_land_gs=7500;
-        p.w_stc_los=200;p.w_stc_stage=100;p.ctcs_step_eps=1.3333333333333333e-05;p.w_eps=0.0;
-        p.margins.trigger=.05;p.margins.geometric=0.02;p.margins.speed=.05;p.margins.tilt_deg=.2;
-        p.margins.path_tilt_deg=.5;p.margins.rate=.005;p.solver.mu=0.1;p.solver.rho=50;
-        p.solver.rhoT=50;p.solver.max_iter=1200;p.ctcs_y_scale=5;p.scale_bounds=true;
-        p.solver.muT=.1;p.margins.los=0.02;p.margins.stage_radius=.05;p.margins.stage_height=0.02;
-        return p;}
-    if(name=="wall_clock"){
-        p.horizon=80;p.term_w_pos_xy=200000;p.term_w_pos_z=10000;p.r_theta=0.0;p.w_touch_vel=0.0;
-        p.w_land_speed=100;p.w_land_tilt=300000000;p.w_land_omega=1000000;p.w_land_gs=7500;
-        p.w_stc_los=200;p.w_stc_stage=100;p.ctcs_step_eps=1e-05;p.w_eps=0.0;p.margins.trigger=.05;
-        p.margins.geometric=0.02;p.margins.speed=.05;p.margins.tilt_deg=.2;
-        p.margins.path_tilt_deg=.5;p.margins.rate=.005;p.solver.mu=0.1;p.solver.rho=100.0;
-        p.solver.rhoT=100;p.solver.max_iter=1200;p.ctcs_y_scale=2;p.scale_bounds=true;
-        p.solver.muT=.1;p.margins.los=0.02;p.margins.stage_radius=.05;p.margins.stage_height=0.02;
-        return p;}
+    p.horizon = 80;
+    // costs
+    p.w_eps = 0.0;
+    p.r_theta = 0.0;
+    p.w_touch_vel = 0.0;
+    p.term_w_pos_xy = 1e5;
+    p.term_w_pos_z  = 1e4;
+    // CTCS density weights and per-interval budget
+    p.w_land_speed = 100;
+    p.w_land_tilt  = 3e8;
+    p.w_land_omega = 1e6;
+    p.w_land_gs    = 7500;
+    p.w_stc_los    = 200;
+    p.w_stc_stage  = 100;
+    p.ctcs_step_eps = 1e-5;
+    p.ctcs_y_scale  = 0.5;
+    p.scale_bounds  = true;
+    // optimizer margins inside the physical bounds
+    p.margins.trigger       = 0.05;  // m
+    p.margins.geometric     = 0.02;  // m
+    p.margins.speed         = 0.05;  // m/s
+    p.margins.tilt_deg      = 0.2;
+    p.margins.path_tilt_deg = 0.5;
+    p.margins.rate          = 0.005; // rad/s
+    p.margins.los           = 0.02;  // m
+    p.margins.stage_radius  = 0.05;  // m
+    p.margins.stage_height  = 0.02;  // m
+    // solver
+    p.solver.max_iter = 1200;
+    p.solver.mu  = 0.1;  p.solver.muT  = 0.1;
+    p.solver.rho = 100;  p.solver.rhoT = 100;
+    return p;
+}
+
+inline Params preset(const std::string& name){
+    if(name.empty()||name=="default")return Params{};
+
     if(name=="wall_clock_node"){
-        p.horizon=40;p.thh=.16;p.solver.max_iter=120;
-        return p;}
+        Params p;
+        p.horizon = 40;
+        p.thh = 0.16;
+        p.solver.max_iter = 120;
+        return p;
+    }
+
+    if(name=="n80")return ctcsBase();
+
+    if(name=="n60"){
+        // Same total horizon time as n80 with fewer, longer intervals.
+        Params p = ctcsBase();
+        const double s = 80.0/60;
+        p.horizon = 60;
+        p.th0 *= s;  p.thl *= s;  p.thh *= s;
+        p.ctcs_step_eps *= s;
+        p.ctcs_y_scale = 5;
+        p.solver.rho = 50;  p.solver.rhoT = 50;
+        return p;
+    }
+
+    if(name=="wall_clock"){
+        Params p = ctcsBase();
+        p.term_w_pos_xy = 2e5;
+        p.ctcs_y_scale = 2;
+        return p;
+    }
+
     if(name=="sitl"){
-        p.horizon=40;p.th0=0.13999999999999999;p.thl=0.06;p.thh=0.24;p.term_w_pos_xy=100000;
-        p.term_w_pos_z=10000;p.r_theta=0.0;p.w_touch_vel=0.0;p.w_land_speed=100;
-        p.w_land_tilt=300000000;p.w_land_omega=1000000;p.w_land_gs=7500;p.w_stc_los=200;
-        p.w_stc_stage=100;p.tilt_phase0_deg=8;p.omega_phase0_max=0.2;p.spd_phase0_max=2.0;
-        p.tilt_stc_deg=5;p.omega_stc_max=0.15;p.gs_cone_deg=31;p.gs_apex_offset=0.25;
-        p.spd_stc_max=1.0;p.los_cone_deg=57;p.los_alt_trig=1.5;p.stage_radius=1.2;
-        p.ctcs_step_eps=1.3333333333333333e-05;p.w_eps=0.0;p.margins.trigger=0.2;
-        p.margins.geometric=0.05;p.margins.speed=0.2;p.margins.tilt_deg=.2;
-        p.margins.path_tilt_deg=.5;p.margins.rate=0.06;p.margins.gs_angle_deg=3;p.solver.rho=50;
-        p.solver.rhoT=50;p.solver.max_iter=1200;p.ctcs_y_scale=5;p.scale_bounds=true;
-        p.solver.muT=.1;p.margins.los=0.09;p.margins.stage_radius=0.7;p.margins.stage_height=0.12;
-        return p;}
+        Params p = ctcsBase();
+        p.horizon = 40;
+        p.th0 = 0.14;  p.thl = 0.06;  p.thh = 0.24;
+        p.ctcs_step_eps *= 80.0/60;    // the n60 budget
+        p.ctcs_y_scale = 5;
+        p.solver.mu = 1.0;             // initial barrier (terminal stays 0.1)
+        p.solver.rho = 50;  p.solver.rhoT = 50;
+        // physical bounds sized for PX4 tracking
+        p.tilt_phase0_deg  = 8;
+        p.omega_phase0_max = 0.2;      // rad/s
+        p.spd_phase0_max   = 2.0;      // m/s
+        p.tilt_stc_deg     = 5;
+        p.omega_stc_max    = 0.15;     // rad/s
+        p.spd_stc_max      = 1.0;      // m/s
+        p.gs_cone_deg      = 31;
+        p.gs_apex_offset   = 0.25;     // m
+        p.los_cone_deg     = 57;
+        p.los_alt_trig     = 1.5;      // m
+        p.stage_radius     = 1.2;      // m
+        // wider optimizer margins to absorb tracking error
+        p.margins.trigger      = 0.2;
+        p.margins.geometric    = 0.05;
+        p.margins.speed        = 0.2;
+        p.margins.rate         = 0.06;
+        p.margins.gs_angle_deg = 3;
+        p.margins.los          = 0.09;
+        p.margins.stage_radius = 0.7;
+        p.margins.stage_height = 0.12;
+        return p;
+    }
+
     throw std::invalid_argument("unknown stc_landing_noaug preset: "+name);
 }
 // STC_PRESET selects the configuration for this process.
