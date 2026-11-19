@@ -184,23 +184,23 @@ inline Params preset(const std::string& name){
         p.ctcs_y_scale = 5;
         p.solver.mu = 1.0;             // initial barrier (terminal stays 0.1)
         p.solver.rho = 50;  p.solver.rhoT = 50;
-        // physical bounds sized for PX4 tracking
-        p.tilt_phase0_deg  = 8;
-        p.omega_phase0_max = 0.2;      // rad/s
+        // physical bounds: tightest set with clean flown plans in SITL (all 7 motions)
+        p.tilt_phase0_deg  = 6;
+        p.omega_phase0_max = 0.12;     // rad/s
         p.spd_phase0_max   = 2.0;      // m/s
-        p.tilt_stc_deg     = 5;
-        p.omega_stc_max    = 0.15;     // rad/s
+        p.tilt_stc_deg     = 4.5;
+        p.omega_stc_max    = 0.12;     // rad/s
         p.spd_stc_max      = 1.0;      // m/s
-        p.gs_cone_deg      = 31;
+        p.gs_cone_deg      = 25;
         p.gs_apex_offset   = 0.25;     // m
-        p.los_cone_deg     = 57;
+        p.los_cone_deg     = 40;
         p.los_alt_trig     = 1.5;      // m
         p.stage_radius     = 1.2;      // m
         // wider optimizer margins to absorb tracking error
         p.margins.trigger      = 0.2;
         p.margins.geometric    = 0.05;
         p.margins.speed        = 0.2;
-        p.margins.rate         = 0.06;
+        p.margins.rate         = 0.02;
         p.margins.gs_angle_deg = 3;
         p.margins.los          = 0.09;
         p.margins.stage_radius = 0.7;
