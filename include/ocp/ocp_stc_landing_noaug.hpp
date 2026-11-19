@@ -188,8 +188,8 @@ inline Params preset(const std::string& name){
         p.tilt_phase0_deg  = 6;
         p.omega_phase0_max = 0.12;     // rad/s
         p.spd_phase0_max   = 2.0;      // m/s
-        p.tilt_stc_deg     = 4.5;
-        p.omega_stc_max    = 0.12;     // rad/s
+        p.tilt_stc_deg     = 5;
+        p.omega_stc_max    = 0.15;     // rad/s
         p.spd_stc_max      = 1.0;      // m/s
         p.gs_cone_deg      = 25;
         p.gs_apex_offset   = 0.25;     // m
