@@ -126,18 +126,6 @@ def flight_stats(cell):
     if not rows:
         return out
     f = lambda r, k: float(r[k])
-    # Trim the force_disarm free-fall: the motor cut is not a tracking failure.
-    cut = len(rows)
-    for i in range(1, len(rows)):
-        dt = f(rows[i], "t_acc") - f(rows[i - 1], "t_acc")
-        if dt <= 0:
-            continue
-        if (f(rows[i], "rvz") - f(rows[i - 1], "rvz")) / dt < -6.0 and f(rows[i], "rz") < 0.4:
-            cut = i
-            break
-    rows = rows[:cut]
-    if not rows:
-        return out
     # Restrict to the DESCENT. moving_executed.csv covers the whole flight, and
     # during takeoff the drone sits on the ground far from the target -- rz is
     # then below alt_trig, so an alt_trig-only filter counts takeoff as landing
@@ -149,6 +137,18 @@ def flight_stats(cell):
             last_high = i
     if last_high is not None:
         rows = rows[last_high:]
+    # Trim the force_disarm free-fall: the motor cut is not a tracking failure.
+    # Searched only inside the descent; on the whole flight the takeoff
+    # transient (also rz < 0.4) matched first and left only takeoff to score.
+    cut = len(rows)
+    for i in range(1, len(rows)):
+        dt = f(rows[i], "t_acc") - f(rows[i - 1], "t_acc")
+        if dt <= 0:
+            continue
+        if (f(rows[i], "rvz") - f(rows[i - 1], "rvz")) / dt < -6.0 and f(rows[i], "rz") < 0.4:
+            cut = i
+            break
+    rows = rows[:cut]
     if not rows:
         return out
     pp = lambda v: v if v > 0 else 0.0
