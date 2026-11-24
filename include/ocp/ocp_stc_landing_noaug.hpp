@@ -59,10 +59,9 @@ struct Params {
     int horizon=30, nex=7;
     double th0=0.07, thl=0.05, thh=0.12;
     // Stage cost
-    double w_eps=1.0, w_pos_xy=0.0, w_pos_z=0.0, w_vel=0.0;
+    double w_eps=1.0;
     double stage_w_time=0.04, r_theta=10.0, theta_ref=0.10, r_ctrl_thr=2.0, r_ctrl_mom=0.6;
     double w_touch_vel=10.0, touch_alt=0.25, touch_scale=0.25;
-    double cap_cost_radius=0.50, k_cap=20.0, cap_desc_radius=0.12, k_desc=40.0;
     // Terminal cost
     double term_w_pos_xy=2500.0, term_w_pos_z=2500.0, term_w_vel_xy=900.0, term_w_vel_z=900.0;
     double term_w_tilt=200.0, term_w_om=50.0, term_vz_ref=0.0;
@@ -235,43 +234,6 @@ inline TriggerFloors triggerFloors(bool tightened){
     return {P.margins.trigger,
             std::max(P.los_trigger_floor,P.margins.trigger/P.los_trigger_scale),
             std::max(P.stage_trigger_floor,P.margins.stage_radius/P.stage_trigger_scale)};
-}
-
-// ── Sigmoid helpers ───────────────────────────────────────────────────────────
-template<typename Scalar>
-inline Scalar sigmaLandVal(const Scalar& rxy2) {
-    const Scalar g = Scalar(P.cap_cost_radius * P.cap_cost_radius) - rxy2;
-    return Scalar(0.5) * (Scalar(1) + std::tanh(Scalar(P.k_cap) * g));
-}
-
-template<typename Scalar>
-inline void sigmaLandGrad(const Scalar& rxy2, const Scalar& x0, const Scalar& x1,
-                          Scalar& sig, Scalar& gx0, Scalar& gx1) {
-    const Scalar g       = Scalar(P.cap_cost_radius * P.cap_cost_radius) - rxy2;
-    const Scalar th      = std::tanh(Scalar(P.k_cap) * g);
-    sig     = Scalar(0.5) * (Scalar(1) + th);
-    const Scalar dsig_dg = Scalar(0.5) * Scalar(P.k_cap) * (Scalar(1) - th * th);
-    gx0 = dsig_dg * Scalar(-2) * x0;
-    gx1 = dsig_dg * Scalar(-2) * x1;
-}
-
-template<typename Scalar>
-inline Scalar sigmaDescVal(const Scalar& rxy2, const Scalar& /*z*/) {
-    const Scalar g = Scalar(P.cap_desc_radius * P.cap_desc_radius) - rxy2;
-    return Scalar(0.5) * (Scalar(1) + std::tanh(Scalar(P.k_desc) * g));
-}
-
-template<typename Scalar>
-inline void sigmaDescGrad(const Scalar& rxy2, const Scalar& x0, const Scalar& x1,
-                          const Scalar& /*z*/,
-                          Scalar& sig, Scalar& gx0, Scalar& gx1, Scalar& gz) {
-    const Scalar g    = Scalar(P.cap_desc_radius * P.cap_desc_radius) - rxy2;
-    const Scalar th   = std::tanh(Scalar(P.k_desc) * g);
-    sig = Scalar(0.5) * (Scalar(1) + th);
-    const Scalar dsig = Scalar(0.5) * Scalar(P.k_desc) * (Scalar(1) - th * th);
-    gx0 = dsig * Scalar(-2) * x0;
-    gx1 = dsig * Scalar(-2) * x1;
-    gz  = Scalar(0);
 }
 
 template<typename Scalar>
@@ -599,35 +561,15 @@ inline int ctcsTightenFromNode(){return CTCS_TIGHTEN_FROM_NODE;}
 template<typename Scalar>
 class CTcSTCStageCost : public StageCostBase<Scalar> {
     Scalar eps_;
-    Scalar w_pos_xy_, w_pos_z_, w_vel_;
-    Scalar rf_x_, rf_y_, rf_z_;
 
 public:
-    CTcSTCStageCost(double eps, double w_pos_xy, double w_pos_z, double w_vel,
-                    const Eigen::Vector3d& r_follow)
-        : eps_(Scalar(eps)),
-          w_pos_xy_(Scalar(w_pos_xy)), w_pos_z_(Scalar(w_pos_z)),
-          w_vel_(Scalar(w_vel)),
-          rf_x_(Scalar(r_follow(0))), rf_y_(Scalar(r_follow(1))), rf_z_(Scalar(r_follow(2))) {}
+    explicit CTcSTCStageCost(double eps) : eps_(Scalar(eps)) {}
 
     Scalar q(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
-        const Scalar rxy2 = x(0)*x(0) + x(1)*x(1);
-        const Scalar sc   = sigmaLandVal(rxy2);
-        const Scalar sd   = sigmaDescVal(rxy2, x(2));
-
-        const Scalar rref_x = (Scalar(1) - sc) * rf_x_;
-        const Scalar rref_y = (Scalar(1) - sc) * rf_y_;
-        const Scalar rref_z = (Scalar(1) - sc) * rf_z_ + sc*(Scalar(1)-sd)*Scalar(P.z_stage);
-
-        const Scalar drx = x(0) - rref_x;
-        const Scalar dry = x(1) - rref_y;
-        const Scalar drz = x(2) - rref_z;
         const Scalar v2  = x.template segment<3>(3).squaredNorm();
         const Scalar touch_margin = (Scalar(P.touch_alt) - x(2)) / Scalar(P.touch_scale);
         const Scalar touch = touch_margin > Scalar(0) ? touch_margin : Scalar(0);
 
-        const Scalar pos_cost = w_pos_xy_*(drx*drx + dry*dry) + w_pos_z_*drz*drz;
-        const Scalar vel_cost = sd * w_vel_ * v2;
         const Scalar touch_vel_cost = Scalar(P.w_touch_vel) * touch * touch * v2;
         const Scalar reg      = eps_*(v2 + x.template segment<3>(10).squaredNorm());
 
@@ -639,54 +581,19 @@ public:
         const Scalar time_reg = Scalar(P.r_theta) * dTheta * dTheta;
 
         return Scalar(P.stage_w_time)*u(IDX_THETA) + time_reg + reg
-             + pos_cost + vel_cost + touch_vel_cost + ctrl_cost;
+             + touch_vel_cost + ctrl_cost;
     }
 
     Vector<Scalar> qx(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
         (void)u;
-        const Scalar rxy2 = x(0)*x(0) + x(1)*x(1);
-
-        Scalar sc, sc_gx0, sc_gx1;
-        sigmaLandGrad(rxy2, x(0), x(1), sc, sc_gx0, sc_gx1);
-
-        Scalar sd, sd_gx0, sd_gx1, sd_gz;
-        sigmaDescGrad(rxy2, x(0), x(1), x(2), sd, sd_gx0, sd_gx1, sd_gz);
-
-        const Scalar Zs    = Scalar(P.z_stage);
-        const Scalar rref_x = (Scalar(1) - sc) * rf_x_;
-        const Scalar rref_y = (Scalar(1) - sc) * rf_y_;
-        const Scalar rref_z = (Scalar(1) - sc) * rf_z_ + sc*(Scalar(1)-sd)*Zs;
-
-        const Scalar drx = x(0) - rref_x;
-        const Scalar dry = x(1) - rref_y;
-        const Scalar drz = x(2) - rref_z;
         const Scalar v2  = x.template segment<3>(3).squaredNorm();
         const Scalar touch_margin = (Scalar(P.touch_alt) - x(2)) / Scalar(P.touch_scale);
         const Scalar touch = touch_margin > Scalar(0) ? touch_margin : Scalar(0);
         const Scalar dtouch_dz = touch_margin > Scalar(0) ? -Scalar(1) / Scalar(P.touch_scale) : Scalar(0);
 
-        const Scalar ddrx_dx0 = Scalar(1) + sc_gx0 * rf_x_;
-        const Scalar ddrx_dx1 = sc_gx1 * rf_x_;
-        const Scalar ddry_dx0 = sc_gx0 * rf_y_;
-        const Scalar ddry_dx1 = Scalar(1) + sc_gx1 * rf_y_;
-
-        const Scalar ddrz_dx0 = sc_gx0*(rf_z_ - Zs*(Scalar(1)-sd)) + sc*sd_gx0*Zs;
-        const Scalar ddrz_dx1 = sc_gx1*(rf_z_ - Zs*(Scalar(1)-sd)) + sc*sd_gx1*Zs;
-        const Scalar ddrz_dz  = Scalar(1) + sc * sd_gz * Zs;
-
         Vector<Scalar> g = Vector<Scalar>::Zero(NX_SS);
-
-        g(0) = Scalar(2)*w_pos_xy_*(drx*ddrx_dx0 + dry*ddry_dx0)
-             + Scalar(2)*w_pos_z_ * drz * ddrz_dx0;
-        g(1) = Scalar(2)*w_pos_xy_*(drx*ddrx_dx1 + dry*ddry_dx1)
-             + Scalar(2)*w_pos_z_ * drz * ddrz_dx1;
-        g(2) = Scalar(2)*w_pos_z_ * drz * ddrz_dz;
-
-        g(0) += sd_gx0 * w_vel_ * v2;
-        g(1) += sd_gx1 * w_vel_ * v2;
-        g(2) += sd_gz  * w_vel_ * v2;
         g.template segment<3>(3) =
-            (Scalar(2)*eps_ + Scalar(2)*sd*w_vel_ + Scalar(2)*Scalar(P.w_touch_vel)*touch*touch)
+            (Scalar(2)*eps_ + Scalar(2)*Scalar(P.w_touch_vel)*touch*touch)
             * x.template segment<3>(3);
         g(2) += Scalar(2)*Scalar(P.w_touch_vel)*touch*dtouch_dz*v2;
         g.template segment<3>(10) = Scalar(2)*eps_ * x.template segment<3>(10);
@@ -707,40 +614,14 @@ public:
 
     Matrix<Scalar> qxx(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
         (void)u;
-        const Scalar rxy2 = x(0)*x(0) + x(1)*x(1);
-
-        Scalar sc, sc_gx0, sc_gx1;
-        sigmaLandGrad(rxy2, x(0), x(1), sc, sc_gx0, sc_gx1);
-        Scalar sd, sd_gx0, sd_gx1, sd_gz;
-        sigmaDescGrad(rxy2, x(0), x(1), x(2), sd, sd_gx0, sd_gx1, sd_gz);
-        const Scalar Zs = Scalar(P.z_stage);
         const Scalar touch_margin = (Scalar(P.touch_alt) - x(2)) / Scalar(P.touch_scale);
         const Scalar touch = touch_margin > Scalar(0) ? touch_margin : Scalar(0);
         const Scalar dtouch_dz = touch_margin > Scalar(0) ? -Scalar(1) / Scalar(P.touch_scale) : Scalar(0);
         const Scalar v2  = x.template segment<3>(3).squaredNorm();
 
-        const Scalar ddrx_dx0 = Scalar(1) + sc_gx0 * rf_x_;
-        const Scalar ddrx_dx1 = sc_gx1 * rf_x_;
-        const Scalar ddry_dx0 = sc_gx0 * rf_y_;
-        const Scalar ddry_dx1 = Scalar(1) + sc_gx1 * rf_y_;
-        const Scalar ddrz_dx0 = sc_gx0*(rf_z_ - Zs*(Scalar(1)-sd)) + sc*sd_gx0*Zs;
-        const Scalar ddrz_dx1 = sc_gx1*(rf_z_ - Zs*(Scalar(1)-sd)) + sc*sd_gx1*Zs;
-        const Scalar ddrz_dz  = Scalar(1) + sc * sd_gz * Zs;
-
         Matrix<Scalar> H = Matrix<Scalar>::Zero(NX_SS, NX_SS);
-
-        H(0,0) = Scalar(2)*w_pos_xy_*(ddrx_dx0*ddrx_dx0 + ddry_dx0*ddry_dx0)
-               + Scalar(2)*w_pos_z_*ddrz_dx0*ddrz_dx0;
-        H(1,1) = Scalar(2)*w_pos_xy_*(ddrx_dx1*ddrx_dx1 + ddry_dx1*ddry_dx1)
-               + Scalar(2)*w_pos_z_*ddrz_dx1*ddrz_dx1;
-        H(2,2) = Scalar(2)*w_pos_z_*ddrz_dz*ddrz_dz;
-        H(0,1) = H(1,0) = Scalar(2)*w_pos_xy_*(ddrx_dx0*ddrx_dx1 + ddry_dx0*ddry_dx1)
-                         + Scalar(2)*w_pos_z_*ddrz_dx0*ddrz_dx1;
-        H(0,2) = H(2,0) = Scalar(2)*w_pos_z_*ddrz_dx0*ddrz_dz;
-        H(1,2) = H(2,1) = Scalar(2)*w_pos_z_*ddrz_dx1*ddrz_dz;
-
         for (int i = 3;  i < 6;  ++i) {
-            H(i,i) = Scalar(2)*eps_ + Scalar(2)*sd*w_vel_
+            H(i,i) = Scalar(2)*eps_
                    + Scalar(2)*Scalar(P.w_touch_vel)*touch*touch;
             // Gauss-Newton curvature of sqrt(P.w_touch_vel)*touch(z)*v.
             // Its mixed block is 2*w*touch*dtouch*v, matching both diagonals.
@@ -1179,14 +1060,7 @@ inline std::shared_ptr<OptimalControlProblem<double>> create(
     const int tighten_from=ctcsTightenFromNode();
     auto cstep_physical = tighten_from>0 ?
         makeCtcsConstraint<double>(dyn, P.ctcs_step_eps / P.ctcs_y_scale, IDX_THETA, 0.0, ctcsPhysicalSubsteps(), false) : cstep;
-    const double eps_cost = P.w_eps;
-    const Eigen::Vector3d r_follow(0.0, 0.0, P.z_stage);
-    auto stage_cost = std::make_shared<CTcSTCStageCost<double>>(
-        eps_cost,
-        P.w_pos_xy,
-        P.w_pos_z,
-        P.w_vel,
-        r_follow);
+    auto stage_cost = std::make_shared<CTcSTCStageCost<double>>(P.w_eps);
 
     for (int k = 0; k < N; ++k) {
         problem->setStageDynamics(k, dyn);
