@@ -60,10 +60,6 @@ struct Params {
     double th0=0.07, thl=0.05, thh=0.12;
     // Stage cost
     double w_eps=1.0;
-    // Stage tracking of the pad (relative origin), integrated over each
-    // interval duration: theta*(w_pos_xy*|r_xy|^2 + w_pos_z*r_z^2 + w_vel*|v|^2).
-    // Objective only; the STC rows are unchanged.
-    double w_pos_xy=0.0, w_pos_z=0.0, w_vel=0.0;
     double stage_w_time=0.04, r_theta=10.0, theta_ref=0.10, r_ctrl_thr=2.0, r_ctrl_mom=0.6;
     double w_touch_vel=10.0, touch_alt=0.25, touch_scale=0.25;
     // Terminal cost
@@ -183,7 +179,7 @@ inline Params preset(const std::string& name){
         Params p = ctcsBase();
         p.horizon = 40;
         p.th0 = 0.14;  p.thl = 0.06;  p.thh = 0.24;
-        p.w_pos_xy = 0.1;  p.w_pos_z = 0.1;   // stage tracking of the pad
+        p.stage_w_time = 0.2;          // tuned on circling SITL
         p.ctcs_step_eps *= 80.0/60;    // the n60 budget
         p.ctcs_y_scale = 5;
         p.solver.mu = 1.0;             // initial barrier (terminal stays 0.1)
@@ -567,25 +563,10 @@ template<typename Scalar>
 class CTcSTCStageCost : public StageCostBase<Scalar> {
     Scalar eps_;
 
-    // Tracking density e(x) = w_xy|r_xy|^2 + w_z r_z^2 + w_v|v|^2 and its gradient.
-    static Scalar trackVal(const Vector<Scalar>& x) {
-        return Scalar(P.w_pos_xy)*(x(0)*x(0)+x(1)*x(1)) + Scalar(P.w_pos_z)*x(2)*x(2)
-             + Scalar(P.w_vel)*x.template segment<3>(3).squaredNorm();
-    }
-    static Vector<Scalar> trackGrad(const Vector<Scalar>& x) {
-        Vector<Scalar> g = Vector<Scalar>::Zero(NX_SS);
-        g(0) = Scalar(2*P.w_pos_xy)*x(0);
-        g(1) = Scalar(2*P.w_pos_xy)*x(1);
-        g(2) = Scalar(2*P.w_pos_z)*x(2);
-        g.template segment<3>(3) = Scalar(2*P.w_vel)*x.template segment<3>(3);
-        return g;
-    }
-
 public:
     explicit CTcSTCStageCost(double eps) : eps_(Scalar(eps)) {}
 
     Scalar q(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
-        const Scalar track = u(IDX_THETA)*trackVal(x);
         const Scalar v2  = x.template segment<3>(3).squaredNorm();
         const Scalar touch_margin = (Scalar(P.touch_alt) - x(2)) / Scalar(P.touch_scale);
         const Scalar touch = touch_margin > Scalar(0) ? touch_margin : Scalar(0);
@@ -601,7 +582,7 @@ public:
         const Scalar time_reg = Scalar(P.r_theta) * dTheta * dTheta;
 
         return Scalar(P.stage_w_time)*u(IDX_THETA) + time_reg + reg
-             + touch_vel_cost + ctrl_cost + track;
+             + touch_vel_cost + ctrl_cost;
     }
 
     Vector<Scalar> qx(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
@@ -617,15 +598,14 @@ public:
             * x.template segment<3>(3);
         g(2) += Scalar(2)*Scalar(P.w_touch_vel)*touch*dtouch_dz*v2;
         g.template segment<3>(10) = Scalar(2)*eps_ * x.template segment<3>(10);
-        g += u(IDX_THETA)*trackGrad(x);
 
         return g;
     }
 
     Vector<Scalar> qu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
+        (void)x;
         Vector<Scalar> g = Vector<Scalar>::Zero(NU_SS);
-        g(IDX_THETA) = Scalar(P.stage_w_time) + Scalar(2 * P.r_theta) * (u(IDX_THETA) - Scalar(P.theta_ref))
-                     + trackVal(x);
+        g(IDX_THETA) = Scalar(P.stage_w_time) + Scalar(2 * P.r_theta) * (u(IDX_THETA) - Scalar(P.theta_ref));
         g(0) = Scalar(2 * P.r_ctrl_thr) * (u(0) - Scalar(HOVER_THRUST));
         g(1) = Scalar(2 * P.r_ctrl_mom) * u(1);
         g(2) = Scalar(2 * P.r_ctrl_mom) * u(2);
@@ -634,6 +614,7 @@ public:
     }
 
     Matrix<Scalar> qxx(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
+        (void)u;
         const Scalar touch_margin = (Scalar(P.touch_alt) - x(2)) / Scalar(P.touch_scale);
         const Scalar touch = touch_margin > Scalar(0) ? touch_margin : Scalar(0);
         const Scalar dtouch_dz = touch_margin > Scalar(0) ? -Scalar(1) / Scalar(P.touch_scale) : Scalar(0);
@@ -650,11 +631,6 @@ public:
         }
         H(2,2) += Scalar(2)*Scalar(P.w_touch_vel)*dtouch_dz*dtouch_dz*v2;
         for (int i = 10; i < 13; ++i) H(i,i) = Scalar(2)*eps_;
-        const Scalar th = u(IDX_THETA);
-        H(0,0) += th*Scalar(2*P.w_pos_xy);
-        H(1,1) += th*Scalar(2*P.w_pos_xy);
-        H(2,2) += th*Scalar(2*P.w_pos_z);
-        for (int i = 3; i < 6; ++i) H(i,i) += th*Scalar(2*P.w_vel);
         return H;
     }
 
@@ -670,10 +646,8 @@ public:
     }
 
     Matrix<Scalar> qxu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
-        (void)u;
-        Matrix<Scalar> H = Matrix<Scalar>::Zero(NX_SS, NU_SS);
-        H.col(IDX_THETA) = trackGrad(x);
-        return H;
+        (void)x; (void)u;
+        return Matrix<Scalar>::Zero(NX_SS, NU_SS);
     }
 };
 
