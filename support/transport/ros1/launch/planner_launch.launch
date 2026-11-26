@@ -6,7 +6,7 @@
 
   <arg name="drone_name"                        default="px4_drone"/>
   <arg name="platform"                          default="mavros"/>
-  <arg name="solver"                            default="alipddp"/>
+  <arg name="solver"                            default="aligator"/>
   <arg name="enable_logging"                    default="true"/>
   <!-- Planner CSV run folders go here (not ~/.ros: roslaunch nodes run cwd-less). -->
   <arg name="log_dir"                           default="$(find comando_planner)/logs"/>

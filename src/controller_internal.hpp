@@ -1,10 +1,8 @@
 #pragma once
 // Private solver and RH/MPC runtime implementation. Tests may inspect these
 // internals; ROS adapters use the public Controller interface.
-#include "alipddp/alipddp.h"
-#include "dynamics/quad_6dof_target_frame.h"
+#include "ocp/aligator_ocp.hpp"
 #include "parameters.hpp"
-#include "optimal_control_problem.h"
 #include "planner_core/adapters.hpp"
 #include "planner_core/controller.hpp"
 #include "planner_core/types.hpp"
@@ -29,52 +27,8 @@
 #include <thread>
 #include <vector>
 
-// Evaluate the returned primal directly, independently of IPM slacks and
-// termination labels. This certifies the transcribed OCP, including its CTCS
-// epsilon allowance; it is not a certificate of unrelaxed physical STCs.
-struct PrimalAudit {
-    double constraints=0, dynamics=0;
-    bool feasible(double tolerance) const {
-        return std::isfinite(constraints)&&std::isfinite(dynamics)&&
-               constraints<=tolerance&&dynamics<=tolerance;
-    }
-};
-inline PrimalAudit auditPrimal(const OptimalControlProblem<double>& problem,
-    const std::vector<Eigen::VectorXd>& x,const std::vector<Eigen::VectorXd>& u,
-    const Param& parameters) {
-    const double invalid=std::numeric_limits<double>::infinity();
-    if(x.size()!=problem.getHorizon()+1||u.size()!=problem.getHorizon())return {invalid,invalid};
-    for(const auto& v:x)if(!v.allFinite())return {invalid,invalid};
-    for(const auto& v:u)if(!v.allFinite())return {invalid,invalid};
-    PrimalAudit result;
-    const auto residual=[](const Eigen::VectorXd& c,ConstraintType type){
-        if(!c.allFinite())return std::numeric_limits<double>::infinity();
-        if(c.size()==0)return 0.;
-        if(type==ConstraintType::SOC)return std::max(0.,c(0)+c.tail(c.size()-1).norm());
-        return type==ConstraintType::EQ?c.cwiseAbs().maxCoeff():std::max(0.,c.maxCoeff());
-    };
-    for(int k=0;k<problem.getHorizon();++k){
-        // Size against the stage dynamics: OCPs may seed only node 0 (hover),
-        // leaving later initial states empty.
-        const auto& dynamics=problem.getDynamics(k);
-        if(x[k].size()!=dynamics->getDimX()||u[k].size()!=dynamics->getDimU())return {invalid,invalid};
-        auto next=dynamics->f(x[k],u[k]);
-        if(next.size()!=x[k+1].size()||!next.allFinite())return {invalid,invalid};
-        if(parameters.is_quaternion_in_state){
-            const int q=parameters.quaternion_idx;
-            if(next.segment(q,4).dot(x[k+1].segment(q,4))<0)next.segment(q,4)*=-1;
-        }
-        result.dynamics=std::max(result.dynamics,(next-x[k+1]).lpNorm<Eigen::Infinity>());
-        for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
-            for(const auto& row:problem.getStageConstraints(k,type))
-                result.constraints=std::max(result.constraints,residual(row->c(x[k],u[k]),type));
-    }
-    for(auto type:{ConstraintType::NO,ConstraintType::SOC,ConstraintType::EQ})
-        for(const auto& row:problem.getTerminalConstraints(type))
-            result.constraints=std::max(result.constraints,residual(row->cT(x.back()),type));
-    result.dynamics=std::max(result.dynamics,(x.front()-problem.getInitialState(0)).lpNorm<Eigen::Infinity>());
-    return result;
-}
+using aligator_ocp::PrimalAudit;
+using aligator_ocp::auditPrimal;
 
 class OcpSolver {
 public:
@@ -161,9 +115,8 @@ private:
     std::vector<Eigen::MatrixXd> makeKshifted(int n_shift) const;
 
     Config                                         config_;
-    std::shared_ptr<OptimalControlProblem<double>> problem_;
-    std::shared_ptr<ALIPDDP<double>>               solver_;
-    Param                                          solver_params_;
+    std::shared_ptr<aligator_ocp::Ocp>             problem_;
+    aligator_ocp::SolverSettings                   solver_settings_;
 
     std::vector<Eigen::VectorXd> prev_X_;
     int next_horizon_ = 0;
@@ -323,8 +276,8 @@ public:
             reject(out, "not_configured", "PlannerCore is not configured");
             return out;
         }
-        if (config_.solver_type != "alipddp" || !mpc_) {
-            reject(out, "solver_unavailable", "ALIPDDP solver is unavailable");
+        if (config_.solver_type != "aligator" || !mpc_) {
+            reject(out, "solver_unavailable", "Aligator solver is unavailable");
             return out;
         }
         const auto frame_check = validateFrameContract(input.state_frame, config_.world_frame);
@@ -613,8 +566,8 @@ public:
             reject(out, "not_configured", "PlannerCore is not configured");
             return out;
         }
-        if (config_.solver_type != "alipddp" || !mpc_) {
-            reject(out, "solver_unavailable", "ALIPDDP solver is unavailable");
+        if (config_.solver_type != "aligator" || !mpc_) {
+            reject(out, "solver_unavailable", "Aligator solver is unavailable");
             return out;
         }
         const auto frame_check = validateFrameContract(input.state_frame, config_.world_frame);
@@ -700,7 +653,7 @@ private:
     };
 
     void rebuildSolver() {
-        if (config_.solver_type != "alipddp") {
+        if (config_.solver_type != "aligator") {
             mpc_.reset();
             return;
         }

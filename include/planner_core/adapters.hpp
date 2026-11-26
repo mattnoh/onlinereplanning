@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <string>
 
-#include "dynamics/quad_6dof_target_frame.h"
 #include "planner_core/types.hpp"
 
 namespace planner_core {

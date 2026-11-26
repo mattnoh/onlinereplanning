@@ -132,7 +132,7 @@ void testJumpDiagnostics() {
 }
 
 void testDynamicsConsistentSampling() {
-    for(const char* name:{"landing_rh","stc_landing_noaug"}) {
+    for(const char* name:{"stc_landing_noaug"}) {
         auto descriptor=OCPRegistry::getDescriptor(name);
         auto model=descriptor.make_model(Eigen::Vector3d(.05,-.03,0));
         auto x=Eigen::VectorXd::Zero(model.nx).eval();x(2)=2;x(6)=1;x(10)=.01;

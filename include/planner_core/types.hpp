@@ -14,8 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "optimal_control_problem.h"
-#include "alipddp/alipddp.h"
+#include "ocp/aligator_ocp.hpp"
 
 /// Snapshot of target state taken at solve time.
 /// Passed to transform_state, validate_target, post_process_result callbacks.
@@ -36,7 +35,7 @@ struct PlannerConfig {
     std::string drone_name = "gogogo";
     bool enable_logging = true;
     std::string platform = "crazyflie";
-    std::string solver_type = "alipddp";
+    std::string solver_type = "aligator";
     std::string mode = "";
 
     double hover_target_x = 0.0;
@@ -311,9 +310,8 @@ struct OCPDescriptor {
     std::function<Model(const Eigen::Vector3d&)> make_model;
 
     std::function<bool(const Eigen::VectorXd&)> feasible_start;
-    std::function<Param()> getSolverParams;
-    std::function<std::shared_ptr<OptimalControlProblem<double>>(const OCPCreateArgs&)>
-        create;
+    std::function<aligator_ocp::SolverSettings()> solver_settings;
+    std::function<std::shared_ptr<aligator_ocp::Ocp>(const OCPCreateArgs&)> create;
 };
 
 namespace planner_core {
@@ -385,7 +383,7 @@ struct PlannerDiagnostic {
 struct PlannerCoreConfig {
     std::string ocp_type;
     Platform platform = Platform::Crazyflie;
-    std::string solver_type = "alipddp";
+    std::string solver_type = "aligator";
     double ocp_dt = 0.05;
     int n_replay = 4;
     bool preserve_remaining_trajectory = false;
@@ -514,6 +512,6 @@ const OCPDescriptor& getDescriptor(const std::string&);
 double getDT(const std::string&);
 int getDefaultNReplay(const std::string&);
 double getDefaultMassKg(const std::string&);
-Param getSolverParams(const std::string&);
-std::shared_ptr<OptimalControlProblem<double>> create(const std::string&,const OCPCreateArgs&);
+aligator_ocp::SolverSettings getSolverSettings(const std::string&);
+std::shared_ptr<aligator_ocp::Ocp> create(const std::string&,const OCPCreateArgs&);
 }

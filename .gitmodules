@@ -1,0 +1,3 @@
+[submodule "third_party/ctcs_stc"]
+	path = third_party/ctcs_stc
+	url = /home/lab/projects/STC/multiquad_carrier_landing/src/solver/ddp/aligator

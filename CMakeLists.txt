@@ -10,42 +10,37 @@ set(COMANDO_ROS_VERSION "$ENV{ROS_VERSION}" CACHE STRING "0=standalone, 1=ROS1, 
 if(COMANDO_ROS_VERSION STREQUAL "")
   set(COMANDO_ROS_VERSION 0)
 endif()
-set(COMANDO_SOLVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ALIPDDP-main" CACHE PATH "ALIPDDP source directory")
+# Solver: Aligator (ProxDDP) built against this toolchain's Eigen/Boost (see
+# support/aligator/build_aligator.sh), and the CTCS/STC constraint header repo.
+set(COMANDO_ALIGATOR_PREFIX "$ENV{HOME}/opt/aligator-sys" CACHE PATH "Aligator install prefix")
+foreach(pkg aligator fmt mimalloc)
+  set(${pkg}_DIR ${COMANDO_ALIGATOR_PREFIX}/lib/cmake/${pkg} CACHE PATH "")
+endforeach()
 find_package(Eigen3 REQUIRED)
 find_package(Threads REQUIRED)
-add_subdirectory(${COMANDO_SOLVER_DIR} ${CMAKE_CURRENT_BINARY_DIR}/alipddp)
+find_package(aligator REQUIRED)
+set(CTCS_STC_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CTCS_STC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/ctcs_stc ${CMAKE_CURRENT_BINARY_DIR}/ctcs_stc)
 add_library(planner_core STATIC src/ocp_registry.cpp src/controller.cpp)
 target_include_directories(planner_core PUBLIC include config ${EIGEN3_INCLUDE_DIR})
-target_link_libraries(planner_core PUBLIC alipddp_library Threads::Threads)
+target_link_libraries(planner_core PUBLIC ctcs_stc::ctcs_stc aligator::aligator Threads::Threads)
 target_compile_options(planner_core PRIVATE -Wall -Wextra -Wpedantic)
-option(COMANDO_BUILD_ANALYSIS "Build dense trajectory constraint audit" OFF)
-if(COMANDO_BUILD_ANALYSIS)
- add_executable(constraint_audit support/tools/analysis/constraint_audit.cpp)
- target_link_libraries(constraint_audit PRIVATE planner_core)
- add_executable(stc_preset_bounds support/tools/analysis/stc_preset_bounds.cpp)
- target_link_libraries(stc_preset_bounds PRIVATE planner_core)
-endif()
+# libaligator carries RUNPATH=$ORIGIN only; executables find its deps here.
+set(CMAKE_BUILD_RPATH ${COMANDO_ALIGATOR_PREFIX}/lib)
+set(CMAKE_INSTALL_RPATH ${COMANDO_ALIGATOR_PREFIX}/lib)
 option(COMANDO_BUILD_TESTS "Build focused core/OCP tests" OFF)
 if(COMANDO_BUILD_TESTS)
  enable_testing()
- foreach(name trajectory_replayer planner_core)
-  set(test_source support/test/test_${name}.cpp)
-  add_executable(test_${name} ${test_source})
+ foreach(name trajectory_replayer aligator_ocp wall_clock_rh)
+  add_executable(test_${name} support/test/test_${name}.cpp)
   target_include_directories(test_${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(test_${name} PRIVATE planner_core)
   target_compile_options(test_${name} PRIVATE -UNDEBUG)
+ endforeach()
+ foreach(name trajectory_replayer aligator_ocp)
   add_test(NAME ${name} COMMAND test_${name})
  endforeach()
- add_executable(test_measured_root_rh support/test/test_measured_root_rh.cpp)
- target_include_directories(test_measured_root_rh PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
- target_compile_definitions(test_measured_root_rh PRIVATE COMANDO_POINTMASS_REFERENCE_SOURCE="${COMANDO_SOLVER_DIR}/problem_examples/uzun2024_ctcs_mpc.cpp")
- target_link_libraries(test_measured_root_rh PRIVATE planner_core)
- add_executable(test_wall_clock_rh support/test/test_wall_clock_rh.cpp)
- target_include_directories(test_wall_clock_rh PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
- target_compile_definitions(test_wall_clock_rh PRIVATE COMANDO_POINTMASS_REFERENCE_SOURCE="${COMANDO_SOLVER_DIR}/problem_examples/uzun2024_ctcs_mpc.cpp")
- target_link_libraries(test_wall_clock_rh PRIVATE planner_core)
- add_test(NAME measured_root_initial_guess_contract COMMAND test_measured_root_rh --root-consistency)
- add_test(NAME ordinary_node_family_contract COMMAND test_measured_root_rh --ordinary-node-contract)
 endif()
 if(COMANDO_ROS_VERSION STREQUAL "1")
  find_package(catkin REQUIRED COMPONENTS roscpp tf2_ros geometry_msgs nav_msgs trajectory_msgs mavros_msgs)
@@ -97,73 +92,4 @@ elseif(COMANDO_ROS_VERSION STREQUAL "2")
  install(DIRECTORY ${transport_dir}/launch/ DESTINATION share/${PROJECT_NAME}/launch)
  install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
  ament_package()
-endif()
-
-# Read-only saved-policy diagnostics against an explicitly selected historical DDP.
-option(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC "Build saved-policy CTCS evaluator" OFF)
-set(COMANDO_POINT_MASS_DDP_SOURCE "" CACHE PATH "Historical point-mass DDP source root")
-if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC)
- if(NOT EXISTS "${COMANDO_POINT_MASS_DDP_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
-  message(FATAL_ERROR "Set COMANDO_POINT_MASS_DDP_SOURCE to the recorded DDP checkout")
- endif()
- add_executable(point_mass_saved_policy
-  support/test/uzun2024_ctcs_mpc/point_mass_saved_policy.cpp
-  ${COMANDO_POINT_MASS_DDP_SOURCE}/alipddp/alipddp/alipddp.cpp
-  ${COMANDO_POINT_MASS_DDP_SOURCE}/problem_maker/optimal_control_problem.cpp)
- target_include_directories(point_mass_saved_policy PRIVATE
-  ${COMANDO_POINT_MASS_DDP_SOURCE}/alipddp
-  ${COMANDO_POINT_MASS_DDP_SOURCE}/problem_maker)
- target_link_libraries(point_mass_saved_policy PRIVATE Eigen3::Eigen)
- target_compile_definitions(point_mass_saved_policy PRIVATE
-  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_POINT_MASS_DDP_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
-endif()
-
-if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC)
- add_executable(point_mass_nonaug_trace support/test/uzun2024_ctcs_mpc/point_mass_nonaug_trace.cpp)
- target_link_libraries(point_mass_nonaug_trace PRIVATE alipddp_library)
- target_compile_definitions(point_mass_nonaug_trace PRIVATE
-  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_SOLVER_DIR}/problem_examples/point_mass_ctcs_compare.cpp")
- add_executable(point_mass_matched_ddp support/test/uzun2024_ctcs_mpc/point_mass_matched_ddp.cpp)
- target_link_libraries(point_mass_matched_ddp PRIVATE alipddp_library)
- target_compile_definitions(point_mass_matched_ddp PRIVATE
-  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_SOLVER_DIR}/problem_examples/point_mass_ctcs_compare.cpp")
- add_executable(point_mass_2x2_ddp support/test/uzun2024_ctcs_mpc/point_mass_2x2_ddp.cpp)
- target_link_libraries(point_mass_2x2_ddp PRIVATE alipddp_library)
- target_compile_definitions(point_mass_2x2_ddp PRIVATE
-  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_SOLVER_DIR}/problem_examples/point_mass_ctcs_compare.cpp")
-endif()
-
-# Optional isolated snapshot with logging-only factorization instrumentation.
-set(COMANDO_POINT_MASS_FACTORIZATION_SOURCE "" CACHE PATH "Instrumented snapshot; never the live solver")
-if(COMANDO_BUILD_POINT_MASS_DIAGNOSTIC AND COMANDO_POINT_MASS_FACTORIZATION_SOURCE)
- add_executable(point_mass_factorization_trace
-  support/test/uzun2024_ctcs_mpc/point_mass_nonaug_trace.cpp
-  ${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/alipddp/alipddp/alipddp.cpp
-  ${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/problem_maker/optimal_control_problem.cpp)
- target_include_directories(point_mass_factorization_trace PRIVATE
-  ${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/alipddp
-  ${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/problem_maker)
- target_link_libraries(point_mass_factorization_trace PRIVATE Eigen3::Eigen)
- target_compile_definitions(point_mass_factorization_trace PRIVATE
-  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_POINT_MASS_FACTORIZATION_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
-endif()
-
-# Research-only old-SOC baseline. It never replaces the production library.
-option(COMANDO_BUILD_SOLVER_ABLATION "Build isolated old-SOC regression targets" OFF)
-set(COMANDO_SOLVER_ABLATION_SOURCE "" CACHE PATH "Frozen old-SOC research source")
-if(COMANDO_BUILD_SOLVER_ABLATION)
- if(NOT EXISTS "${COMANDO_SOLVER_ABLATION_SOURCE}/snapshot_manifest.json")
-  message(FATAL_ERROR "Provide an explicitly prepared old-SOC snapshot")
- endif()
- add_library(alipddp_old_soc STATIC
-  ${COMANDO_SOLVER_ABLATION_SOURCE}/alipddp/alipddp/alipddp.cpp
-  ${COMANDO_SOLVER_ABLATION_SOURCE}/problem_maker/optimal_control_problem.cpp)
- target_include_directories(alipddp_old_soc PUBLIC
-  ${COMANDO_SOLVER_ABLATION_SOURCE}/alipddp
-  ${COMANDO_SOLVER_ABLATION_SOURCE}/problem_maker)
- target_link_libraries(alipddp_old_soc PUBLIC Eigen3::Eigen)
- add_executable(point_mass_old_soc_trace support/test/uzun2024_ctcs_mpc/point_mass_nonaug_trace.cpp)
- target_link_libraries(point_mass_old_soc_trace PRIVATE alipddp_old_soc)
- target_compile_definitions(point_mass_old_soc_trace PRIVATE
-  POINT_MASS_DIAGNOSTIC_SOURCE="${COMANDO_SOLVER_ABLATION_SOURCE}/problem_examples/point_mass_ctcs_compare.cpp")
 endif()

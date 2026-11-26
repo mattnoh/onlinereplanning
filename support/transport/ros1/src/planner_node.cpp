@@ -18,7 +18,6 @@
 #include "planner_logging.hpp"
 #include "planner_core/controller.hpp"
 #include "hover_controller.hpp"
-#include "ocp/ocp_landing_rh.hpp"
 
 #include <chrono>
 #include <memory>
@@ -433,7 +432,7 @@ private:
     }
 
     void rebuildMpcSolver() {
-        if (solver_type_ != "alipddp") return;
+        if (solver_type_ != "aligator") return;
         planner_core::PlannerCoreConfig core_cfg;
         core_cfg.world_frame=world_frame_;
         core_cfg.ocp_type                = ocp_type_;
@@ -538,9 +537,10 @@ private:
             auto hold=getCurrentState();const auto target=getTargetSnapshot();
             if(target.valid) {
                 const auto now=Clock::now();const double h=prep_last_==Clock::time_point{}?.05:std::clamp(std::chrono::duration<double>(now-prep_last_).count(),.001,.1);
-                const auto& limits=LandingRhOCP::P;  // ordinary landing tilt/rate limits
-                const double acceleration_limit=.6*9.81*std::tan(limits.tilt_scale*limits.tilt_max_deg*M_PI/180);
-                const double jerk_limit=.5*9.81*limits.omega_max;
+                // Reference limits of the cone preparation: 0.95 deg tilt, 0.019 rad/s.
+                constexpr double tilt_deg=.95,omega_max=.019;
+                const double acceleration_limit=.6*9.81*std::tan(tilt_deg*M_PI/180);
+                const double jerk_limit=.5*9.81*omega_max;
                 const double jerk=prep_last_==Clock::time_point{}?0:(target.acceleration-prep_last_accel_).head<2>().norm()/h;
                 if(!prep_filter_&&(target.acceleration.head<2>().norm()>acceleration_limit||jerk>jerk_limit)) {
                     prep_filter_=true;prep_position_=hold.head<3>();prep_velocity_=hold.segment<3>(3);prep_acceleration_.setZero();

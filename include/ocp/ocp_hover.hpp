@@ -1,272 +1,140 @@
-// ocp_hover.hpp
+/// @file ocp_hover.hpp
+/// @brief World-frame hover / go-to ("hover"), ProxDDP. Used for SITL staging.
 #pragma once
 
-#include <Eigen/Dense>
-#include <memory>
-#include <cmath>
-#include "optimal_control_problem.h"
-#include "alipddp/alipddp.h"
+#include "ocp/aligator_ocp.hpp"
 #include "planner_core/types.hpp"
+
+#include <Eigen/Dense>
+#include <cmath>
+#include <memory>
 
 namespace HoverOCP {
 
-inline constexpr int HORIZON=100, DEFAULT_N_REPLAY=4;
-inline constexpr double DT=0.05;
-inline constexpr double MASS=0.0282, DEFAULT_MASS_KG=MASS;
-inline constexpr double IXX=1.66e-5, IYY=1.66e-5, IZZ=2.92e-5;
-inline const double J_SCALE=1.0/IXX;
-inline const Eigen::Matrix3d INERTIA=(Eigen::Matrix3d()<<IXX*J_SCALE,0,0,0,IYY*J_SCALE,0,0,0,IZZ*J_SCALE).finished();
-inline constexpr double FMAX=0.42, FMIN=0.08;
-inline constexpr double W_POS_STAGE=15, W_VEL_STAGE=20, W_ATT_STAGE=2.0, W_ANGRATE_STAGE=5.0;
-inline constexpr double W_THRUST=0.1, W_MOMENT=0.1;
-inline constexpr double TERM_POS_WEIGHT=600, TERM_VEL_WEIGHT=100, TERM_ATT_WEIGHT=200, TERM_ANGRATE_WEIGHT=100;
-inline Param getSolverParams(){
-    Param p;p.reg1_min=1e-6;p.reg2_min=1;p.mu_mul=0.1;p.rho=20;p.rho_mul=9;p.tolerance=1e-3;p.max_iter=200;
-    p.is_quaternion_in_state=false;return p;
+using aligator_ocp::V;
+using aligator_ocp::M;
+namespace quad = aligator_ocp::quad;
+
+inline constexpr int HORIZON = 100, DEFAULT_N_REPLAY = 4, NX = 13, NU = 4;
+inline constexpr double DT = 0.05;
+inline constexpr double MASS = 0.0282, DEFAULT_MASS_KG = MASS;
+inline constexpr double IXX = 1.66e-5, IYY = 1.66e-5, IZZ = 2.92e-5;
+inline constexpr double FMAX = 0.42, FMIN = 0.08;
+inline constexpr double W_POS = 15, W_VEL = 20, W_ATT = 2.0, W_RATE = 5.0, W_THRUST = 0.1, W_MOMENT = 0.1;
+inline constexpr double T_POS = 600, T_VEL = 100, T_ATT = 200, T_RATE = 100;
+inline constexpr double COST_SCALE = 1e-2;
+
+inline aligator_ocp::SolverSettings solverSettings() {
+    aligator_ocp::SolverSettings s;
+    s.tol = 1e-3;
+    s.mu_init = 0.1;
+    s.max_iters = 200;
+    s.accept_tol = 1e-3;
+    return s;
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Stage cost – penalises tracking error and control effort
-// ─────────────────────────────────────────────────────────────────
-template <typename Scalar>
-class StageCost : public StageCostBase<Scalar> {
-private:
- Eigen::Vector3d target_pos_;
- Eigen::Vector3d target_vel_;
-
-public:
- StageCost(const Eigen::Vector3d& target_pos,
-    const Eigen::Vector3d& target_vel = Eigen::Vector3d::Zero())
- : target_pos_(target_pos), target_vel_(target_vel) {}
-
- Scalar q(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- Eigen::Vector3d pos = x.template segment<3>(0);
- Eigen::Vector3d vel = x.template segment<3>(3);
- Eigen::Vector3d omega = x.template segment<3>(10);
- Scalar q0 = x(6);
- Eigen::Vector3d qv = x.template segment<3>(7);
-
- Scalar att_err = qv.squaredNorm() + (1.0 - q0) * (1.0 - q0);
-
- Scalar fz = u(0);
- Eigen::Vector3d m = u.template segment<3>(1);
-
- return W_POS_STAGE * (pos - target_pos_).squaredNorm()
- + W_VEL_STAGE * (vel - target_vel_).squaredNorm()
- + W_ATT_STAGE * att_err
- + W_ANGRATE_STAGE * omega.squaredNorm()
- + W_THRUST * fz * fz
- + W_MOMENT * m.squaredNorm();
- }
-
- Vector<Scalar> qx(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)u;
- Vector<Scalar> g = Vector<Scalar>::Zero(x.size());
-
- g.template segment<3>(0) = 2.0 * W_POS_STAGE * (x.template segment<3>(0).eval() - target_pos_);
- g.template segment<3>(3) = 2.0 * W_VEL_STAGE * (x.template segment<3>(3).eval() - target_vel_);
-
- Scalar q0 = x(6);
- Eigen::Vector3d qv = x.template segment<3>(7);
- g(6) = -2.0 * W_ATT_STAGE * (1.0 - q0);
- g.template segment<3>(7) = 2.0 * W_ATT_STAGE * qv;
-
- g.template segment<3>(10) = 2.0 * W_ANGRATE_STAGE * x.template segment<3>(10);
-
- return g;
- }
-
- Vector<Scalar> qu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x;
- Vector<Scalar> g = Vector<Scalar>::Zero(u.size());
- g(0) = 2.0 * W_THRUST * u(0);
- g.template segment<3>(1) = 2.0 * W_MOMENT * u.template segment<3>(1);
- return g;
- }
-
- Matrix<Scalar> qxx(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x; (void)u;
- Matrix<Scalar> H = Matrix<Scalar>::Zero(x.size(), x.size());
-
- H.template block<3,3>(0,0) = 2.0 * W_POS_STAGE * Matrix<Scalar>::Identity(3,3);
- H.template block<3,3>(3,3) = 2.0 * W_VEL_STAGE * Matrix<Scalar>::Identity(3,3);
- H(6,6) = 2.0 * W_ATT_STAGE;
- H.template block<3,3>(7,7) = 2.0 * W_ATT_STAGE * Matrix<Scalar>::Identity(3,3);
- H.template block<3,3>(10,10) = 2.0 * W_ANGRATE_STAGE * Matrix<Scalar>::Identity(3,3);
-
- return H;
- }
-
- Matrix<Scalar> quu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x; (void)u;
- Matrix<Scalar> H = Matrix<Scalar>::Zero(u.size(), u.size());
- H(0, 0) = 2.0 * W_THRUST;
- H.template block<3,3>(1,1) = 2.0 * W_MOMENT * Matrix<Scalar>::Identity(3,3);
- return H;
- }
-
- Matrix<Scalar> qxu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x; (void)u;
- return Matrix<Scalar>::Zero(x.size(), u.size());
- }
+/// x_{k+1}: one RK4 step of DT, quaternion renormalised. 13 states, 4 controls.
+struct Dynamics : aligator::ExplicitDynamicsModelTpl<double> {
+    using Base = aligator::ExplicitDynamicsModelTpl<double>;
+    using Data = aligator::ExplicitDynamicsDataTpl<double>;
+    quad::Body body{MASS, IXX, IYY, IZZ};
+    explicit Dynamics(const aligator_ocp::Space& s) : Base(s, NU) {}
+    V next(const V& x, const V& u) const {
+        const Eigen::Vector3d a = Eigen::Vector3d::Zero();
+        const V k1 = quad::xdot(body, x, u, a), k2 = quad::xdot(body, x + 0.5 * DT * k1, u, a),
+                k3 = quad::xdot(body, x + 0.5 * DT * k2, u, a), k4 = quad::xdot(body, x + DT * k3, u, a);
+        V xn = x + DT / 6.0 * (k1 + 2 * k2 + 2 * k3 + k4);
+        xn.segment<4>(6).normalize();
+        return xn;
+    }
+    void forward(const ConstVectorRef& x, const ConstVectorRef& u, Data& d) const override { d.xnext_ = next(x, u); }
+    void dForward(const ConstVectorRef& xx, const ConstVectorRef& uu, Data& d) const override {
+        const V x = xx, u = uu;
+        const Eigen::Vector3d a = Eigen::Vector3d::Zero();
+        const M I = M::Identity(NX, NX);
+        const double h = DT;
+        const V k1 = quad::xdot(body, x, u, a), x2 = x + 0.5 * h * k1, k2 = quad::xdot(body, x2, u, a),
+                x3 = x + 0.5 * h * k2, k3 = quad::xdot(body, x3, u, a), x4 = x + h * k3, k4 = quad::xdot(body, x4, u, a);
+        const M A1 = quad::A(body, x, u), A2 = quad::A(body, x2, u), A3 = quad::A(body, x3, u), A4 = quad::A(body, x4, u);
+        const M B1 = quad::B(body, x), B2 = quad::B(body, x2), B3 = quad::B(body, x3), B4 = quad::B(body, x4);
+        const M d2x = A2 * (I + 0.5 * h * A1), d3x = A3 * (I + 0.5 * h * d2x), d4x = A4 * (I + h * d3x);
+        const M d2u = A2 * (0.5 * h * B1) + B2, d3u = A3 * (0.5 * h * d2u) + B3, d4u = A4 * (h * d3u) + B4;
+        const Eigen::Vector4d qr = (x + h / 6.0 * (k1 + 2 * k2 + 2 * k3 + k4)).segment<4>(6);
+        const double n = qr.norm();
+        M N = I;
+        N.block<4, 4>(6, 6) = (Eigen::Matrix4d::Identity() - qr * qr.transpose() / (n * n)) / n;
+        d.Jx() = N * (I + h / 6.0 * (A1 + 2 * d2x + 2 * d3x + d4x));
+        d.Ju() = N * (h / 6.0 * (B1 + 2 * d2u + 2 * d3u + d4u));
+    }
 };
 
-// ─────────────────────────────────────────────────────────────────
-// Terminal cost – strong penalty on all states
-// ─────────────────────────────────────────────────────────────────
-template <typename Scalar>
-class TerminalCost : public TerminalCostBase<Scalar> {
-private:
- Eigen::Vector3d target_pos_;
- Eigen::Vector3d target_vel_;
-
-public:
- TerminalCost(const Eigen::VectorXd& target_state)
- : target_pos_(target_state.segment<3>(0)),
-  target_vel_(target_state.segment<3>(3))
- {}
-
- Scalar p(const Vector<Scalar>& x) const override {
- Eigen::Vector3d pos = x.template segment<3>(0);
- Eigen::Vector3d vel = x.template segment<3>(3);
- Scalar q0 = x(6);
- Eigen::Vector3d qv = x.template segment<3>(7);
- Eigen::Vector3d omega = x.template segment<3>(10);
-
- Scalar att_err = qv.squaredNorm() + (1.0 - q0) * (1.0 - q0);
-
- return TERM_POS_WEIGHT * (pos - target_pos_).squaredNorm()
- + TERM_VEL_WEIGHT * (vel - target_vel_).squaredNorm()
- + TERM_ATT_WEIGHT * att_err
- + TERM_ANGRATE_WEIGHT * omega.squaredNorm();
- }
-
- Vector<Scalar> px(const Vector<Scalar>& x) const override {
- Vector<Scalar> grad = Vector<Scalar>::Zero(x.size());
-
- grad.template segment<3>(0) = 2.0 * TERM_POS_WEIGHT * (x.template segment<3>(0) - target_pos_);
- grad.template segment<3>(3) = 2.0 * TERM_VEL_WEIGHT * (x.template segment<3>(3) - target_vel_);
-
- Scalar q0 = x(6);
- Eigen::Vector3d qv = x.template segment<3>(7);
- grad(6) = -2.0 * TERM_ATT_WEIGHT * (1.0 - q0);
- grad.template segment<3>(7) = 2.0 * TERM_ATT_WEIGHT * qv;
-
- grad.template segment<3>(10) = 2.0 * TERM_ANGRATE_WEIGHT * x.template segment<3>(10);
-
- return grad;
- }
-
- Matrix<Scalar> pxx(const Vector<Scalar>& x) const override {
- (void)x;
- Matrix<Scalar> H = Matrix<Scalar>::Zero(x.size(), x.size());
-
- H.template block<3,3>(0,0) = 2.0 * TERM_POS_WEIGHT * Matrix<Scalar>::Identity(3,3);
- H.template block<3,3>(3,3) = 2.0 * TERM_VEL_WEIGHT * Matrix<Scalar>::Identity(3,3);
- H(6,6) = 2.0 * TERM_ATT_WEIGHT;
- H.template block<3,3>(7,7) = 2.0 * TERM_ATT_WEIGHT * Matrix<Scalar>::Identity(3,3);
- H.template block<3,3>(10,10) = 2.0 * TERM_ANGRATE_WEIGHT * Matrix<Scalar>::Identity(3,3);
-
- return H;
- }
+/// Quadratic tracking of a world target state; attitude error |q_v|^2 + (1 - q_w)^2.
+struct Cost : aligator::CostAbstractTpl<double> {
+    using Base = aligator::CostAbstractTpl<double>;
+    using Data = aligator::CostDataAbstractTpl<double>;
+    V wx = V::Zero(NX), ref = V::Zero(NX), wu = V::Zero(NU);
+    Cost(const aligator_ocp::Space& s, const V& target, bool terminal) : Base(s, terminal ? 0 : NU) {
+        const double p = terminal ? T_POS : W_POS, v = terminal ? T_VEL : W_VEL, q = terminal ? T_ATT : W_ATT,
+                     w = terminal ? T_RATE : W_RATE;
+        wx << p, p, p, v, v, v, q, q, q, q, w, w, w;
+        wx *= COST_SCALE;
+        ref.head<6>() = target.head<6>();
+        ref(6) = 1.0;
+        if (!terminal) wu << W_THRUST, W_MOMENT, W_MOMENT, W_MOMENT;
+        wu *= COST_SCALE;
+    }
+    void evaluate(const ConstVectorRef& x, const ConstVectorRef& u, Data& d) const override {
+        d.value_ = (wx.array() * (x - ref).array().square()).sum();
+        if (u.size()) d.value_ += (wu.array() * u.array().square()).sum();
+    }
+    void computeGradients(const ConstVectorRef& x, const ConstVectorRef& u, Data& d) const override {
+        d.Lx_ = 2 * wx.cwiseProduct(x - ref);
+        if (u.size()) d.Lu_ = 2 * wu.cwiseProduct(u);
+    }
+    void computeHessians(const ConstVectorRef&, const ConstVectorRef& u, Data& d) const override {
+        d.Lxx_ = (2 * wx).asDiagonal();
+        d.Lxu_.setZero();
+        if (u.size()) d.Luu_ = (2 * wu).asDiagonal();
+    }
 };
 
-// ─────────────────────────────────────────────────────────────────
-// Max thrust constraint (inequality)
-// ─────────────────────────────────────────────────────────────────
-template <typename Scalar>
-class MaxThrustConstraint : public StageConstraintBase<Scalar> {
-private:
- Scalar fmax_;
-public:
- MaxThrustConstraint(Scalar fmax = FMAX) : fmax_(fmax) {
- this->constraint_type = ConstraintType::NO;
- this->dim_c = 1;
- }
-
- Vector<Scalar> c(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x;
- Vector<Scalar> c_n(1);
- c_n(0) = u(0) - fmax_;
- return c_n;
- }
-
- Matrix<Scalar> cx(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x; (void)u;
- return Matrix<Scalar>::Zero(1, x.size());
- }
-
- Matrix<Scalar> cu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x; (void)u;
- Matrix<Scalar> J = Matrix<Scalar>::Zero(1, u.size());
- J(0, 0) = 1.0;
- return J;
- }
+/// FMIN <= f_z <= fmax, as rows scaled by the range.
+struct Thrust : aligator::StageFunctionTpl<double> {
+    using Base = aligator::StageFunctionTpl<double>;
+    using Data = aligator::StageFunctionDataTpl<double>;
+    double fmax;
+    explicit Thrust(double f) : Base(NX, NU, 2), fmax(f) {}
+    void evaluate(const ConstVectorRef&, const ConstVectorRef& u, Data& d) const override {
+        d.value_ << (FMIN - u(0)) / (fmax - FMIN), (u(0) - fmax) / (fmax - FMIN);
+    }
+    void computeJacobians(const ConstVectorRef&, const ConstVectorRef&, Data& d) const override {
+        d.Jx_.setZero();
+        d.Ju_.setZero();
+        d.Ju_(0, 0) = -1 / (fmax - FMIN);
+        d.Ju_(1, 0) = 1 / (fmax - FMIN);
+    }
 };
 
-// ─────────────────────────────────────────────────────────────────
-// Min thrust constraint (inequality) – a quad cannot push downward
-// ─────────────────────────────────────────────────────────────────
-template <typename Scalar>
-class MinThrustConstraint : public StageConstraintBase<Scalar> {
-public:
- MinThrustConstraint() {
- this->constraint_type = ConstraintType::NO;
- this->dim_c = 1;
- }
- Vector<Scalar> c(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x; Vector<Scalar> c_n(1); c_n(0) = FMIN - u(0); return c_n;
- }
- Matrix<Scalar> cx(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x; (void)u; return Matrix<Scalar>::Zero(1, x.size());
- }
- Matrix<Scalar> cu(const Vector<Scalar>& x, const Vector<Scalar>& u) const override {
- (void)x; (void)u;
- Matrix<Scalar> J = Matrix<Scalar>::Zero(1, u.size()); J(0,0) = -1.0; return J;
- }
-};
-
-// ─────────────────────────────────────────────────────────────────
-// Factory function: creates a hover problem with given target
-// ─────────────────────────────────────────────────────────────────
-inline std::shared_ptr<OptimalControlProblem<double>> create(
- const Eigen::VectorXd& current_state,
- const Eigen::VectorXd& terminal_state,
- double fmax = FMAX)
-{
- auto prob = std::make_shared<OptimalControlProblem<double>>(HORIZON);
-
- auto dyn = std::make_shared<Quad6DOF<double>>();
- dyn->setMass(MASS);
- dyn->setGravity(Eigen::Vector3d(0.0, 0.0, -9.81));
- dyn->setJb(INERTIA);
- dyn->setDt(DT);
- for (int i = 0; i < HORIZON; ++i)
- prob->setStageDynamics(i, dyn);
-
- Eigen::Vector3d target_pos = terminal_state.segment<3>(0);
- Eigen::Vector3d target_vel = terminal_state.segment<3>(3);
- auto stage_cost = std::make_shared<StageCost<double>>(target_pos, target_vel);
- for (int i = 0; i < HORIZON; ++i)
- prob->setStageCost(i, stage_cost);
-
- prob->setTerminalCost(std::make_shared<TerminalCost<double>>(terminal_state));
-
- auto mt = std::make_shared<MaxThrustConstraint<double>>(fmax);
- auto fmin = std::make_shared<MinThrustConstraint<double>>();
- for (int i = 0; i < HORIZON; ++i) {
- prob->addStageConstraint(i, mt);
- prob->addStageConstraint(i, fmin);
- }
-
- prob->setInitialState(0, current_state);
-
- Eigen::VectorXd u0(4);
- u0 << MASS * 9.81, 0.0, 0.0, 0.0;
- for (int i = 0; i < HORIZON; ++i)
- prob->setInitialControl(i, u0);
-
- return prob;
+inline std::shared_ptr<aligator_ocp::Ocp> create(const V& current_state, const V& terminal_state, double fmax = FMAX) {
+    aligator_ocp::Space space(NX);
+    const Dynamics dyn(space);
+    const Cost stage_cost(space, terminal_state, false), terminal(space, terminal_state, true);
+    std::vector<xyz::polymorphic<aligator_ocp::StageModel>> stages;
+    for (int k = 0; k < HORIZON; ++k) {
+        aligator_ocp::StageModel stage(stage_cost, dyn);
+        stage.addConstraint(Thrust(fmax), aligator_ocp::Orthant());
+        stages.emplace_back(stage);
+    }
+    const V x0 = current_state.head(NX);
+    auto ocp = std::make_shared<aligator_ocp::Ocp>();
+    ocp->problem = std::make_shared<aligator_ocp::Problem>(x0, stages, terminal);
+    ocp->step = [dyn](const V& x, const V& u) { return dyn.next(x, u); };
+    V u0(NU);
+    u0 << MASS * 9.81, 0, 0, 0;
+    ocp->us.assign(HORIZON, u0);
+    ocp->xs.assign(HORIZON + 1, x0);
+    for (int k = 0; k < HORIZON; ++k) ocp->xs[k + 1] = dyn.next(ocp->xs[k], u0);
+    return ocp;
 }
 
 inline OCPDescriptor descriptor() {
@@ -277,11 +145,12 @@ inline OCPDescriptor descriptor() {
     d.default_mass_kg = DEFAULT_MASS_KG;
     d.warm_start = OCPDescriptor::WarmStart::Shift;
     d.command_mode = OCPDescriptor::CommandMode::CmdFullState;
-    d.world_acceleration=[](const Eigen::VectorXd& x,const Eigen::VectorXd& u) {
-        if(x.size()<13||u.size()<1||!x.allFinite()||!u.allFinite())throw std::invalid_argument("invalid DDP acceleration input");
-        Eigen::Quaterniond q(x(6),x(7),x(8),x(9));
-        if(q.norm()<1e-8)throw std::invalid_argument("invalid DDP attitude");
-        return Eigen::Vector3d(q.normalized()*Eigen::Vector3d(0,0,u(0)/MASS)+Eigen::Vector3d(0,0,-9.81));
+    d.world_acceleration = [](const V& x, const V& u) {
+        if (x.size() < 13 || u.size() < 1 || !x.allFinite() || !u.allFinite())
+            throw std::invalid_argument("invalid DDP acceleration input");
+        Eigen::Quaterniond q(x(6), x(7), x(8), x(9));
+        if (q.norm() < 1e-8) throw std::invalid_argument("invalid DDP attitude");
+        return Eigen::Vector3d(q.normalized() * Eigen::Vector3d(0, 0, u(0) / MASS) + Eigen::Vector3d(0, 0, -9.81));
     };
     d.coordinates = OCPDescriptor::Coordinates::World;
     d.state_dim = 13;
@@ -291,11 +160,9 @@ inline OCPDescriptor descriptor() {
     d.control_names = OCPLoggerDefaults::getControlNames4D();
     d.extract_actual_state_row = OCPLoggerDefaults::getActualStateRow13D;
     d.make_hover_state = OCPLoggerDefaults::makeHoverState13D;
-    d.getSolverParams = getSolverParams;
-    d.create = [](const OCPCreateArgs& a) {
-        return create(a.current_state, a.terminal_state);
-    };
+    d.solver_settings = solverSettings;
+    d.create = [](const OCPCreateArgs& a) { return create(a.current_state, a.terminal_state); };
     return d;
 }
 
-} // namespace HoverOCP
+}  // namespace HoverOCP

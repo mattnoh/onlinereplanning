@@ -70,7 +70,7 @@ using namespace std;
 
 OcpSolver::OcpSolver(const Config& config) : config_(config) {
     try {
-        solver_params_ = descriptor().getSolverParams();
+        solver_settings_ = descriptor().solver_settings();
     } catch (const std::runtime_error& e) {
         std::cerr << "ERROR: " << e.what() << "\n";
         throw;
@@ -161,7 +161,7 @@ std::vector<Eigen::VectorXd> OcpSolver::makeXshifted(int n_shift) const {
         if(source<Nx)xs[i]=prev_X_[source];
         else if(problem_&&!prev_U_.empty()){
             const auto& previous=i==0?prev_X_.back():xs[i-1];
-            xs[i]=problem_->getDynamics(problem_->getHorizon()-1)->f(previous,prev_U_.back());
+            xs[i]=problem_->step(previous,problem_->toSolver(prev_U_.back()));
         }else xs[i]=prev_X_.back();
     }
     return xs;
@@ -182,7 +182,6 @@ std::vector<Eigen::MatrixXd> OcpSolver::makeKshifted(int n_shift) const {
 
 void OcpSolver::setupProblem(const OCPCreateArgs& args) {
     try {
-        solver_.reset();
         problem_ = descriptor().create(args);
     } catch (const std::runtime_error& e) {
         std::cerr << "ERROR: " << e.what() << "\n";
@@ -253,29 +252,34 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
 
         setupProblem(args);
 
-        // Each measured-root request starts fresh IP/AL numerical state.
-        solver_ = make_shared<ALIPDDP<double>>(*problem_);
-        solver_->init(solver_params_);
-        solver_->solve();
+        // Each measured-root request starts a fresh ProxDDP (no multiplier or
+        // penalty state carried between solves).
+        auto solver = aligator_ocp::makeSolver(solver_settings_);
+        solver->setup(*problem_->problem);
+        const bool flag = solver->run(*problem_->problem, problem_->xs, problem_->us);
+        const auto& r = solver->results_;
 
-        auto X_result = solver_->getResX();
-        auto U_result = solver_->getResU();
-        auto K_result = solver_->getResK();
-        result.primal = auditPrimal(*problem_,X_result,U_result,solver_params_);
-        result.termination = solver_->getTerminationReason();
-        result.optimality_error = solver_->getOptError();
-        result.converged = result.termination == "Optimal Solution" &&
-            std::isfinite(result.optimality_error) &&
-            result.optimality_error <= solver_params_.tolerance &&
-            result.primal.feasible(solver_params_.tolerance);
+        std::vector<Eigen::VectorXd> X_result(r.xs.begin(), r.xs.end());
+        std::vector<Eigen::VectorXd> U_result, U_solver(r.us.begin(), r.us.end());
+        std::vector<Eigen::MatrixXd> K_result;
+        for (std::size_t k = 0; k < U_solver.size(); ++k) {
+            U_result.push_back(problem_->toPhysical(U_solver[k]));
+            // Feedback in physical units: du_phys = diag(scale) K dx.
+            const Eigen::VectorXd one = Eigen::VectorXd::Ones(U_solver[k].size());
+            const Eigen::VectorXd scale = problem_->toPhysical(one) - problem_->toPhysical(0 * one);
+            K_result.push_back(scale.asDiagonal() * Eigen::MatrixXd(r.getFeedback(k)));
+        }
+        result.primal = auditPrimal(*problem_, X_result, U_solver);
+        result.termination = flag ? "converged" : "max_iters_or_stalled";
+        result.optimality_error = r.dual_infeas;
+        result.converged = flag && result.primal.feasible(solver_settings_.accept_tol);
 
         const auto t_finish = chrono::steady_clock::now();
         result.solve_finish_time = t_finish;
-        result.solve_time_ms = chrono::duration<double, milli>(
-            t_finish - t0).count();
+        result.solve_time_ms = chrono::duration<double, milli>(t_finish - t0).count();
         result.solve_timestamp = result.solve_start_time;
-        result.constraint_error = solver_->getError();
-        result.solve_iters = static_cast<int>(solver_->getAllCost().size());
+        result.constraint_error = std::max(result.primal.constraints, result.primal.dynamics);
+        result.solve_iters = static_cast<int>(r.num_iters);
         result.extra_params = extra_params;
         last_solve_ms_ = result.solve_time_ms;
 
@@ -290,7 +294,7 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
             result.state_trajectory = X_result;
             result.control_trajectory = U_result;
             result.feedback_gains = K_result;
-            result.success = result.primal.feasible(solver_params_.tolerance);
+            result.success = result.primal.feasible(solver_settings_.accept_tol);
             if(!result.success)std::cerr<<"[MPC] infeasible returned primal: constraints="
                 <<result.primal.constraints<<" dynamics="<<result.primal.dynamics
                 <<" termination="<<result.termination<<"\n";
@@ -325,7 +329,6 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
 void OcpSolver::setTerminalState(const Eigen::VectorXd& terminal) {
     if (terminal.size() > 0) {
         config_.terminal_state = terminal;
-        solver_.reset();
         prev_U_.clear();
         prev_X_.clear();
         prev_K_.clear();
