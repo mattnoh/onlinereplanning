@@ -48,6 +48,9 @@ struct SolverSettings {
     bool verbose = false;
     int step_acceptance = 0;  // 0 nonmonotone line search, 1 Armijo, 2 filter
     double reg_init = 1e-9, reg_min = 1e-10;  // primal regularisation (ProxDDP defaults)
+    int ls_mode = 0;             // 0 primal merit, 1 primal-dual merit
+    int multiplier_update = 0;   // 0 Newton, 1 primal, 2 primal-dual
+    double dual_weight = 1.0, mu_update_factor = 0.01;
 };
 
 /// One solve's problem. Controls in `us` and in the solver are in SOLVER units;
@@ -253,6 +256,11 @@ inline std::unique_ptr<aligator::context::SolverProxDDP> makeSolver(const Solver
         s.exact_hessian ? aligator::HessianApprox::EXACT : aligator::HessianApprox::GAUSS_NEWTON);
     solver->max_al_iters = s.max_al_iters;
     solver->rollout_type_ = s.nonlinear_rollout ? aligator::RolloutType::NONLINEAR : aligator::RolloutType::LINEAR;
+    solver->ls_mode = s.ls_mode ? aligator::LinesearchMode::PRIMAL_DUAL : aligator::LinesearchMode::PRIMAL;
+    solver->multiplier_update_mode = s.multiplier_update == 1 ? aligator::MultiplierUpdateMode::PRIMAL
+        : s.multiplier_update == 2 ? aligator::MultiplierUpdateMode::PRIMAL_DUAL : aligator::MultiplierUpdateMode::NEWTON;
+    solver->dual_weight = s.dual_weight;
+    solver->bcl_params.mu_update_factor = s.mu_update_factor;
     solver->reg_init = s.reg_init;
     solver->reg_min = s.reg_min;
     solver->preg_ = s.reg_init;

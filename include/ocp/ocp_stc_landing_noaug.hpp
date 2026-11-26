@@ -231,11 +231,10 @@ inline TriggerFloors triggerFloors(bool tightened) {
 constexpr int CTCS_TIGHTEN_FROM_NODE = 4;
 constexpr int CTCS_PHYSICAL_SUBSTEPS = 8;
 
-/// How the conditional rules enter the OCP (the 100-IC arms).
+/// How the conditional rules enter the OCP.
 enum class Enforcement {
     Interval,  ///< one interval-integral row per stage (the method)
-    Node,      ///< nodal [-g]_+ c <= 0 per implication (Szmuk 2018)
-    Penalty    ///< the same interval integral as a stage cost, no row
+    Node       ///< nodal [-g]_+ c <= 0 per implication (Szmuk 2018)
 };
 
 using ConstantAccelPredictor = target_models::ConstantAccelPredictor;
@@ -391,19 +390,15 @@ inline ctcs_stc::Spec<double> landingRules(bool tightened, ctcs_stc::Form form, 
 
 // ── Costs ─────────────────────────────────────────────────────────────────────
 /// cost_scale (w_t theta + r_theta (theta - theta_ref)^2 + r_thr (f - mg)^2 + r_mom |M|^2)
-/// [+ w_pen * interval integral of the rules, Enforcement::Penalty only]
 struct StageCost : aligator::CostAbstractTpl<double> {
     using Base = aligator::CostAbstractTpl<double>;
     using Data = aligator::CostDataAbstractTpl<double>;
     quad::ControlScaling s = scaling();
-    std::shared_ptr<const ctcs_stc::Spec<double>> penalty;  // optional
-    double w_pen = 0.0;
     explicit StageCost(const aligator_ocp::Space& sp) : Base(sp, NU_SS) {}
     void evaluate(const ConstVectorRef& x, const ConstVectorRef& uu, Data& d) const override {
         const V u = s.physical(uu);
         d.value_ = P.cost_scale * (P.stage_w_time * u(IDX_THETA) + P.r_theta * std::pow(u(IDX_THETA) - P.theta_ref, 2) +
                                    P.r_ctrl_thr * std::pow(u(0) - HOVER_THRUST, 2) + P.r_ctrl_mom * u.segment<3>(1).squaredNorm());
-        if (penalty) d.value_ += w_pen * (penalty->c(V(x), V(uu))(0) + 1.0);  // w_pen sum w I / eps
     }
     void computeGradients(const ConstVectorRef& x, const ConstVectorRef& uu, Data& d) const override {
         const V u = s.physical(uu);
@@ -413,10 +408,6 @@ struct StageCost : aligator::CostAbstractTpl<double> {
         d.Lu_.segment<3>(1) = 2 * P.r_ctrl_mom * u.segment<3>(1);
         d.Lu_(IDX_THETA) = P.stage_w_time + 2 * P.r_theta * (u(IDX_THETA) - P.theta_ref);
         d.Lu_ = P.cost_scale * d.Lu_.cwiseProduct(s.scale);
-        if (penalty) {
-            d.Lx_ += w_pen * penalty->cx(V(x), V(uu)).row(0).transpose();
-            d.Lu_ += w_pen * penalty->cu(V(x), V(uu)).row(0).transpose();
-        }
     }
     void computeHessians(const ConstVectorRef& x, const ConstVectorRef& uu, Data& d) const override {
         d.Lxx_.setZero();
@@ -426,12 +417,6 @@ struct StageCost : aligator::CostAbstractTpl<double> {
         for (int j = 1; j < NU; ++j) d.Luu_(j, j) = 2 * P.r_ctrl_mom;
         d.Luu_(IDX_THETA, IDX_THETA) = 2 * P.r_theta;
         d.Luu_ = P.cost_scale * s.scale.asDiagonal() * d.Luu_ * s.scale.asDiagonal();
-        if (penalty) {
-            const M H = penalty->lagrangianHessian(V(x), V(uu), V::Constant(1, w_pen));
-            d.Lxx_ += H.topLeftCorner(NX_SS, NX_SS);
-            d.Lxu_ += H.topRightCorner(NX_SS, NU_SS);
-            d.Luu_ += H.bottomRightCorner(NU_SS, NU_SS);
-        }
     }
 };
 
@@ -563,8 +548,7 @@ inline std::shared_ptr<aligator_ocp::Ocp> create(const V& x0_rel, const std::vec
                                                  const std::vector<M>& prev_K = {},
                                                  std::shared_ptr<ConstantAccelPredictor> predictor = nullptr,
                                                  int requested_horizon = 0,
-                                                 Enforcement enforcement = Enforcement::Interval,
-                                                 double w_pen = 0.0) {
+                                                 Enforcement enforcement = Enforcement::Interval) {
     const int N = requested_horizon > 0 ? requested_horizon : P.horizon;
     if (N > P.horizon) throw std::invalid_argument("remaining landing horizon exceeds configured maneuver");
     if (!predictor) predictor = std::make_shared<ConstantAccelPredictor>();
@@ -579,21 +563,13 @@ inline std::shared_ptr<aligator_ocp::Ocp> create(const V& x0_rel, const std::vec
     const auto form = enforcement == Enforcement::Node ? ctcs_stc::Form::Original2018 : ctcs_stc::Form::Density;
     const auto tight = landingRules(true, form, 1, a_target);
     const auto physical = landingRules(false, form, CTCS_PHYSICAL_SUBSTEPS, a_target);
-    std::shared_ptr<const ctcs_stc::Spec<double>> tight_pen, physical_pen;
-    if (enforcement == Enforcement::Penalty) {
-        tight_pen = std::make_shared<const ctcs_stc::Spec<double>>(tight);
-        physical_pen = std::make_shared<const ctcs_stc::Spec<double>>(physical);
-    }
 
     std::vector<xyz::polymorphic<aligator_ocp::StageModel>> stages;
     for (int k = 0; k < N; ++k) {
         const bool phys = k < CTCS_TIGHTEN_FROM_NODE;
-        StageCost c = cost;
-        if (enforcement == Enforcement::Penalty) { c.penalty = phys ? physical_pen : tight_pen; c.w_pen = w_pen; }
-        aligator_ocp::StageModel stage(c, dyn);
+        aligator_ocp::StageModel stage(cost, dyn);
         stage.addConstraint(Bounds(), aligator_ocp::Orthant());
-        if (enforcement != Enforcement::Penalty)
-            stage.addConstraint(ctcs_stc::StageFunction(NX_SS, NU_SS, phys ? physical : tight,
+        stage.addConstraint(ctcs_stc::StageFunction(NX_SS, NU_SS, phys ? physical : tight,
                                                         ctcs_stc::Curvature::GaussNewton),
                                 aligator_ocp::Orthant());
         stages.emplace_back(stage);
@@ -655,7 +631,7 @@ inline std::shared_ptr<aligator_ocp::Ocp> create(const V& x0_rel, const std::vec
 }
 
 // ── Descriptor ────────────────────────────────────────────────────────────────
-inline OCPDescriptor descriptor(Enforcement enforcement = Enforcement::Interval, double w_pen = 0.0) {
+inline OCPDescriptor descriptor(Enforcement enforcement = Enforcement::Interval) {
     OCPDescriptor d;
     d.disarm_on_landing_finish = true;
     d.name = "stc_landing_noaug";
@@ -743,7 +719,7 @@ inline OCPDescriptor descriptor(Enforcement enforcement = Enforcement::Interval,
         return model;
     };
     d.solver_settings = [] { return P.solver; };
-    d.create = [enforcement, w_pen](const OCPCreateArgs& a) {
+    d.create = [enforcement](const OCPCreateArgs& a) {
         StcLandingNoAugExtra ex;
         if (a.extra.has_value()) {
             try { ex = std::any_cast<StcLandingNoAugExtra>(a.extra); } catch (const std::bad_any_cast&) {}
@@ -753,10 +729,9 @@ inline OCPDescriptor descriptor(Enforcement enforcement = Enforcement::Interval,
             pred = std::make_shared<ConstantAccelPredictor>();
             pred->setState(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), a.target_accel);
         }
-        return create(a.current_state, a.prev_U, a.prev_X, a.prev_K, pred, a.horizon, enforcement, w_pen);
+        return create(a.current_state, a.prev_U, a.prev_X, a.prev_K, pred, a.horizon, enforcement);
     };
     if (enforcement == Enforcement::Node) d.name = "stc_landing_noaug_node";
-    if (enforcement == Enforcement::Penalty) d.name = "stc_landing_noaug_penalty";
     return d;
 }
 
