@@ -76,10 +76,12 @@ struct Params {
     double alt_trig = 0.8;  // landing phase below [m]
     double los_alt_trig = 1.8, los_trigger_scale = 0.25, los_trigger_floor = 0.0;
     double z_stage = 1.8, stage_radius = 1.10, stage_trigger_scale = 0.25, stage_trigger_floor = 0.0;
-    // CTCS density weights and per-interval budget (row = sum w I / ctcs_step_eps - 1)
-    double w_land_speed = 100, w_land_tilt = 3e8, w_land_omega = 1e6, w_land_gs = 7500;
-    double w_stc_los = 200, w_stc_stage = 100;
-    double ctcs_step_eps = 1e-5;
+    // CTCS: each consequence is a dimensionless fraction of its own limit
+    // (Elango 2025, Sec. 6) with unit weight, against one per-interval budget:
+    //   row = sum_i integral([-g_i]_+^2 [c_i / limit_i]_+^2) / ctcs_step_eps - 1 <= 0
+    // Length residuals (glideslope, LOS, staging) are measured in gs_length or the
+    // trigger scales.
+    double ctcs_step_eps = 3e-6, gs_length = 0.1;
     CtcsMargins margins;
     // Control scaling seen by the solver: u = center + scale .* u~
     double f_scale = 0.05, m_scale = 0.1;
@@ -157,6 +159,7 @@ inline Params loadParams() {
     num("STC_TUNE_MU", p.solver.mu_init);
     num("STC_TUNE_TOL", p.solver.tol);
     num("STC_TUNE_ACCEPT", p.solver.accept_tol);
+    num("STC_TUNE_INTERVAL_ACCEPT", p.solver.interval_accept_tol);
     num("STC_TUNE_COST_SCALE", p.cost_scale);
     num("STC_TUNE_MAX_ITERS", max_iters);
     p.solver.max_iters = static_cast<std::size_t>(max_iters);
@@ -253,18 +256,19 @@ inline ctcs_stc::Spec<double> landingRules(bool tightened, ctcs_stc::Form form, 
     const auto tiltLimit = [](double degrees) { return std::pow(std::sin(0.5 * degrees * M_PI / 180.0), 2); };
     const auto add = [&](const std::string& name, std::function<double(const V&)> trigger,
                          std::function<V(const V&)> dtrigger, std::function<double(const V&)> consequence,
-                         std::function<V(const V&)> dconsequence, double weight) {
+                         std::function<V(const V&)> dconsequence, double scale) {
         spec.add(name).triggerWhenNegative(std::move(trigger), std::move(dtrigger))
             .consequence([consequence](const V& x, const V&) { return consequence(x); },
                          [dconsequence](const V& x, const V&) { return dconsequence(x); },
                          [](const V&, const V& u) -> V { return V::Zero(u.size()); })
-            .weight(density ? weight * inv_eps : 1.0);
+            .scale(scale)
+            .weight(density ? inv_eps : 1.0);
     };
 
     const double looseTilt = tiltLimit(P.tilt_phase0_deg - margins.path_tilt_deg);
     const double looseOmega2 = std::pow(P.omega_phase0_max - margins.rate, 2);
-    add("loose_tilt", always, zero, [=](const V& x) { return tilt(x) - looseTilt; }, dtilt, 1.0);
-    add("loose_omega", always, zero, [=](const V& x) { return omega(x) - looseOmega2; }, domega, 1.0);
+    add("loose_tilt", always, zero, [=](const V& x) { return tilt(x) - looseTilt; }, dtilt, 1.0 / looseTilt);
+    add("loose_omega", always, zero, [=](const V& x) { return omega(x) - looseOmega2; }, domega, 1.0 / looseOmega2);
 
     const double r_stage = P.stage_radius - margins.stage_radius;
     add("staging",
@@ -279,7 +283,7 @@ inline ctcs_stc::Spec<double> landingRules(bool tightened, ctcs_stc::Form form, 
             return g;
         },
         [=](const V& x) { return P.z_stage + margins.stage_height - x(2); },
-        [](const V& x) -> V { V g = V::Zero(x.size()); g(2) = -1; return g; }, P.w_stc_stage);
+        [](const V& x) -> V { V g = V::Zero(x.size()); g(2) = -1; return g; }, 1.0 / P.stage_trigger_scale);
 
     const double z_los = P.los_alt_trig + margins.trigger, los_tan = LOS_CONE_TAN;
     add("los",
@@ -314,7 +318,7 @@ inline ctcs_stc::Spec<double> landingRules(bool tightened, ctcs_stc::Form form, 
             }
             return g;
         },
-        P.w_stc_los);
+        1.0 / P.los_trigger_scale);
 
     const double z_land = P.alt_trig + margins.trigger;
     const auto land = [=](const V& x) { const double d = z_land - x(2); return d > 0 ? -(floors.landing + d) : -d; };
@@ -322,11 +326,11 @@ inline ctcs_stc::Spec<double> landingRules(bool tightened, ctcs_stc::Form form, 
     const double v2 = std::pow(P.spd_stc_max - margins.speed, 2);
     add("landing_speed", land, dland, [=](const V& x) { return x.segment<3>(3).squaredNorm() - v2; },
         [](const V& x) -> V { V g = V::Zero(x.size()); g.segment<3>(3) = 2 * x.segment<3>(3); return g; },
-        P.w_land_speed);
+        1.0 / v2);
     const double landTilt = tiltLimit(P.alpha_theta_stc * P.tilt_stc_deg - margins.tilt_deg);
-    add("landing_tilt", land, dland, [=](const V& x) { return tilt(x) - landTilt; }, dtilt, P.w_land_tilt);
+    add("landing_tilt", land, dland, [=](const V& x) { return tilt(x) - landTilt; }, dtilt, 1.0 / landTilt);
     const double om2 = std::pow(P.omega_stc_max - margins.rate, 2);
-    add("landing_omega", land, dland, [=](const V& x) { return omega(x) - om2; }, domega, P.w_land_omega);
+    add("landing_omega", land, dland, [=](const V& x) { return omega(x) - om2; }, domega, 1.0 / om2);
     const double gs_tan = gsConeTan(margins);
     add("landing_glideslope", land, dland,
         [=](const V& x) {
@@ -338,7 +342,7 @@ inline ctcs_stc::Spec<double> landingRules(bool tightened, ctcs_stc::Form form, 
             g(0) = x(0) / r; g(1) = x(1) / r; g(2) = -gs_tan;
             return g;
         },
-        P.w_land_gs);
+        1.0 / P.gs_length);
 
     if (density) {
         const auto b = body();

@@ -58,6 +58,7 @@ int main(int argc, char** argv) {
         auto desc = std::make_shared<OCPDescriptor>(
             OCPRegistry::getDescriptor(node ? "stc_landing_noaug_node" : "stc_landing_noaug"));
         desc->use_predicted_handoff_state = false;  // the measured root is the root
+        if (std::getenv("WALL_RH_WARM")) desc->native_guess_for_measured_root = false;  // shifted plan as seed
         const auto model = desc->make_model(Eigen::Vector3d::Zero());
 
         // Relative start; world plant = target(0) + relative.
@@ -116,7 +117,9 @@ int main(int argc, char** argv) {
                         solves << "{\"t\":" << in.absolute_time_sec << ",\"accepted\":" << r.solve_accepted
                                << ",\"reason\":" << std::quoted(r.rejection_reason) << ",\"ms\":" << r.solve_result.solve_time_ms
                                << ",\"iters\":" << r.solve_result.solve_iters
-                               << ",\"violation\":" << r.solve_result.constraint_error << "}\n";
+                               << ",\"violation\":" << r.solve_result.constraint_error
+                               << ",\"rows\":" << r.solve_result.primal_constraint_violation
+                               << ",\"defect\":" << r.solve_result.dynamics_error << "}\n";
                         if (r.solve_accepted) { ++accepted; consecutive = 0; }
                         else { ++rejected; if (++consecutive > max_consecutive) { failure = r.rejection_reason; stop = true; } }
                     }

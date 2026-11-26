@@ -272,13 +272,13 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
         result.primal = auditPrimal(*problem_, X_result, U_solver);
         result.termination = flag ? "converged" : "max_iters_or_stalled";
         result.optimality_error = r.dual_infeas;
-        result.converged = flag && result.primal.feasible(solver_settings_.accept_tol);
+        result.converged = flag && result.primal.feasible(solver_settings_);
 
         const auto t_finish = chrono::steady_clock::now();
         result.solve_finish_time = t_finish;
         result.solve_time_ms = chrono::duration<double, milli>(t_finish - t0).count();
         result.solve_timestamp = result.solve_start_time;
-        result.constraint_error = std::max(result.primal.constraints, result.primal.dynamics);
+        result.constraint_error = std::max({result.primal.constraints, result.primal.interval, result.primal.dynamics});
         result.solve_iters = static_cast<int>(r.num_iters);
         result.extra_params = extra_params;
         last_solve_ms_ = result.solve_time_ms;
@@ -294,7 +294,7 @@ OcpSolver::Result OcpSolver::solve(const Eigen::VectorXd& current_state,
             result.state_trajectory = X_result;
             result.control_trajectory = U_result;
             result.feedback_gains = K_result;
-            result.success = result.primal.feasible(solver_settings_.accept_tol);
+            result.success = result.primal.feasible(solver_settings_);
             if(!result.success)std::cerr<<"[MPC] infeasible returned primal: constraints="
                 <<result.primal.constraints<<" dynamics="<<result.primal.dynamics
                 <<" termination="<<result.termination<<"\n";

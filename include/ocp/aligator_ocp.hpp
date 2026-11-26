@@ -12,6 +12,8 @@
 #include <aligator/modelling/constraints/negative-orthant.hpp>
 #include <aligator/solvers/proxddp/solver-proxddp.hpp>
 
+#include "ctcs_stc/stage_function.hpp"
+
 #include <Eigen/Dense>
 
 #include <algorithm>
@@ -40,6 +42,9 @@ struct SolverSettings {
     bool exact_hessian = false;
     bool nonlinear_rollout = false;  // the nonlinear rollout NaNs on the landing OCP
     double accept_tol = 1e-3;
+    // Interval-integral rows (sum w I / eps - 1) may end this fraction over
+    // their budget: ALIPDDP's 1e-6 on I - eps at eps = 2.67e-6 allowed 0.375.
+    double interval_accept_tol = 0.375;
     bool verbose = false;
 };
 
@@ -53,13 +58,13 @@ struct Ocp {
     std::function<V(const V&)> toSolver = [](const V& u) { return u; };
 };
 
-/// Largest positive row value over every stage constraint, and the largest
-/// dynamics defect (including x0), at a returned primal.
+/// Largest positive row value over the ordinary stage constraints and over the
+/// interval-integral rows, and the largest dynamics defect (including x0).
 struct PrimalAudit {
-    double constraints = 0, dynamics = 0;
-    bool feasible(double tol) const {
-        return std::isfinite(constraints) && std::isfinite(dynamics) &&
-               constraints <= tol && dynamics <= tol;
+    double constraints = 0, interval = 0, dynamics = 0;
+    bool feasible(const SolverSettings& s) const {
+        return std::isfinite(constraints) && std::isfinite(interval) && std::isfinite(dynamics) &&
+               constraints <= s.accept_tol && dynamics <= s.accept_tol && interval <= s.interval_accept_tol;
     }
 };
 
@@ -80,7 +85,10 @@ inline PrimalAudit auditPrimal(const Ocp& ocp, const std::vector<V>& xs, const s
             auto data = stack.funcs[j]->createData();
             stack.funcs[j]->evaluate(xs[k], us[k], *data);
             if (!data->value_.allFinite()) return {bad, bad};
-            if (data->value_.size()) out.constraints = std::max(out.constraints, data->value_.maxCoeff());
+            if (!data->value_.size()) continue;
+            const bool row = dynamic_cast<const ctcs_stc::StageFunction*>(&*stack.funcs[j]) != nullptr;
+            double& slot = row ? out.interval : out.constraints;
+            slot = std::max(slot, data->value_.maxCoeff());
         }
     }
     return out;

@@ -100,8 +100,8 @@ int main() {
     const auto audit = aligator_ocp::auditPrimal(*ocp, xs, us);
     double T = 0;
     for (const auto& uk : us) T += ocp->toPhysical(uk)(Q::IDX_THETA);
-    std::printf("single horizon: flag=%d iters=%zu %.0f ms  rows<=%.2e  defect %.2e  T=%.2f s  |r_N|=%.3f |v_N|=%.3f\n",
-                flag, static_cast<std::size_t>(r.num_iters), ms, audit.constraints, audit.dynamics, T,
+    std::printf("single horizon: flag=%d iters=%zu %.0f ms  rows<=%.2e interval<=%.2e  defect %.2e  T=%.2f s  |r_N|=%.3f |v_N|=%.3f\n",
+                flag, static_cast<std::size_t>(r.num_iters), ms, audit.constraints, audit.interval, audit.dynamics, T,
                 xs.back().head<3>().norm(), xs.back().segment<3>(3).norm());
 
     std::printf(failures ? "FAIL (%d)\n" : "PASS\n", failures);
