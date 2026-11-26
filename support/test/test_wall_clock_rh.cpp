@@ -7,6 +7,7 @@
 //   test_wall_clock_rh interval|node SECONDS OUTPUT_DIR
 //   WALL_RH_START="rx ry rz [rvx rvy rvz]"  relative start (default per target)
 //   WALL_RH_MAX_CONSECUTIVE_REJECTIONS=n    keep flying the previous plan (default 0)
+//   WALL_RH_COMPENSATE=1                    SITL timing: delay-compensated root, 0.5 s lead
 #include "planner_core/adapters.hpp"
 #include "planner_core/controller.hpp"
 #include "ocp/ocp_stc_landing_noaug.hpp"
@@ -78,6 +79,12 @@ int main(int argc, char** argv) {
         planner_core::PlannerCoreConfig cfg;
         cfg.ocp_type = desc->name; cfg.ocp_dt = desc->dt; cfg.n_replay = 4; cfg.enable_terminal_freeze = false;
         cfg.max_first_solve_age_sec = 1.;
+        if (std::getenv("WALL_RH_COMPENSATE")) {  // the SITL profile's timing (no PX4 tracking model)
+            cfg.measured_state_delay_compensation = true;
+            cfg.initial_solve_lead_sec = 0.5;
+            cfg.solve_lead_guard_sec = 0.15;
+            cfg.n_replay = 3;
+        }
         planner_core::Controller controller;
         controller.configure(cfg, desc);
 
@@ -109,6 +116,7 @@ int main(int argc, char** argv) {
                         in.now = origin + std::chrono::milliseconds(ticks);
                     }
                     in.state_frame = "world";
+                    const Vec root = planner_core::prepareOcpState(*desc, in.current_state, in.target_snapshot);
                     busy = true;
                     auto r = controller.trySolve(in);
                     busy = false;
@@ -119,7 +127,18 @@ int main(int argc, char** argv) {
                                << ",\"iters\":" << r.solve_result.solve_iters
                                << ",\"violation\":" << r.solve_result.constraint_error
                                << ",\"rows\":" << r.solve_result.primal_constraint_violation
-                               << ",\"defect\":" << r.solve_result.dynamics_error << "}\n";
+                               << ",\"defect\":" << r.solve_result.dynamics_error << ",\"root\":[";
+                        for (int j = 0; j < 13; ++j) solves << root(j) << ',';
+                        solves << in.target_snapshot.acceleration.x() << ',' << in.target_snapshot.acceleration.y() << ','
+                               << in.target_snapshot.acceleration.z() << "]";
+                        const auto& X = r.solve_result.state_trajectory;
+                        if (r.solve_accepted && !X.empty()) {
+                            double vmax = 0, tilt = 0;
+                            for (const auto& x : X) { vmax = std::max(vmax, x.segment<3>(3).norm()); tilt = std::max(tilt, 2 * std::asin(std::min(1.0, x.segment<2>(7).norm())) * 180 / M_PI); }
+                            solves << ",\"T\":" << X.back()(13) << ",\"end\":[" << X.back()(0) << ',' << X.back()(1) << ',' << X.back()(2)
+                                   << "],\"vmax\":" << vmax << ",\"tilt_max\":" << tilt;
+                        }
+                        solves << "}\n";
                         if (r.solve_accepted) { ++accepted; consecutive = 0; }
                         else { ++rejected; if (++consecutive > max_consecutive) { failure = r.rejection_reason; stop = true; } }
                     }

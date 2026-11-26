@@ -5,7 +5,9 @@
 
 #include <chrono>
 #include <cstdio>
+#include <algorithm>
 #include <functional>
+#include <memory>
 
 namespace Q = StcLandingNoAugOCP;
 using V = Eigen::VectorXd;
@@ -32,8 +34,47 @@ static void check(const char* name, const M& analytic, const M& numeric, double 
     std::printf("[%s] %-44s max|err| %.3e (scale %.2e)\n", ok ? "pass" : "FAIL", name, err, scale);
 }
 
+// PROBE_ROOTS=file: one cold solve per line "x(13) a_target(3)", as the planner
+// would solve it; prints acceptance (planner audit), iterations and time.
+static int probeRoots(const char* path) {
+    std::FILE* f = std::fopen(path, "r");
+    if (!f) { std::perror(path); return 1; }
+    std::vector<double> ms;
+    int n = 0, accepted = 0;
+    double v[16];
+    while (true) {
+        int got = 0;
+        for (int i = 0; i < 16 && std::fscanf(f, "%lf", &v[i]) == 1; ++i) ++got;
+        if (got < 16) break;
+        V x0 = Eigen::Map<V>(v, 13);
+        x0.segment<4>(6).normalize();
+        auto pred = std::make_shared<Q::ConstantAccelPredictor>();
+        pred->setState(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), Eigen::Vector3d(v[13], v[14], v[15]));
+        auto ocp = Q::create(x0, {}, {}, {}, pred);
+        auto solver = aligator_ocp::makeSolver(Q::P.solver);
+        solver->setup(*ocp->problem);
+        const auto t0 = std::chrono::steady_clock::now();
+        try { solver->run(*ocp->problem, ocp->xs, ocp->us); }
+        catch (const std::exception& e) { if (std::getenv("PROBE_VERBOSE")) { const std::string w = e.what(); std::printf("  threw: %s\n", w.substr(w.size() > 90 ? w.size() - 90 : 0).c_str()); } }
+        ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        const auto& r = solver->results_;
+        const auto audit = aligator_ocp::auditPrimal(*ocp, {r.xs.begin(), r.xs.end()}, {r.us.begin(), r.us.end()});
+        const bool ok = audit.feasible(Q::P.solver);
+        accepted += ok;
+        ++n;
+        if (std::getenv("PROBE_VERBOSE"))
+            std::printf("root %3d z=%.2f ok=%d iters=%zu %.0f ms rows %.1e interval %.1e defect %.1e\n", n, x0(2), ok,
+                        static_cast<std::size_t>(r.num_iters), ms.back(), audit.constraints, audit.interval, audit.dynamics);
+    }
+    std::fclose(f);
+    std::sort(ms.begin(), ms.end());
+    std::printf("PROBE accepted %d/%d  ms median %.0f p90 %.0f\n", accepted, n, ms[ms.size() / 2], ms[ms.size() * 9 / 10]);
+    return 0;
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    if (const char* roots = std::getenv("PROBE_ROOTS")) return probeRoots(roots);
     aligator_ocp::Space space(Q::NX_SS);
     const Eigen::Vector3d a_t(0.05, -0.03, 0);
     const aligator_ocp::quad::Dynamics dyn(space, Q::body(), Q::scaling(), a_t);

@@ -46,6 +46,8 @@ struct SolverSettings {
     // their budget: ALIPDDP's 1e-6 on I - eps at eps = 2.67e-6 allowed 0.375.
     double interval_accept_tol = 0.375;
     bool verbose = false;
+    int step_acceptance = 0;  // 0 nonmonotone line search, 1 Armijo, 2 filter
+    double reg_init = 1e-9, reg_min = 1e-10;  // primal regularisation (ProxDDP defaults)
 };
 
 /// One solve's problem. Controls in `us` and in the solver are in SOLVER units;
@@ -245,10 +247,15 @@ struct Dynamics : aligator::ExplicitDynamicsModelTpl<double> {
 inline std::unique_ptr<aligator::context::SolverProxDDP> makeSolver(const SolverSettings& s) {
     auto solver = std::make_unique<aligator::context::SolverProxDDP>(s.tol, s.mu_init, s.max_iters,
         s.verbose ? aligator::VERBOSE : aligator::QUIET,
-        aligator::StepAcceptanceStrategy::LINESEARCH_NONMONOTONE,
+        s.step_acceptance == 1 ? aligator::StepAcceptanceStrategy::LINESEARCH_ARMIJO
+            : s.step_acceptance == 2 ? aligator::StepAcceptanceStrategy::FILTER
+            : aligator::StepAcceptanceStrategy::LINESEARCH_NONMONOTONE,
         s.exact_hessian ? aligator::HessianApprox::EXACT : aligator::HessianApprox::GAUSS_NEWTON);
     solver->max_al_iters = s.max_al_iters;
     solver->rollout_type_ = s.nonlinear_rollout ? aligator::RolloutType::NONLINEAR : aligator::RolloutType::LINEAR;
+    solver->reg_init = s.reg_init;
+    solver->reg_min = s.reg_min;
+    solver->preg_ = s.reg_init;
     solver->setNumThreads(1);
     return solver;
 }

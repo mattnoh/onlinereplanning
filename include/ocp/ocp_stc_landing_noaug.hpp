@@ -86,11 +86,13 @@ struct Params {
     // Control scaling seen by the solver: u = center + scale .* u~
     double f_scale = 0.05, m_scale = 0.1;
     double max_feedback_du = 0.05;  // feedback warm start: largest accepted correction
+    bool hover_seed = false;        // cold seed: hover thrust at th0 instead of the staged PD guess
     aligator_ocp::SolverSettings solver;
 };
 
 // ── Presets ───────────────────────────────────────────────────────────────────
-//   n80    single horizon, 80 intervals (the 100-IC study)   = ctcsBase()
+//   n80    single horizon, 80 intervals                      = ctcsBase()
+//   ic100  the 100-IC study profile (no tightening, terminal 2500/900)
 //   sitl   PX4/Gazebo measured-state replanning (all target motions)
 inline Params ctcsBase() {
     Params p;
@@ -111,6 +113,15 @@ inline Params ctcsBase() {
 
 inline Params preset(const std::string& name) {
     if (name.empty() || name == "n80") return ctcsBase();
+
+    // The 100-IC study (paper Sec. VII-A, Table II): terminal weights 2500/900,
+    // no optimizer tightening (every interval uses the physical rules).
+    if (name == "ic100") {
+        Params p = ctcsBase();
+        p.term_w_pos_xy = p.term_w_pos_z = 2500;
+        p.margins = CtcsMargins{};
+        return p;
+    }
 
     if (name == "sitl") {
         Params p = ctcsBase();
@@ -154,7 +165,11 @@ inline Params loadParams() {
     const auto num = [](const char* key, double& v) { if (const char* s = std::getenv(key)) v = std::stod(s); };
     double max_iters = static_cast<double>(p.solver.max_iters);
     num("STC_TUNE_W_TIME", p.stage_w_time);
+    double hs = p.hover_seed;
+    num("STC_TUNE_HOVER_SEED", hs);
+    p.hover_seed = hs != 0;
     num("STC_TUNE_R_THETA", p.r_theta);
+    num("STC_TUNE_THETA_REF", p.theta_ref);
     num("STC_TUNE_EPS", p.ctcs_step_eps);
     num("STC_TUNE_MU", p.solver.mu_init);
     num("STC_TUNE_TOL", p.solver.tol);
@@ -169,6 +184,9 @@ inline Params loadParams() {
     flag = p.solver.exact_hessian;
     num("STC_TUNE_EXACT_HESSIAN", flag);
     p.solver.exact_hessian = flag != 0;
+    double step = p.solver.step_acceptance;
+    num("STC_TUNE_STEP", step);
+    p.solver.step_acceptance = static_cast<int>(step);
     flag = p.solver.verbose;
     num("STC_TUNE_VERBOSE", flag);
     p.solver.verbose = flag != 0;
@@ -624,7 +642,8 @@ inline std::shared_ptr<aligator_ocp::Ocp> create(const V& x0_rel, const std::vec
                 if (!wild) uk = u_fb;
             }
         } else {
-            uk = nativeGuessControl(sim, a_target);
+            if (P.hover_seed) { uk = V::Zero(NU_SS); uk(0) = HOVER_THRUST; uk(IDX_THETA) = P.th0; }
+            else uk = nativeGuessControl(sim, a_target);
         }
         clampWarmControl(uk);
         ocp->us[k] = s.solver(uk);
