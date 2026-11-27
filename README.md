@@ -28,7 +28,7 @@ Ubuntu 22.04, ROS Noetic, a catkin workspace that already builds `mavros`/`mavli
 1. Clone with submodules into the `src/` of an overlay workspace:
    ```bash
    mkdir -p ~/landing/ros1/src && cd ~/landing/ros1/src
-   git clone --recursive -b aligator-ros1 <this repo> CoManDO_planner_ALIGATOR
+   git clone --recursive -b aligator-ros1 git@github.com:mattnoh/onlinereplanning.git CoManDO_planner_ALIGATOR
    ```
 2. Build Aligator against the system Eigen 3.4 / Boost that ROS links (fmt >= 10 and
    mimalloc must be in `$PREFIX`; Ubuntu 22.04 does not ship them):
