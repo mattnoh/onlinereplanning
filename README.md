@@ -16,8 +16,7 @@ include/planner_core/, src/     ROS-free core: OCP registry, solve/acceptance, r
 support/transport/ros2/         ROS 2 node, Crazyflie platform adapter, launch files, CrazySim runner
 config/ros2/                    hover and landing profiles
 support/test/                   OCP derivative checks, perfect-plant receding-horizon test
-third_party/ctcs_stc            CTCSTCDDP (git submodule)
-aligator                        Aligator 0.19.1-19 (git submodule; built once, see below)
+third_party/ctcs_stc            CTCSTCDDP (git submodule); carries Aligator as its own submodule
 ```
 
 ## Setup

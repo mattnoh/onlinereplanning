@@ -1,6 +1,3 @@
 [submodule "third_party/ctcs_stc"]
 	path = third_party/ctcs_stc
 	url = https://github.com/mattnoh/CTCSTCDDP.git
-[submodule "aligator"]
-	path = aligator
-	url = https://github.com/Simple-Robotics/aligator
