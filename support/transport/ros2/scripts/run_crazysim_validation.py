@@ -1,5 +1,5 @@
 import argparse,os,pathlib,subprocess,signal,time,json,csv,math
-p=argparse.ArgumentParser();p.add_argument('--planner',default='/home/lab/projects/cf/online/ros_ws/install/comando_planner/lib/comando_planner/comando_planner');p.add_argument('--target',default='/home/lab/projects/cf/online/ros_ws/install/comando_planner/lib/comando_planner/target_publisher');p.add_argument('--motion',default='circle');p.add_argument('--out',required=True);p.add_argument('--direct',action='store_true');p.add_argument('--calibrate',action='store_true');p.add_argument('--rate',type=float,default=0);p.add_argument('--thrust',type=float,default=9.81);p.add_argument('--axis',choices=['roll','pitch','yaw'],default='yaw');p.add_argument('--calibrated',action='store_true');p.add_argument('--rate-ki',type=float,default=None);p.add_argument('--rate-scale',type=float,default=None);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--planner',default='/home/lab/ros2_ws_aligator/install/comando_planner/lib/comando_planner/comando_planner');p.add_argument('--target',default='/home/lab/ros2_ws_aligator/install/comando_planner/lib/comando_planner/target_publisher');p.add_argument('--motion',default='circle');p.add_argument('--out',required=True);p.add_argument('--direct',action='store_true');p.add_argument('--calibrate',action='store_true');p.add_argument('--rate',type=float,default=0);p.add_argument('--thrust',type=float,default=9.81);p.add_argument('--axis',choices=['roll','pitch','yaw'],default='yaw');p.add_argument('--calibrated',action='store_true');p.add_argument('--rate-ki',type=float,default=None);p.add_argument('--rate-scale',type=float,default=None);a=p.parse_args()
 out=pathlib.Path(a.out);out.mkdir(parents=True,exist_ok=True);procs=[]
 setup='export ROS_DOMAIN_ID=77; source /opt/ros/humble/setup.bash; source /home/lab/projects/cf/online/ros_ws/install/setup.bash; '
 fw='/home/lab/projects/cf/online/CrazySim/crazyflie-firmware'
@@ -49,8 +49,9 @@ try:
    with (out/'target.csv').open('w') as f:
     w=csv.writer(f);w.writerow(['t','x','y','z','vx','vy','vz','ax','ay','az']);w.writerows([[i*.01,.4*i*.01,0,.2,.4,0,0,0,0,0] for i in range(20001)])
    mode='trace_replay';args=f' -p trace_csv_path:={out}/target.csv'
+  target_command=f'{a.target} --ros-args -p target_mode:={mode} -p planning_frame:=world'+args
   if a.motion!='straight':spawn(target_command,'target')
-  env='SZMUK_Z_STAGE=1.3 SZMUK_LOS_ALT_TRIG=1.2 MPC_RATE_LIMIT=.35 MPC_MAX_ITER=120 MPC_MAX_POLICY_AGE=2.0 MPC_HOVER_THRUST=.5460495715192737 MPC_RATE_TAU=.08' if a.direct else 'SZMUK_Z_STAGE=1.4 SZMUK_LOS_ALT_TRIG=1.2 SZMUK_RH_N=40 SZMUK_THH=.16'
+  env='SZMUK_Z_STAGE=1.3 SZMUK_LOS_ALT_TRIG=1.2 MPC_RATE_LIMIT=.35 MPC_MAX_ITER=120 MPC_MAX_POLICY_AGE=2.0 MPC_HOVER_THRUST=.5460495715192737 MPC_RATE_TAU=.08' if a.direct else 'STC_PRESET=sitl'
   spawn(f'{env} {a.planner} --ros-args -p drone_name:=cf_1 -p platform:=crazyflie -p log_dir:={out} -p enable_logging:=true','planner')
   ready('planner',lambda:'comando_planner' in run('ros2 node list').stdout)
  for service,type_,body,wait in [('/cf_1/arm','Arm','{arm: true}',1),('/cf_1/takeoff','Takeoff','{group_mask: 0, height: 1.0, duration: {sec: 3, nanosec: 0}}',5),('/cf_1/go_to','GoTo','{group_mask: 0, relative: false, goal: {x: 2.0, y: 2.0, z: 1.8}, yaw: 0.0, duration: {sec: 6, nanosec: 0}}',9)]:
