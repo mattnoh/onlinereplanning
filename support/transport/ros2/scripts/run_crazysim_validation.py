@@ -3,8 +3,10 @@ import argparse,os,pathlib,subprocess,signal,time,json,csv,math
 WS=pathlib.Path(__file__).resolve().parents[6]
 p=argparse.ArgumentParser();p.add_argument('--planner',default=str(WS/'install/comando_planner/lib/comando_planner/comando_planner'));p.add_argument('--target',default=str(WS/'install/comando_planner/lib/comando_planner/target_publisher'));p.add_argument('--motion',default='circle');p.add_argument('--out',required=True);p.add_argument('--direct',action='store_true');p.add_argument('--calibrate',action='store_true');p.add_argument('--rate',type=float,default=0);p.add_argument('--thrust',type=float,default=9.81);p.add_argument('--axis',choices=['roll','pitch','yaw'],default='yaw');p.add_argument('--calibrated',action='store_true');p.add_argument('--rate-ki',type=float,default=None);p.add_argument('--rate-scale',type=float,default=None);a=p.parse_args()
 out=pathlib.Path(a.out);out.mkdir(parents=True,exist_ok=True);procs=[]
-setup='export ROS_DOMAIN_ID=77; source /opt/ros/humble/setup.bash; source /home/lab/projects/cf/online/ros_ws/install/setup.bash; '
-fw='/home/lab/projects/cf/online/CrazySim/crazyflie-firmware'
+# The ROS 2 workspace with crazyswarm2 (crazyflie server, crazyflie_interfaces) and the CrazySim firmware checkout.
+cf_ws=os.environ.get('CRAZYFLIE_WS',os.path.expanduser('~/projects/cf/online/ros_ws'))
+setup=f'export ROS_DOMAIN_ID=77; source /opt/ros/humble/setup.bash; source {cf_ws}/install/setup.bash; '
+fw=os.environ.get('CRAZYSIM_FIRMWARE',os.path.expanduser('~/projects/cf/online/CrazySim/crazyflie-firmware'))
 def run(cmd,timeout=20):return subprocess.run(['bash','-lc',setup+cmd],capture_output=True,text=True,timeout=timeout)
 def spawn(cmd,name,prelude=True):
  f=(out/(name+'.log')).open('w');pr=subprocess.Popen(['bash','-lc',(setup if prelude else '')+cmd],stdout=f,stderr=subprocess.STDOUT,start_new_session=True);procs.append(pr);return pr
