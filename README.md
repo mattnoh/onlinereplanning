@@ -17,8 +17,7 @@ support/transport/ros1/         ROS 1 node, MAVROS platform adapter, launch file
 config/ros1/                    hover and landing profiles
 support/scripts/                PX4 SITL campaign runner
 support/test/                   OCP derivative checks, perfect-plant receding-horizon test
-third_party/ctcs_stc            CTCSTCDDP (git submodule)
-aligator                        Aligator 0.19.1-19 (git submodule; built once, see below)
+third_party/ctcs_stc            CTCSTCDDP (git submodule); carries Aligator as its own submodule
 ```
 
 ## Setup
