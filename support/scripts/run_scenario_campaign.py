@@ -40,7 +40,9 @@ PX4 = "/home/lab/projects/px4/PX4-Autopilot"
 # Package actually launched (an overlay workspace may run another revision);
 # its launch files and commit define the campaign identity.
 RUNPKG = os.environ.get("COMANDO_RUN_PACKAGE", PKG)
-SETUP = os.environ.get("COMANDO_ROS_SETUP", "source /opt/ros/noetic/setup.bash && source /home/lab/mavros_ws/devel/setup.bash")
+# Default: the catkin workspace this package is checked out in (WS/src/<package>).
+WS = os.path.dirname(os.path.dirname(PKG))
+SETUP = os.environ.get("COMANDO_ROS_SETUP", f"source /opt/ros/noetic/setup.bash && source {WS}/devel/setup.bash")
 
 # Motion shape params. Speeds are held near the flown circle (0.4 m/s) so the
 # scenarios are comparable and remain physically landable.
@@ -74,8 +76,7 @@ PLANNER_ENV = {"STC_PRESET": "sitl", "LANDING_RH_PRESET": "campaign", "LANDING_M
 # infrastructure attempt (the controller under test never got the landing).
 VALID_RESULTS = ("LANDED", "TIMEOUT", "POLICY_EXPIRED", "STALE_STATE",
                  "UNCOMMANDED_DISARM", "INITIALIZATION_FAILED", "NO_FEASIBLE_START")
-DEVEL = os.environ.get("COMANDO_DEVEL_LIB",
-                       "/home/lab/mavros_ws/devel/.private/comando_planner/lib/comando_planner")
+DEVEL = os.environ.get("COMANDO_DEVEL_LIB", f"{WS}/devel/.private/comando_planner/lib/comando_planner")
 
 
 # Staging geometry. STAGE_R matches the |(1.4, 1.4)| engagement range the
