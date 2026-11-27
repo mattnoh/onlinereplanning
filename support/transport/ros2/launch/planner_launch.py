@@ -18,7 +18,7 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument('drone_name', default_value='gogogo'),
         DeclareLaunchArgument('platform', default_value='crazyflie'),
-        DeclareLaunchArgument('solver', default_value='alipddp'),
+        DeclareLaunchArgument('solver', default_value='aligator'),
         DeclareLaunchArgument('enable_logging', default_value='true'),
         DeclareLaunchArgument('open_loop_abort_on_divergence', default_value='false'),
         DeclareLaunchArgument('open_loop_abort_max_z_error_m', default_value='0.50'),

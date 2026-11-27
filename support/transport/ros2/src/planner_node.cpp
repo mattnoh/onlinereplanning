@@ -465,7 +465,7 @@ private:
     }
 
     void rebuildMpcSolver() {
-        if (solver_type_ != "alipddp") {
+        if (solver_type_ != "aligator") {
             return;
         }
         planner_core::PlannerCoreConfig core_cfg;

@@ -11,7 +11,7 @@ struct PlannerRuntimeConfig {
     std::string drone_name = "gogogo";
     bool enable_logging = true;
     std::string platform = "crazyflie";
-    std::string solver = "alipddp";
+    std::string solver = "aligator";
     std::string mode = "";
 
     double hover_target_x = 0.0;
