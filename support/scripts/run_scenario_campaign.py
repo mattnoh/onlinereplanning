@@ -36,7 +36,7 @@ import time
 import zlib
 
 PKG = os.environ.get("COMANDO_PACKAGE", os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-PX4 = "/home/lab/projects/px4/PX4-Autopilot"
+PX4 = os.environ.get("COMANDO_PX4_DIR", os.path.expanduser("~/projects/px4/PX4-Autopilot"))
 # Package actually launched (an overlay workspace may run another revision);
 # its launch files and commit define the campaign identity.
 RUNPKG = os.environ.get("COMANDO_RUN_PACKAGE", PKG)
@@ -457,7 +457,7 @@ def run_cell(motion, level, trial, outdir, args):
     shutil.copyfile(args.profile, os.path.join(cell, "landing_profile.yaml"))
     revision = subprocess.run(["git", "-C", RUNPKG, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     json.dump(dict(planner_commit=revision, setup=SETUP, config_hash=args.config_hash,
-                   solver=git_identity(args.solver_dir, ("alipddp", "problem_maker"))),
+                   solver=git_identity(args.solver_dir, ("include",))),
               open(os.path.join(cell, "source.json"), "w"), indent=2)
     activated = False
     print(f"  [run ] {tag} seed={seed}", flush=True)
@@ -664,7 +664,7 @@ def main():
     ap.add_argument("--infra-retries", type=int, default=2)
     ap.add_argument("--trial-offset", type=int, default=0)
     ap.add_argument("--solver-dir", default=os.environ.get("COMANDO_SOLVER_DIR",
-                    os.path.join(os.path.dirname(PKG), "ALIPDDP-main")))
+                    os.path.join(PKG, "third_party", "ctcs_stc")))
     args = ap.parse_args()
     args.profile = os.path.abspath(args.profile)
     args.config_hash, identity = campaign_identity(args)
@@ -685,7 +685,7 @@ def main():
         raise SystemExit(f"--reuse with a different configuration: {previous.get('config_hash')} "
                          f"!= {args.config_hash}; use a new --out")
     json.dump(dict(config_hash=args.config_hash, identity=identity, argv=sys.argv,
-                   planner=git_identity(RUNPKG), runner=git_identity(PKG), setup=SETUP, solver=git_identity(args.solver_dir, ("alipddp", "problem_maker")),
+                   planner=git_identity(RUNPKG), runner=git_identity(PKG), setup=SETUP, solver=git_identity(args.solver_dir, ("include",)),
                    started=previous.get("started") if previous else datetime.datetime.now().isoformat()),
               open(manifest, "w"), indent=2)
 
