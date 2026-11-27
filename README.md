@@ -29,7 +29,7 @@ and [CrazySim](https://github.com/gtfactslab/CrazySim) with its SITL firmware bu
 1. Clone with submodules into the `src/` of an overlay workspace:
    ```bash
    mkdir -p ~/landing/ros2/src && cd ~/landing/ros2/src
-   git clone --recursive -b aligator-ros2 <this repo> CoManDO_planner_ALIGATOR
+   git clone --recursive -b aligator-ros2 git@github.com:mattnoh/onlinereplanning.git CoManDO_planner_ALIGATOR
    ```
 2. Build Aligator against the system Eigen 3.4 / Boost (fmt >= 10 and mimalloc must be in
    `$PREFIX`; Ubuntu 22.04 does not ship them):
